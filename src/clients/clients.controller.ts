@@ -1,0 +1,67 @@
+import {
+  Controller,
+  Get,
+  Post,
+  Put,
+  Delete,
+  Body,
+  Param,
+  Query,
+  UseGuards,
+  ParseUUIDPipe,
+  HttpCode,
+  HttpStatus,
+} from '@nestjs/common';
+import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PermissionsGuard } from '../auth/guards/permissions.guard';
+import { RequirePermission } from '../auth/decorators/permissions.decorator';
+import { ClientsService } from './clients.service';
+import { CreateClientDto } from './dto/create-client.dto';
+import { UpdateClientDto } from './dto/update-client.dto';
+import { QueryClientDto } from './dto/query-client.dto';
+
+@UseGuards(JwtAuthGuard, PermissionsGuard)
+@Controller('clients')
+export class ClientsController {
+  constructor(private readonly clientsService: ClientsService) {}
+
+  @Get('stats/color-distribution')
+  @RequirePermission('clients', 'read')
+  async getColorStats() {
+    return this.clientsService.getClientColorStats();
+  }
+
+  @Get()
+  @RequirePermission('clients', 'read')
+  async findAll(@Query() query: QueryClientDto) {
+    return this.clientsService.findAllClients(query);
+  }
+
+  @Get(':id')
+  @RequirePermission('clients', 'read')
+  async findOne(@Param('id', ParseUUIDPipe) id: string) {
+    return this.clientsService.findClientById(id);
+  }
+
+  @Post()
+  @RequirePermission('clients', 'create')
+  async create(@Body() dto: CreateClientDto) {
+    return this.clientsService.createClient(dto);
+  }
+
+  @Put(':id')
+  @RequirePermission('clients', 'update')
+  async update(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: UpdateClientDto,
+  ) {
+    return this.clientsService.updateClient(id, dto);
+  }
+
+  @Delete(':id')
+  @RequirePermission('clients', 'delete')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  async remove(@Param('id', ParseUUIDPipe) id: string) {
+    await this.clientsService.deleteClient(id);
+  }
+}
