@@ -22,11 +22,20 @@ interface EmployeeRecord {
   fixed_salary?: number;
   currency?: string;
   is_active?: boolean;
+  updated_at?: unknown;
 }
 
 interface UserRecord {
   id: string;
-  phone_number: string;
+  employee_id?: string;
+  phone_number?: string;
+  username?: string;
+  password_hash?: string;
+  role_id?: string;
+  role?: string;
+  status?: string;
+  is_active?: boolean;
+  updated_at?: unknown;
 }
 
 export async function seed(knex: Knex): Promise<void> {
@@ -44,7 +53,11 @@ export async function seed(knex: Knex): Promise<void> {
     adminDept = inserted[0];
   }
 
-  // 2. Ensure CEO role exists (it is created in migration, but let's query it)
+  if (!adminDept) {
+    throw new Error('Administration department could not be created or found.');
+  }
+
+  // 2. Ensure CEO role exists (it is created in migration, but query it)
   const ceoRole = await knex<RoleRecord>('roles')
     .where({ name: 'CEO' })
     .first();
@@ -52,47 +65,69 @@ export async function seed(knex: Knex): Promise<void> {
     throw new Error('CEO role not found in database. Run migrations first.');
   }
 
-  // 3. Ensure CEO employee exists
-  const ceoPhone = '+998330094112';
-  const normalizedPhone = '998330094112';
+  const phoneWithPlus = '+998330094112';
+  const phoneNormalized = '998330094112';
 
-  if (!adminDept) {
-    throw new Error('Administration department could not be created or found.');
-  }
-
+  // 3. Upsert CEO employee (check phone number first)
   let ceoEmp = await knex<EmployeeRecord>('employees')
-    .where({ phone: ceoPhone })
+    .whereIn('phone', [phoneWithPlus, phoneNormalized])
     .first();
-  if (!ceoEmp) {
-    const inserted = await knex<EmployeeRecord>('employees')
-      .insert({
-        first_name: 'Shaxzod',
-        last_name: 'Rashiov',
-        phone: ceoPhone,
-        department_id: adminDept.id,
-        color: '#000000',
-        fixed_salary: 0.0,
-        currency: 'UZS',
-        is_active: true,
+
+  const employeeData = {
+    first_name: 'Shaxzod',
+    last_name: 'Rashidov',
+    phone: phoneWithPlus,
+    department_id: adminDept.id,
+    color: '#000000',
+    fixed_salary: 0.0,
+    currency: 'UZS',
+    is_active: true,
+  };
+
+  if (ceoEmp) {
+    const [updated] = await knex<EmployeeRecord>('employees')
+      .where({ id: ceoEmp.id })
+      .update({
+        ...employeeData,
+        updated_at: knex.fn.now(),
       })
       .returning('*');
-    ceoEmp = inserted[0];
+    ceoEmp = updated || ceoEmp;
+  } else {
+    const [inserted] = await knex<EmployeeRecord>('employees')
+      .insert(employeeData)
+      .returning('*');
+    ceoEmp = inserted;
   }
 
   if (!ceoEmp) {
-    throw new Error('CEO employee could not be created or found.');
+    throw new Error('CEO employee record could not be created or updated.');
   }
 
-  // 4. Ensure CEO user account exists
+  // 4. Upsert CEO user account (check phone number / username / employee_id first)
   const ceoUser = await knex<UserRecord>('users')
-    .where({ phone_number: normalizedPhone })
+    .whereIn('phone_number', [phoneNormalized, phoneWithPlus])
+    .orWhereIn('username', [phoneNormalized, phoneWithPlus])
+    .orWhere({ employee_id: ceoEmp.id })
     .first();
-  if (!ceoUser) {
+
+  if (ceoUser) {
+    await knex('users').where({ id: ceoUser.id }).update({
+      employee_id: ceoEmp.id,
+      phone_number: phoneNormalized,
+      username: phoneNormalized,
+      role_id: ceoRole.id,
+      role: 'CEO',
+      status: 'Open',
+      is_active: true,
+      updated_at: knex.fn.now(),
+    });
+  } else {
     const passwordHash = await bcrypt.hash('Yaqeen2026!', 10);
     await knex('users').insert({
       employee_id: ceoEmp.id,
-      phone_number: normalizedPhone,
-      username: normalizedPhone,
+      phone_number: phoneNormalized,
+      username: phoneNormalized,
       password_hash: passwordHash,
       role_id: ceoRole.id,
       role: 'CEO',
