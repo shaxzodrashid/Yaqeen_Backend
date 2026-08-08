@@ -15,6 +15,250 @@ import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import * as crypto from 'crypto';
 
+export interface TushumMetric {
+  amount: number;
+  currency: string;
+  formatted: string;
+}
+
+export interface RejaFaktMetric {
+  plan_target: number;
+  fact_amount: number;
+  percentage: number;
+  currency: string;
+  status: string;
+  status_code: string;
+  formatted_plan: string;
+  formatted_fact: string;
+}
+
+export interface EmployeeMetrics {
+  tushum: TushumMetric;
+  reja_fakt: RejaFaktMetric;
+  mijozlar_count: number;
+}
+
+export interface DepartmentRow {
+  id: string;
+  name: string;
+  display_name: string;
+  created_at?: Date | string;
+  updated_at?: Date | string;
+}
+
+export interface RoleRow {
+  id: string;
+  name: string;
+  display_name?: string | null;
+  description?: string | null;
+  permissions?: Record<string, unknown> | string | null;
+  is_system?: boolean | null;
+  created_at?: Date | string;
+  updated_at?: Date | string;
+}
+
+export interface EmployeeRow {
+  id: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  secondary_phone?: string | null;
+  address?: string | null;
+  department_id: string;
+  fixed_salary: number | string;
+  currency: string;
+  color: string;
+  picture_url?: string | null;
+  is_active: boolean;
+  created_at?: Date | string;
+  updated_at?: Date | string;
+}
+
+export interface JoinedEmployeeRow {
+  id: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  secondary_phone: string | null;
+  address: string | null;
+  department_id: string;
+  fixed_salary: number | string;
+  currency: string;
+  color: string;
+  _raw_picture_path?: string | null;
+  is_active: boolean;
+  created_at: Date | string;
+  updated_at: Date | string;
+  department_name: string;
+  department_display_name: string;
+  user_id: string | null;
+  username: string | null;
+  user_role: string | null;
+  user_status: string | null;
+}
+
+export interface EmployeeWithMetrics extends Omit<
+  JoinedEmployeeRow,
+  '_raw_picture_path'
+> {
+  picture_url: string | null;
+  tushum: TushumMetric;
+  reja_fakt: RejaFaktMetric;
+  mijozlar_count: number;
+}
+
+export interface UserRow {
+  id: string;
+  employee_id?: string | null;
+  phone_number?: string | null;
+  username?: string | null;
+  password_hash?: string | null;
+  role?: string | null;
+  role_id?: string | null;
+  status?: string | null;
+  is_active?: boolean | null;
+  created_at?: Date | string | null;
+  updated_at?: Date | string | null;
+}
+
+export interface UserWithRoleEmployeeRow {
+  user_id: string;
+  user_phone: string;
+  username: string;
+  role: string;
+  role_id: string | null;
+  status: string;
+  user_is_active: boolean;
+  user_created_at: Date | string;
+  user_updated_at: Date | string;
+  role_name: string | null;
+  role_display_name: string | null;
+  role_description: string | null;
+  role_permissions: Record<string, unknown> | string | null;
+  role_is_system: boolean | null;
+  employee_id: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  employee_phone: string | null;
+  secondary_phone: string | null;
+  address: string | null;
+  fixed_salary: number | string | null;
+  currency: string | null;
+  color: string | null;
+  employee_picture_path: string | null;
+  employee_is_active: boolean | null;
+  department_id: string | null;
+  department_name: string | null;
+  department_display_name: string | null;
+}
+
+interface ClientCountRow {
+  employee_id: string;
+  count: string | number;
+}
+
+interface CargoSaleRow {
+  employee_id: string;
+  total_sales: string | number | null;
+}
+
+interface SalesManagerEvalRow {
+  employee_id: string;
+  total_sales: string | number | null;
+  plan_target_max: string | number | null;
+  is_plan_achieved: boolean | null;
+}
+
+interface EmployeePlanRow {
+  employee_id: string;
+  target_amount: string | number | null;
+  currency: string | null;
+}
+
+export interface ModulePermissions {
+  create: boolean;
+  read: boolean;
+  update: boolean;
+  delete: boolean;
+}
+
+export interface UserEmployeeResponse {
+  id: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  phone: string | null;
+  phone_number: string;
+  secondary_phone: string | null;
+  address: string | null;
+  department_id: string | null;
+  fixed_salary: number;
+  currency: string;
+  color: string | null;
+  picture_url: string | null;
+  is_active: boolean;
+  created_at: Date | string;
+  updated_at: Date | string;
+  department_name: string | null;
+  department_display_name: string | null;
+  user_id: string;
+  username: string;
+  role: string;
+  user_role: string;
+  user_status: string;
+  role_id: string | null;
+  permissions: Record<string, ModulePermissions>;
+  tushum: TushumMetric;
+  reja_fakt: RejaFaktMetric;
+  mijozlar_count: number;
+  user: {
+    id: string;
+    phone_number: string;
+    username: string;
+    role: string;
+    role_id: string | null;
+    status: string;
+    is_active: boolean;
+    role_details: {
+      id: string;
+      name: string;
+      display_name: string;
+      description: string | null;
+      is_system: boolean;
+      permissions: Record<string, ModulePermissions>;
+    } | null;
+    permissions: Record<string, ModulePermissions>;
+  };
+  employee: {
+    id: string;
+    first_name: string | null;
+    last_name: string | null;
+    phone: string | null;
+    secondary_phone: string | null;
+    address: string | null;
+    color: string | null;
+    picture_url: string | null;
+    fixed_salary: number;
+    currency: string;
+    is_active: boolean;
+    department: {
+      id: string;
+      name: string | null;
+      display_name: string | null;
+    } | null;
+    tushum: TushumMetric;
+    reja_fakt: RejaFaktMetric;
+    mijozlar_count: number;
+  } | null;
+}
+
+export interface PaginationMeta {
+  totalItems: number;
+  itemCount: number;
+  itemsPerPage: number;
+  totalPages: number;
+  currentPage: number;
+}
+
 @Injectable()
 export class EmployeesService implements OnModuleInit {
   private readonly logger = new Logger(EmployeesService.name);
@@ -41,7 +285,7 @@ export class EmployeesService implements OnModuleInit {
       }
     } catch (err) {
       this.logger.warn(
-        `Failed to verify picture_url column on employees table: ${err}`,
+        `Failed to verify picture_url column on employees table: ${String(err)}`,
       );
     }
   }
@@ -79,13 +323,12 @@ export class EmployeesService implements OnModuleInit {
    * Batch fetches clients count, tushum (revenue), and reja/fakt (plan targets)
    * for an array of employee IDs using parallel batch queries for maximum performance.
    */
-  private async getEmployeesMetricsMap(employeeIds: string[]) {
+  private async getEmployeesMetricsMap(
+    employeeIds: string[],
+  ): Promise<Map<string, EmployeeMetrics>> {
     const validIds = (employeeIds || []).filter(Boolean);
     if (!validIds.length) {
-      return new Map<
-        string,
-        { tushum: any; reja_fakt: any; mijozlar_count: number }
-      >();
+      return new Map<string, EmployeeMetrics>();
     }
 
     const [clientCounts, cargoSales, salesManagerEvals, plans] =
@@ -95,21 +338,25 @@ export class EmployeesService implements OnModuleInit {
           .whereIn('assigned_employee_id', validIds)
           .select('assigned_employee_id as employee_id')
           .count('id as count')
-          .groupBy('assigned_employee_id'),
+          .groupBy('assigned_employee_id') as unknown as Promise<
+          ClientCountRow[]
+        >,
 
         // 2. Cargo transactions total revenue per employee
         this.knex('cargo_transactions')
           .whereIn('employee_id', validIds)
           .select('employee_id')
           .sum('sell_price as total_sales')
-          .groupBy('employee_id'),
+          .groupBy('employee_id') as unknown as Promise<CargoSaleRow[]>,
 
         // 3. Sales manager evaluations (plan/revenue source)
         this.knex.schema
           .hasTable('sales_manager_evaluations')
-          .then(async (hasTable) => {
+          .then(async (hasTable): Promise<SalesManagerEvalRow[]> => {
             if (!hasTable) return [];
-            return this.knex('sales_manager_evaluations')
+            const rows = await this.knex<SalesManagerEvalRow>(
+              'sales_manager_evaluations',
+            )
               .whereIn('employee_id', validIds)
               .select(
                 'employee_id',
@@ -118,16 +365,20 @@ export class EmployeesService implements OnModuleInit {
                 'is_plan_achieved',
               )
               .orderBy('created_at', 'desc');
+            return rows;
           }),
 
         // 4. Employee plans
-        this.knex.schema.hasTable('employee_plans').then(async (hasTable) => {
-          if (!hasTable) return [];
-          return this.knex('employee_plans')
-            .whereIn('employee_id', validIds)
-            .select('employee_id', 'target_amount', 'currency')
-            .orderBy('created_at', 'desc');
-        }),
+        this.knex.schema
+          .hasTable('employee_plans')
+          .then(async (hasTable): Promise<EmployeePlanRow[]> => {
+            if (!hasTable) return [];
+            const rows = await this.knex<EmployeePlanRow>('employee_plans')
+              .whereIn('employee_id', validIds)
+              .select('employee_id', 'target_amount', 'currency')
+              .orderBy('created_at', 'desc');
+            return rows;
+          }),
       ]);
 
     const clientCountMap = new Map<string, number>();
@@ -175,10 +426,7 @@ export class EmployeesService implements OnModuleInit {
       }
     }
 
-    const metricsMap = new Map<
-      string,
-      { tushum: any; reja_fakt: any; mijozlar_count: number }
-    >();
+    const metricsMap = new Map<string, EmployeeMetrics>();
 
     for (const empId of validIds) {
       const mijozlarCount = clientCountMap.get(empId) || 0;
@@ -244,7 +492,7 @@ export class EmployeesService implements OnModuleInit {
         return cachedUrl;
       }
     } catch (error) {
-      this.logger.warn(`Redis get failed for ${cacheKey}: ${error}`);
+      this.logger.warn(`Redis get failed for ${cacheKey}: ${String(error)}`);
     }
 
     try {
@@ -256,13 +504,15 @@ export class EmployeesService implements OnModuleInit {
       try {
         await this.redisService.set(cacheKey, presignedUrl, 840);
       } catch (cacheError) {
-        this.logger.warn(`Redis set failed for ${cacheKey}: ${cacheError}`);
+        this.logger.warn(
+          `Redis set failed for ${cacheKey}: ${String(cacheError)}`,
+        );
       }
 
       return presignedUrl;
     } catch (error) {
       this.logger.error(
-        `Failed to generate presigned URL for path ${picturePath}: ${error}`,
+        `Failed to generate presigned URL for path ${picturePath}: ${String(error)}`,
       );
       return null;
     }
@@ -306,16 +556,22 @@ export class EmployeesService implements OnModuleInit {
   /**
    * Upload profile picture for an employee.
    */
-  async uploadProfilePicture(employeeId: string, file: Express.Multer.File) {
+  async uploadProfilePicture(
+    employeeId: string,
+    file: Express.Multer.File,
+  ): Promise<EmployeeWithMetrics> {
     this.validateImageFile(file);
-    const employee = await this.findEmployeeById(employeeId);
+    const rawEmployee = (await this.knex('employees')
+      .where('id', employeeId)
+      .select('picture_url')
+      .first()) as unknown as { picture_url: string | null } | undefined;
 
-    if (employee._raw_picture_path) {
+    if (rawEmployee?.picture_url) {
       try {
-        await this.minioService.deleteFile(employee._raw_picture_path);
+        await this.minioService.deleteFile(rawEmployee.picture_url);
       } catch (err) {
         this.logger.warn(
-          `Failed to remove old profile picture ${employee._raw_picture_path}: ${err}`,
+          `Failed to remove old profile picture ${rawEmployee.picture_url}: ${String(err)}`,
         );
       }
     }
@@ -338,7 +594,9 @@ export class EmployeesService implements OnModuleInit {
     try {
       await this.redisService.del(cacheKey);
     } catch (cacheErr) {
-      this.logger.warn(`Failed to evict Redis key ${cacheKey}: ${cacheErr}`);
+      this.logger.warn(
+        `Failed to evict Redis key ${cacheKey}: ${String(cacheErr)}`,
+      );
     }
 
     return this.findEmployeeById(employeeId);
@@ -347,17 +605,18 @@ export class EmployeesService implements OnModuleInit {
   /**
    * Delete profile picture for an employee.
    */
-  async deleteProfilePicture(employeeId: string) {
-    const rawEmployee = await this.knex('employees')
+  async deleteProfilePicture(employeeId: string): Promise<EmployeeWithMetrics> {
+    const rawEmployee = (await this.knex('employees')
       .where('id', employeeId)
-      .first();
+      .select('picture_url')
+      .first()) as unknown as { picture_url: string | null } | undefined;
 
     if (rawEmployee && rawEmployee.picture_url) {
       try {
         await this.minioService.deleteFile(rawEmployee.picture_url);
       } catch (err) {
         this.logger.warn(
-          `Failed to delete MinIO file ${rawEmployee.picture_url}: ${err}`,
+          `Failed to delete MinIO file ${rawEmployee.picture_url}: ${String(err)}`,
         );
       }
 
@@ -370,7 +629,9 @@ export class EmployeesService implements OnModuleInit {
       try {
         await this.redisService.del(cacheKey);
       } catch (cacheErr) {
-        this.logger.warn(`Failed to evict Redis key ${cacheKey}: ${cacheErr}`);
+        this.logger.warn(
+          `Failed to evict Redis key ${cacheKey}: ${String(cacheErr)}`,
+        );
       }
     }
 
@@ -381,10 +642,10 @@ export class EmployeesService implements OnModuleInit {
   // DEPARTMENTS METHODS
   // ==========================================
 
-  async createDepartment(dto: CreateDepartmentDto) {
-    const existing = await this.knex('departments')
+  async createDepartment(dto: CreateDepartmentDto): Promise<DepartmentRow> {
+    const existing = (await this.knex('departments')
       .where('name', dto.name)
-      .first();
+      .first()) as unknown as DepartmentRow | undefined;
 
     if (existing) {
       throw new BadRequestException({
@@ -393,22 +654,27 @@ export class EmployeesService implements OnModuleInit {
       });
     }
 
-    const [created] = await this.knex('departments')
+    const [created] = (await this.knex('departments')
       .insert({
         name: dto.name,
         display_name: dto.display_name,
       })
-      .returning('*');
+      .returning('*')) as unknown as DepartmentRow[];
 
     return created;
   }
 
-  async findAllDepartments() {
-    return this.knex('departments').select('*').orderBy('display_name', 'asc');
+  async findAllDepartments(): Promise<DepartmentRow[]> {
+    const departments = (await this.knex('departments')
+      .select('*')
+      .orderBy('display_name', 'asc')) as unknown as DepartmentRow[];
+    return departments;
   }
 
-  async findDepartmentById(id: string) {
-    const department = await this.knex('departments').where('id', id).first();
+  async findDepartmentById(id: string): Promise<DepartmentRow> {
+    const department = (await this.knex('departments')
+      .where('id', id)
+      .first()) as unknown as DepartmentRow | undefined;
     if (!department) {
       throw new NotFoundException({
         message: 'Department not found.',
@@ -418,13 +684,16 @@ export class EmployeesService implements OnModuleInit {
     return department;
   }
 
-  async updateDepartment(id: string, dto: CreateDepartmentDto) {
+  async updateDepartment(
+    id: string,
+    dto: CreateDepartmentDto,
+  ): Promise<DepartmentRow> {
     await this.findDepartmentById(id);
 
-    const existingName = await this.knex('departments')
+    const existingName = (await this.knex('departments')
       .where('name', dto.name)
       .whereNot('id', id)
-      .first();
+      .first()) as unknown as DepartmentRow | undefined;
 
     if (existingName) {
       throw new BadRequestException({
@@ -433,28 +702,28 @@ export class EmployeesService implements OnModuleInit {
       });
     }
 
-    const [updated] = await this.knex('departments')
+    const [updated] = (await this.knex('departments')
       .where('id', id)
       .update({
         name: dto.name,
         display_name: dto.display_name,
         updated_at: this.knex.fn.now(),
       })
-      .returning('*');
+      .returning('*')) as unknown as DepartmentRow[];
 
     return updated;
   }
 
-  async deleteDepartment(id: string) {
+  async deleteDepartment(id: string): Promise<void> {
     await this.findDepartmentById(id);
 
     // Check if there are employees assigned to this department
-    const employeeCount = await this.knex('employees')
+    const employeeCount = (await this.knex('employees')
       .where('department_id', id)
       .count('id as count')
-      .first();
+      .first()) as unknown as { count?: string | number } | undefined;
 
-    const count = parseInt((employeeCount?.count as string) || '0', 10);
+    const count = parseInt(String(employeeCount?.count || '0'), 10);
     if (count > 0) {
       throw new BadRequestException({
         message: `Cannot delete department because it contains ${count} employee(s).`,
@@ -469,16 +738,18 @@ export class EmployeesService implements OnModuleInit {
   // EMPLOYEES METHODS
   // ==========================================
 
-  async createEmployee(dto: CreateEmployeeDto) {
+  async createEmployee(dto: CreateEmployeeDto): Promise<EmployeeRow> {
     const phoneDigits = this.normalizePhone(dto.phone);
 
     // Check department exists
     await this.findDepartmentById(dto.department_id);
 
     // Validate role_id / role
-    let roleRecord: any = null;
+    let roleRecord: RoleRow | undefined = undefined;
     if (dto.role_id) {
-      roleRecord = await this.knex('roles').where('id', dto.role_id).first();
+      roleRecord = await this.knex<RoleRow>('roles')
+        .where('id', dto.role_id)
+        .first();
       if (!roleRecord) {
         throw new BadRequestException({
           message: `Role with ID "${dto.role_id}" not found.`,
@@ -486,7 +757,7 @@ export class EmployeesService implements OnModuleInit {
         });
       }
     } else if (dto.role) {
-      roleRecord = await this.knex('roles')
+      roleRecord = await this.knex<RoleRow>('roles')
         .whereRaw('LOWER(name) = ?', [dto.role.toLowerCase()])
         .first();
       if (!roleRecord) {
@@ -502,10 +773,12 @@ export class EmployeesService implements OnModuleInit {
       });
     }
 
+    const activeRole = roleRecord;
+
     // Check if employee with same phone digits already exists
-    const existingEmployee = await this.knex('employees')
+    const existingEmployee = (await this.knex('employees')
       .whereRaw("regexp_replace(phone, '[^0-9]', '', 'g') = ?", [phoneDigits])
-      .first();
+      .first()) as unknown as EmployeeRow | undefined;
 
     if (existingEmployee) {
       throw new BadRequestException({
@@ -527,21 +800,21 @@ export class EmployeesService implements OnModuleInit {
       is_active: true,
     };
 
-    return this.knex.transaction(async (trx) => {
-      const [employee] = await trx('employees')
+    return this.knex.transaction(async (trx): Promise<EmployeeRow> => {
+      const [employee] = (await trx('employees')
         .insert(employeePayload)
-        .returning('*');
+        .returning('*')) as unknown as EmployeeRow[];
 
       // Check if there is an existing user account with this phone number to link
-      const user = await trx('users')
+      const user = (await trx('users')
         .where('phone_number', phoneDigits)
-        .first();
+        .first()) as unknown as UserRow | undefined;
 
       if (user) {
         await trx('users').where('id', user.id).update({
           employee_id: employee.id,
-          role_id: roleRecord.id,
-          role: roleRecord.name,
+          role_id: activeRole.id,
+          role: activeRole.name,
           updated_at: trx.fn.now(),
         });
       } else {
@@ -550,8 +823,8 @@ export class EmployeesService implements OnModuleInit {
           phone_number: phoneDigits,
           username: phoneDigits, // default to phone
           password_hash: '', // no password yet
-          role_id: roleRecord.id,
-          role: roleRecord.name,
+          role_id: activeRole.id,
+          role: activeRole.name,
           status: 'Pending',
         });
       }
@@ -565,7 +838,7 @@ export class EmployeesService implements OnModuleInit {
     search?: string;
     page?: number;
     limit?: number;
-  }) {
+  }): Promise<{ items: EmployeeWithMetrics[]; meta: PaginationMeta }> {
     const page = filters.page && filters.page > 0 ? filters.page : 1;
     const limit = filters.limit && filters.limit > 0 ? filters.limit : 10;
     const offset = (page - 1) * limit;
@@ -622,19 +895,21 @@ export class EmployeesService implements OnModuleInit {
           .orWhere('e.phone', 'like', searchPattern);
       });
     }
-    const [{ count }] = await totalQuery.count('e.id as count');
-    const totalItems = parseInt(count as string, 10);
+    const [{ count }] = (await totalQuery.count(
+      'e.id as count',
+    )) as unknown as [{ count: string | number }];
+    const totalItems = parseInt(String(count || '0'), 10);
 
-    const rawItems = await query
+    const rawItems = (await query
       .orderBy('e.created_at', 'desc')
       .limit(limit)
-      .offset(offset);
+      .offset(offset)) as unknown as JoinedEmployeeRow[];
 
     const employeeIds = rawItems.map((item) => item.id);
     const metricsMap = await this.getEmployeesMetricsMap(employeeIds);
 
     const items = await Promise.all(
-      rawItems.map(async (item) => {
+      rawItems.map(async (item): Promise<EmployeeWithMetrics> => {
         const rawPath = item._raw_picture_path;
         delete item._raw_picture_path;
         const presignedUrl = await this.resolvePictureUrl(item.id, rawPath);
@@ -680,8 +955,8 @@ export class EmployeesService implements OnModuleInit {
     };
   }
 
-  async findEmployeeById(id: string) {
-    const employee = await this.knex('employees as e')
+  async findEmployeeById(id: string): Promise<EmployeeWithMetrics> {
+    const employee = (await this.knex('employees as e')
       .leftJoin('departments as d', 'e.department_id', 'd.id')
       .leftJoin('users as u', 'e.id', 'u.employee_id')
       .select(
@@ -707,7 +982,7 @@ export class EmployeesService implements OnModuleInit {
         'u.status as user_status',
       )
       .where('e.id', id)
-      .first();
+      .first()) as unknown as JoinedEmployeeRow | undefined;
 
     if (!employee) {
       throw new NotFoundException({
@@ -751,8 +1026,8 @@ export class EmployeesService implements OnModuleInit {
     };
   }
 
-  async findEmployeeByUserId(userId: string) {
-    const user = await this.knex('users as u')
+  async findEmployeeByUserId(userId: string): Promise<UserEmployeeResponse> {
+    const user = (await this.knex('users as u')
       .leftJoin('employees as e', 'u.employee_id', 'e.id')
       .leftJoin('departments as d', 'e.department_id', 'd.id')
       .leftJoin('roles as r', 'u.role_id', 'r.id')
@@ -787,7 +1062,7 @@ export class EmployeesService implements OnModuleInit {
         'd.display_name as department_display_name',
       )
       .where('u.id', userId)
-      .first();
+      .first()) as unknown as UserWithRoleEmployeeRow | undefined;
 
     if (!user) {
       throw new NotFoundException({
@@ -817,7 +1092,7 @@ export class EmployeesService implements OnModuleInit {
       'roles',
     ];
 
-    let rawPermissions = user.role_permissions;
+    let rawPermissions: unknown = user.role_permissions;
     if (typeof rawPermissions === 'string') {
       try {
         rawPermissions = JSON.parse(rawPermissions);
@@ -826,13 +1101,16 @@ export class EmployeesService implements OnModuleInit {
       }
     }
 
-    const permissions: Record<
-      string,
-      { create: boolean; read: boolean; update: boolean; delete: boolean }
-    > = {};
+    const parsedPermissions = (
+      typeof rawPermissions === 'object' && rawPermissions !== null
+        ? rawPermissions
+        : {}
+    ) as Record<string, Record<string, boolean>>;
+
+    const permissions: Record<string, ModulePermissions> = {};
 
     for (const mod of systemModules) {
-      const rawMod = rawPermissions?.[mod] || {};
+      const rawMod = parsedPermissions[mod] || {};
       const isCeo = user.role === 'CEO';
 
       permissions[mod] = {
@@ -844,32 +1122,40 @@ export class EmployeesService implements OnModuleInit {
     }
 
     const activeRoleName = user.role_name || user.role;
+    const defaultCurrency = user.currency || 'UZS';
 
-    let metrics: any = {
+    let metrics: EmployeeMetrics = {
       tushum: {
         amount: 0,
-        currency: user.currency || 'UZS',
-        formatted: this.formatCurrency(0, user.currency),
+        currency: defaultCurrency,
+        formatted: this.formatCurrency(0, defaultCurrency),
       },
       reja_fakt: {
         plan_target: 0,
         fact_amount: 0,
         percentage: 0,
-        currency: user.currency || 'UZS',
+        currency: defaultCurrency,
         status: 'Jarayonda',
         status_code: 'IN_PROGRESS',
-        formatted_plan: this.formatCurrency(0, user.currency),
-        formatted_fact: this.formatCurrency(0, user.currency),
+        formatted_plan: this.formatCurrency(0, defaultCurrency),
+        formatted_fact: this.formatCurrency(0, defaultCurrency),
       },
       mijozlar_count: 0,
     };
 
     if (user.employee_id) {
       const metricsMap = await this.getEmployeesMetricsMap([user.employee_id]);
-      if (metricsMap.has(user.employee_id)) {
-        metrics = metricsMap.get(user.employee_id);
+      const foundMetrics = metricsMap.get(user.employee_id);
+      if (foundMetrics) {
+        metrics = foundMetrics;
       }
     }
+
+    const fixedSalaryNum = user.fixed_salary
+      ? typeof user.fixed_salary === 'number'
+        ? user.fixed_salary
+        : parseFloat(user.fixed_salary)
+      : 0;
 
     // Return unified professional response (combining flat layout for e2e tests & nested structure for frontend)
     return {
@@ -882,17 +1168,18 @@ export class EmployeesService implements OnModuleInit {
       secondary_phone: user.secondary_phone,
       address: user.address,
       department_id: user.department_id,
-      fixed_salary: user.fixed_salary ? parseFloat(user.fixed_salary) : 0,
-      currency: user.currency || 'UZS',
+      fixed_salary: fixedSalaryNum,
+      currency: defaultCurrency,
       color: user.color,
       picture_url: presignedUrl,
-      is_active: !!user.employee_is_active,
+      is_active: Boolean(user.employee_is_active),
       created_at: user.user_created_at,
       updated_at: user.user_updated_at,
       department_name: user.department_name,
       department_display_name: user.department_display_name,
       user_id: user.user_id,
       username: user.username,
+      role: activeRoleName,
       user_role: activeRoleName,
       user_status: user.status,
       role_id: user.role_id,
@@ -909,14 +1196,14 @@ export class EmployeesService implements OnModuleInit {
         role: activeRoleName,
         role_id: user.role_id,
         status: user.status,
-        is_active: !!user.user_is_active,
+        is_active: Boolean(user.user_is_active),
         role_details: user.role_id
           ? {
               id: user.role_id,
               name: activeRoleName,
               display_name: user.role_display_name || activeRoleName,
               description: user.role_description,
-              is_system: !!user.role_is_system,
+              is_system: Boolean(user.role_is_system),
               permissions: permissions,
             }
           : null,
@@ -932,9 +1219,9 @@ export class EmployeesService implements OnModuleInit {
             address: user.address,
             color: user.color,
             picture_url: presignedUrl,
-            fixed_salary: user.fixed_salary ? parseFloat(user.fixed_salary) : 0,
-            currency: user.currency || 'UZS',
-            is_active: !!user.employee_is_active,
+            fixed_salary: fixedSalaryNum,
+            currency: defaultCurrency,
+            is_active: Boolean(user.employee_is_active),
             department: user.department_id
               ? {
                   id: user.department_id,
@@ -950,10 +1237,13 @@ export class EmployeesService implements OnModuleInit {
     };
   }
 
-  async updateEmployee(id: string, dto: UpdateEmployeeDto) {
-    const employee = await this.findEmployeeById(id);
+  async updateEmployee(
+    id: string,
+    dto: UpdateEmployeeDto,
+  ): Promise<EmployeeRow> {
+    await this.findEmployeeById(id);
 
-    const updatePayload: any = {};
+    const updatePayload: Partial<EmployeeRow> = {};
     if (dto.first_name !== undefined) updatePayload.first_name = dto.first_name;
     if (dto.last_name !== undefined) updatePayload.last_name = dto.last_name;
     if (dto.secondary_phone !== undefined)
@@ -971,10 +1261,10 @@ export class EmployeesService implements OnModuleInit {
 
     if (dto.phone !== undefined) {
       const phoneDigits = this.normalizePhone(dto.phone);
-      const existingPhone = await this.knex('employees')
+      const existingPhone = (await this.knex('employees')
         .whereRaw("regexp_replace(phone, '[^0-9]', '', 'g') = ?", [phoneDigits])
         .whereNot('id', id)
-        .first();
+        .first()) as unknown as EmployeeRow | undefined;
 
       if (existingPhone) {
         throw new BadRequestException({
@@ -989,20 +1279,22 @@ export class EmployeesService implements OnModuleInit {
       updatePayload.is_active = dto.is_active;
     }
 
-    return this.knex.transaction(async (trx) => {
-      const [updated] = await trx('employees')
+    return this.knex.transaction(async (trx): Promise<EmployeeRow> => {
+      const [updated] = (await trx('employees')
         .where('id', id)
         .update({
           ...updatePayload,
           updated_at: trx.fn.now(),
         })
-        .returning('*');
+        .returning('*')) as unknown as EmployeeRow[];
 
       // Update role if role_id or role is passed
       if (dto.role_id || dto.role) {
-        let roleRecord: any = null;
+        let roleRecord: RoleRow | undefined = undefined;
         if (dto.role_id) {
-          roleRecord = await trx('roles').where('id', dto.role_id).first();
+          roleRecord = await trx<RoleRow>('roles')
+            .where('id', dto.role_id)
+            .first();
           if (!roleRecord) {
             throw new BadRequestException({
               message: `Role with ID "${dto.role_id}" not found.`,
@@ -1010,7 +1302,7 @@ export class EmployeesService implements OnModuleInit {
             });
           }
         } else if (dto.role) {
-          roleRecord = await trx('roles')
+          roleRecord = await trx<RoleRow>('roles')
             .whereRaw('LOWER(name) = ?', [dto.role.toLowerCase()])
             .first();
         }
@@ -1026,7 +1318,9 @@ export class EmployeesService implements OnModuleInit {
 
       // If is_active is modified, sync with the linked user account
       if (dto.is_active !== undefined) {
-        const user = await trx('users').where('employee_id', id).first();
+        const user = (await trx('users')
+          .where('employee_id', id)
+          .first()) as unknown as UserRow | undefined;
         if (user) {
           await trx('users')
             .where('id', user.id)
@@ -1042,14 +1336,16 @@ export class EmployeesService implements OnModuleInit {
     });
   }
 
-  async deleteEmployee(id: string) {
+  async deleteEmployee(id: string): Promise<void> {
     await this.findEmployeeById(id);
 
-    return this.knex.transaction(async (trx) => {
+    return this.knex.transaction(async (trx): Promise<void> => {
       // Linked users will have their employee_id set to null automatically due to
       // FOREIGN KEY references ... onDelete("SET NULL")
       // However, we should also deactivate/clean up that user so they cannot authenticate
-      const user = await trx('users').where('employee_id', id).first();
+      const user = (await trx('users')
+        .where('employee_id', id)
+        .first()) as unknown as UserRow | undefined;
       if (user) {
         await trx('users').where('id', user.id).update({
           employee_id: null,
@@ -1079,11 +1375,17 @@ export class EmployeesService implements OnModuleInit {
       return false;
     }
 
-    const dbUser = await this.knex('users as u')
+    const dbUser = (await this.knex('users as u')
       .leftJoin('roles as r', 'u.role_id', 'r.id')
       .select('u.role', 'r.name as role_name', 'r.permissions')
       .where('u.id', userId)
-      .first();
+      .first()) as unknown as
+      | {
+          role: string;
+          role_name: string | null;
+          permissions: Record<string, unknown> | string | null;
+        }
+      | undefined;
 
     if (!dbUser) {
       return false;
@@ -1098,19 +1400,31 @@ export class EmployeesService implements OnModuleInit {
     let rawPermissions = dbUser.permissions;
 
     if (!rawPermissions && dbUser.role) {
-      const fallbackRole = await this.knex('roles')
+      const fallbackRole = (await this.knex('roles')
         .whereRaw('LOWER(name) = ?', [dbUser.role.toLowerCase()])
-        .first();
+        .first()) as unknown as RoleRow | undefined;
       if (fallbackRole) {
-        rawPermissions = fallbackRole.permissions;
+        rawPermissions = fallbackRole.permissions ?? null;
       }
     }
 
-    const permissions =
-      typeof rawPermissions === 'string'
-        ? JSON.parse(rawPermissions)
-        : rawPermissions || {};
+    let permissionsObj: Record<string, Record<string, boolean>> = {};
+    if (typeof rawPermissions === 'string') {
+      try {
+        permissionsObj = JSON.parse(rawPermissions) as Record<
+          string,
+          Record<string, boolean>
+        >;
+      } catch {
+        permissionsObj = {};
+      }
+    } else if (typeof rawPermissions === 'object' && rawPermissions !== null) {
+      permissionsObj = rawPermissions as Record<
+        string,
+        Record<string, boolean>
+      >;
+    }
 
-    return Boolean(permissions?.[module]?.[action]);
+    return Boolean(permissionsObj[module]?.[action]);
   }
 }
