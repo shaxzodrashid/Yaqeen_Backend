@@ -5,6 +5,7 @@ import {
   Inject,
   Logger,
 } from '@nestjs/common';
+import 'multer';
 import { KNEX_CONNECTION } from '../database/database.module';
 import { Knex } from 'knex';
 import { MinioService } from '../minio/minio.service';
