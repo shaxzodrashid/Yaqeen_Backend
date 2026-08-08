@@ -27,4 +27,5 @@ export const envValidationSchema = Joi.object({
   MINIO_ACCESS_KEY: Joi.string().required(),
   MINIO_SECRET_KEY: Joi.string().required(),
   MINIO_BUCKET_NAME: Joi.string().default('yaqeen-attachments'),
+  MINIO_PUBLIC_URL: Joi.string().allow('').optional(),
 });

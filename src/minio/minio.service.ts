@@ -93,11 +93,25 @@ export class MinioService implements OnModuleInit {
     bucketName: string = this.defaultBucket,
   ): Promise<string> {
     try {
-      return await this.minioClient.presignedGetObject(
+      const url = await this.minioClient.presignedGetObject(
         bucketName,
         path,
         expiryInSeconds,
       );
+
+      const publicUrl = this.configService.get<string>('minio.publicUrl');
+      if (publicUrl) {
+        const endPoint =
+          this.configService.get<string>('minio.endpoint') || '127.0.0.1';
+        const port = this.configService.get<number>('minio.port') || 9000;
+        const useSSL = this.configService.get<boolean>('minio.useSSL') || false;
+        const protocol = useSSL ? 'https' : 'http';
+        const internalBase = `${protocol}://${endPoint}:${port}`;
+
+        return url.replace(internalBase, publicUrl.replace(/\/$/, ''));
+      }
+
+      return url;
     } catch (error) {
       const errMsg = error instanceof Error ? error.message : String(error);
       this.logger.error(

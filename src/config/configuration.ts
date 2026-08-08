@@ -25,5 +25,6 @@ export default () => ({
     accessKey: process.env.MINIO_ACCESS_KEY || '',
     secretKey: process.env.MINIO_SECRET_KEY || '',
     bucketName: process.env.MINIO_BUCKET_NAME || 'yaqeen-attachments',
+    publicUrl: process.env.MINIO_PUBLIC_URL || '',
   },
 });
