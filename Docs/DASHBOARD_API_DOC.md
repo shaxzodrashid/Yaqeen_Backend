@@ -193,12 +193,13 @@ $$\text{growthRateSales} = \begin{cases} \left(\frac{\text{totalSales}_{\text{cu
 
 #### Query Parameters:
 
-Supports `period`, `start_date`, `end_date`, `employee_id`, `client_id`, `cargo_type`.
+Supports `currency` (`UZS`, `USD`, `RUB`, `RMB`, `CNY`), `period`, `start_date`, `end_date`, `employee_id`, `client_id`, `cargo_type`.
 
 #### Response (200 OK):
 
 ```json
 {
+  "currency": "USD",
   "totalSales": 48500.0,
   "totalPurchaseCost": 32100.0,
   "totalMargin": 16400.0,
@@ -224,12 +225,13 @@ Supports `period`, `start_date`, `end_date`, `employee_id`, `client_id`, `cargo_
 
 #### Query Parameters:
 
-Supports `period`, `start_date`, `end_date`, `employee_id`, `client_id`, `cargo_type`.
+Supports `currency` (`UZS`, `USD`, `RUB`, `RMB`, `CNY`), `period`, `start_date`, `end_date`, `employee_id`, `client_id`, `cargo_type`.
 
 #### Response (200 OK):
 
 ```json
 {
+  "currency": "USD",
   "cargoTypeDistribution": [
     {
       "category": "FTL",
@@ -270,12 +272,13 @@ Supports `period`, `start_date`, `end_date`, `employee_id`, `client_id`, `cargo_
 #### Query Parameters:
 
 - `limit`: `number` (default `5`, max `50`).
-- Supports `period`, `start_date`, `end_date`, `employee_id`, `client_id`, `cargo_type`.
+- Supports `currency` (`UZS`, `USD`, `RUB`, `RMB`, `CNY`), `period`, `start_date`, `end_date`, `employee_id`, `client_id`, `cargo_type`.
 
 #### Response (200 OK):
 
 ```json
 {
+  "currency": "USD",
   "topManagers": [
     {
       "employeeId": "e4a215b4-7b1b-4d92-93cb-33d31b0142fa",

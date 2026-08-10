@@ -22,6 +22,7 @@ import { CommercialOffersModule } from './commercial-offers/commercial-offers.mo
 import { SalesManagerKpiModule } from './sales-manager-kpi/sales-manager-kpi.module';
 import { CargoRegistrationsModule } from './cargo-registrations/cargo-registrations.module';
 import { DashboardModule } from './dashboard/dashboard.module';
+import { KpiSummaryModule } from './kpi-summary/kpi-summary.module';
 
 @Module({
   imports: [
@@ -77,6 +78,7 @@ import { DashboardModule } from './dashboard/dashboard.module';
     CommercialOffersModule,
     SalesManagerKpiModule,
     DashboardModule,
+    KpiSummaryModule,
   ],
   controllers: [AppController],
   providers: [AppService],

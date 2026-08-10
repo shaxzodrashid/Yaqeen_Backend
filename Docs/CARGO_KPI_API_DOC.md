@@ -506,3 +506,153 @@ $$\text{KPI Bonus} = \text{Margin} \times \frac{\text{kpi\_percentage}}{100}$$
 ### `POST /api/cargo-kpi/reset-all`
 
 Resets all LTL, FTL, and ROP data across the Cargo & KPI sub-modules.
+
+---
+
+## 10. Dedicated KPI Summary & History Module
+
+### `GET /api/v1/kpi/summary`
+
+Returns complete aggregated summary of KPI scores per employee for the specified month (or all months), including individual breakdowns across LTL, FTL, ROP, Sales, and Cargo Transactions. Uses standard `{ meta, pagination, data }` response shape.
+
+#### Query Parameters:
+
+- `month` (optional): `YYYY-MM` (e.g. `2026-08`) or `all`. Defaults to current month (`YYYY-MM`).
+- `employee_id` (optional): Filter by specific Employee UUID.
+- `department_id` (optional): Filter by Department UUID.
+- `search` (optional): Search by employee first/last name.
+- `page` (optional): Page number (default: `1`).
+- `limit` (optional): Results per page (default: `20`, max: `100`).
+- `sort_by` (optional): Sorting column (e.g. `total_kpi`, `employee_name`, `total_ltl_kpi`, `total_ftl_kpi`, default: `total_kpi`).
+- `order` (optional): `ASC` or `DESC` (default: `DESC`).
+
+#### Example Response (200 OK):
+
+```json
+{
+  "meta": {
+    "total": 1,
+    "page": 1,
+    "limit": 20,
+    "totalPages": 1,
+    "month": "2026-08",
+    "totals": {
+      "grand_total_kpi": 120,
+      "total_ltl_kpi": 120,
+      "total_ftl_kpi": 0,
+      "total_rop_kpi": 0,
+      "total_sales_kpi": 0,
+      "total_transactions_kpi": 0,
+      "total_margin_generated": 0
+    }
+  },
+  "pagination": {
+    "total": 1,
+    "page": 1,
+    "limit": 20,
+    "totalPages": 1
+  },
+  "data": [
+    {
+      "employee_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "employee_name": "Jasur Yoldoshev",
+      "department_id": "dept-uuid-string",
+      "department_name": "Logistics",
+      "career_level": "MID",
+      "month": "2026-08",
+      "total_kpi": 120,
+      "total_ltl_kpi": 120,
+      "total_ftl_kpi": 0,
+      "total_rop_kpi": 0,
+      "total_sales_kpi": 0,
+      "total_transactions_kpi": 0,
+      "ltl_volume_m3": 50,
+      "ftl_fura_count": 0,
+      "transactions_count": 0,
+      "total_margin_generated": 0,
+      "currency": "USD"
+    }
+  ]
+}
+```
+
+---
+
+### `GET /api/v1/kpi/history`
+
+Returns full itemized audit trail history of KPIs ("Each amount of money came from where"), listing individual source records from LTL items, FTL fura items, ROP worker sales, Sales Manager evaluations, and Cargo Transactions.
+
+#### Query Parameters:
+
+- `month` (optional): `YYYY-MM` or `all`.
+- `employee_id` (optional): Filter by Employee UUID.
+- `source_type` (optional): `LTL`, `FTL`, `ROP`, `SALES`, or `TRANSACTION`.
+- `search` (optional): Text search across employee name, description, and department name.
+- `page` (optional): Page number (default: `1`).
+- `limit` (optional): Results per page (default: `20`).
+- `sort_by` (optional): Sort column (`date`, `kpi_amount`, `margin_amount`, default: `date`).
+- `order` (optional): `ASC` or `DESC` (default: `DESC`).
+
+#### Example Response (200 OK):
+
+```json
+{
+  "meta": {
+    "total": 1,
+    "page": 1,
+    "limit": 20,
+    "totalPages": 1,
+    "filters": {
+      "month": "2026-08",
+      "employee_id": null,
+      "source_type": null
+    },
+    "summary": {
+      "total_kpi_amount": 150,
+      "total_margin_amount": 0,
+      "count_by_source": {
+        "LTL": 1,
+        "FTL": 0,
+        "ROP": 0,
+        "SALES": 0,
+        "TRANSACTION": 0
+      }
+    }
+  },
+  "pagination": {
+    "total": 1,
+    "page": 1,
+    "limit": 20,
+    "totalPages": 1
+  },
+  "data": [
+    {
+      "id": "item-uuid-string",
+      "employee_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "employee_name": "Jasur Yoldoshev",
+      "department_name": "Logistics",
+      "source_type": "LTL",
+      "source_id": "item-uuid-string",
+      "date": "2026-08-05",
+      "month": "2026-08",
+      "kpi_amount": 150,
+      "margin_amount": 0,
+      "description": "LTL Cargo (oddiy): Volume 50 m³, Weight 5000 kg, Density 100 kg/m³, Base Rate $3/m³",
+      "details": {
+        "volume": 50,
+        "weight": 5000,
+        "cargo_type": "oddiy",
+        "density": 100,
+        "base_rate": 3,
+        "base_kpi": 150
+      }
+    }
+  ]
+}
+```
+
+---
+
+### `GET /api/v1/kpi/employee/:id`
+
+Returns a comprehensive single-employee summary and detailed itemized history breakdown across all KPI sources.
