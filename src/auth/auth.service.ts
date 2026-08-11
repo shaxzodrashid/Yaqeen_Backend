@@ -87,11 +87,42 @@ export class AuthService {
       .first();
 
     if (!contact) {
+      const botUsername = this.telegramBotService.getBotUsername();
+      const botUrl = this.telegramBotService.getBotUrl(phone);
       throw new BadRequestException({
         message: 'Phone number is not registered in the Telegram bot.',
         location: 'telegram_not_registered',
+        telegram_bot_username: botUsername,
+        telegram_bot_url: botUrl,
       });
     }
+  }
+
+  /**
+   * Check if a phone number is registered in Telegram bot and return bot URL.
+   */
+  async checkTelegramStatus(phoneNumber: string) {
+    if (!phoneNumber) {
+      throw new BadRequestException({
+        message: 'Phone number is required.',
+        location: 'validation_failed',
+      });
+    }
+
+    const phone = this.normalizePhone(phoneNumber);
+    const contact = await this.knex<TelegramContact>('telegram_contacts')
+      .where('phone_number', phone)
+      .first();
+
+    const botUsername = this.telegramBotService.getBotUsername();
+    const botUrl = this.telegramBotService.getBotUrl(phone);
+
+    return {
+      registered: Boolean(contact),
+      phone_number: phone,
+      telegram_bot_username: botUsername,
+      telegram_bot_url: botUrl,
+    };
   }
 
   /**

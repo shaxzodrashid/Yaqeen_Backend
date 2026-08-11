@@ -351,7 +351,18 @@ _Example Payload:_
 #### Error Responses
 
 - **400 Bad Request (`location: "telegram_not_registered"`)**
-  - _Cause:_ No matching `phone_number` mapping exists in `telegram_contacts`. Tell the user to open the bot and register their contact.
+  - _Cause:_ No matching `phone_number` mapping exists in `telegram_contacts`.
+  - _Response Payload:_ Includes direct deep link metadata for seamless web redirection:
+    ```json
+    {
+      "statusCode": 400,
+      "message": "Phone number is not registered in the Telegram bot.",
+      "error": "BadRequestException",
+      "location": "telegram_not_registered",
+      "telegram_bot_username": "YaqeenOtpBot",
+      "telegram_bot_url": "https://t.me/YaqeenOtpBot?start=reg_998901234567"
+    }
+    ```
 - **400 Bad Request (`location: "account_not_found"`)**
   - _Cause:_ No user exists with this phone number, **and** no matching record exists in the `employees` table. (Only pre-registered employees can create accounts).
 - **400 Bad Request (`location: "already_registered"`)**
@@ -360,6 +371,39 @@ _Example Payload:_
   - _Cause:_ A user with this phone number is `Banned`.
 - **400 Bad Request (`location: "account_deleted"`)**
   - _Cause:_ A user with this phone number is `Deleted`.
+
+---
+
+### 6.5.1. Check Telegram Registration Status
+
+Check if a phone number has been linked/registered in the Telegram OTP Bot, and retrieve direct deep link URLs for UI modals.
+
+- **Route:** `/auth/check-telegram-status`
+- **Method:** `GET`
+- **Access:** `Public`
+- **Query Parameters:**
+  - `phone_number` (string, required): Phone number to check (e.g., `+998901234567` or `998901234567`).
+
+#### Success Response (200 OK)
+
+```json
+{
+  "registered": true,
+  "phone_number": "998901234567",
+  "telegram_bot_username": "YaqeenOtpBot",
+  "telegram_bot_url": "https://t.me/YaqeenOtpBot?start=reg_998901234567"
+}
+```
+
+> [!TIP]
+> **Frontend Integration Pattern (Recommended Web UX Flow):**
+>
+> 1. When calling `POST /auth/register/send-otp` returns `400` with `location: "telegram_not_registered"`:
+> 2. Open a modal displaying:
+>    - A primary CTA button: **"Open Telegram Bot"** pointing to `response.telegram_bot_url`.
+>    - A **QR Code** generated from `telegram_bot_url` for desktop users to scan with their phone.
+> 3. Start auto-polling `GET /auth/check-telegram-status?phone_number=<phone>` every 2 seconds.
+> 4. As soon as `registered` becomes `true`, close the modal and automatically re-trigger `POST /auth/register/send-otp`!
 
 ---
 

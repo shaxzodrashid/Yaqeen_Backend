@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Body,
+  Query,
   HttpCode,
   HttpStatus,
   UseGuards,
@@ -28,6 +29,11 @@ export class AuthController {
   @UseGuards(JwtAuthGuard)
   async getMe(@CurrentUser() user: AuthenticatedUser) {
     return this.authService.getMe(user.id);
+  }
+
+  @Get('check-telegram-status')
+  async checkTelegramStatus(@Query('phone_number') phoneNumber: string) {
+    return this.authService.checkTelegramStatus(phoneNumber);
   }
 
   @Post('login')

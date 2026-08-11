@@ -13,6 +13,7 @@ import { Knex } from 'knex';
 export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(TelegramBotService.name);
   private botToken: string;
+  private botUsername = '';
   private isPolling = false;
   private offset = 0;
 
@@ -23,12 +24,42 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     this.botToken = this.configService.get<string>('telegramBotToken') || '';
   }
 
+  getBotUsername(): string {
+    return this.botUsername;
+  }
+
+  getBotUrl(phoneNumber?: string): string {
+    const username = this.botUsername || 'YaqeenOtpBot';
+    if (phoneNumber) {
+      const normalized = phoneNumber.replace(/\D/g, '');
+      return `https://t.me/${username}?start=reg_${normalized}`;
+    }
+    return `https://t.me/${username}`;
+  }
+
   async onModuleInit() {
     if (!this.botToken) {
       this.logger.warn(
         'TELEGRAM_BOT_TOKEN is not configured in the environment. Telegram bot polling will be skipped. OTP codes will be logged to console.',
       );
       return;
+    }
+
+    // Fetch bot username & details
+    try {
+      const meUrl = `https://api.telegram.org/bot${this.botToken}/getMe`;
+      const meRes = await fetch(meUrl);
+      if (meRes.ok) {
+        const meData = await meRes.json();
+        if (meData.ok && meData.result && meData.result.username) {
+          this.botUsername = meData.result.username;
+          this.logger.log(
+            `Telegram bot username initialized: @${this.botUsername}`,
+          );
+        }
+      }
+    } catch (err) {
+      this.logger.error(`Error fetching Telegram bot profile: ${err.message}`);
     }
 
     // Clear old updates on boot so we don't process stale messages
@@ -92,9 +123,21 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     const text = update.message.text;
     const contact = update.message.contact;
 
-    if (text === '/start') {
+    if (text && text.startsWith('/start')) {
+      let promptText =
+        'Assalomu alaykum! Welcome to the Yaqeen OTP service. Please share your phone number to receive OTP messages for registration or password changes.';
+
+      const parts = text.split(' ');
+      if (parts.length > 1) {
+        const param = parts[1];
+        const rawPhone = param.replace(/^reg_/, '').replace(/\D/g, '');
+        if (rawPhone) {
+          promptText = `Assalomu alaykum! We noticed you are registering from the Yaqeen Web App (+${rawPhone}). Please click the button "Register Phone Number 📱" below to confirm your phone number and complete registration.`;
+        }
+      }
+
       await this.sendMessage(chat.id, {
-        text: 'Assalomu alaykum! Welcome to the Yaqeen OTP service. Please share your phone number to receive OTP messages for registration or password changes.',
+        text: promptText,
         reply_markup: {
           keyboard: [
             [
