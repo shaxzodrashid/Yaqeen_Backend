@@ -220,6 +220,10 @@ Authorization: Bearer <JWT_TOKEN>
   "data": [
     {
       "id": "7a06df8a-384c-4c8d-9932-57db348a3451",
+      "cargo_type": "FTL",
+      "volume": null,
+      "weight": null,
+      "container_type": "40HQ",
       "container_truck_id": "TRK-6447",
       "agent_name": "SilkRoad Express",
       "client_full_name": "Jasur Aliyev",

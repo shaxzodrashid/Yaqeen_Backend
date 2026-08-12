@@ -693,6 +693,10 @@ export class CargoRegistrationsService {
     const rows = await baseQuery
       .select(
         'cr.id',
+        'cr.cargo_type',
+        'cr.volume',
+        'cr.weight',
+        'cr.container_type',
         'cr.container_truck_id',
         'cr.agent_name',
         'cr.cargo',
@@ -862,6 +866,10 @@ export class CargoRegistrationsService {
 
       return {
         id: r.id,
+        cargo_type: r.cargo_type,
+        volume: r.volume ? Number(r.volume) : null,
+        weight: r.weight ? Number(r.weight) : null,
+        container_type: r.container_type,
         container_truck_id: r.container_truck_id,
         agent_name: r.agent_name,
         client_full_name: clientName,

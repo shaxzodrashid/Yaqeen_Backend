@@ -8,7 +8,7 @@ import {
   IsUUID,
   Matches,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
 
 export const ALLOWED_CONTAINER_TYPES = [
   '40HQ',
@@ -364,6 +364,9 @@ export class QueryCargoRegistrationDto {
   client_id?: string;
 
   @IsOptional()
+  @Transform(({ value }) =>
+    typeof value === 'string' ? (value.toUpperCase() as any) : value,
+  )
   @IsString()
   @IsIn(['LTL', 'FTL'])
   cargo_type?: 'LTL' | 'FTL';

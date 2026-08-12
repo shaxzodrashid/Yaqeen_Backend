@@ -297,6 +297,10 @@ describe('CargoRegistrationsService', () => {
       const paginatedData = [
         {
           id: 'cargo-1',
+          cargo_type: 'LTL',
+          volume: 12.5,
+          weight: 1500.0,
+          container_type: null,
           container_truck_id: 'TRK-100',
           agent_name: 'FastCargo',
           cargo: 'Computers',
@@ -313,6 +317,10 @@ describe('CargoRegistrationsService', () => {
         },
         {
           id: 'cargo-2',
+          cargo_type: 'FTL',
+          volume: null,
+          weight: null,
+          container_type: '40HQ',
           container_truck_id: 'TRK-200',
           agent_name: 'SinoLogistics',
           cargo: 'Solar Panels',
@@ -349,9 +357,13 @@ describe('CargoRegistrationsService', () => {
       expect(result.meta.gross_sales_revenue.USD).toBe(2700);
       expect(result.meta.calculated_net_yield.USD).toBe(631.16);
       expect(result.data.length).toBe(2);
+      expect(result.data[0].cargo_type).toBe('LTL');
+      expect(result.data[0].volume).toBe(12.5);
       expect(result.data[0].agent_name).toBe('FastCargo');
       expect(result.data[0].purchase_price.amount).toBe(1000);
       expect(result.data[0].purchase_price.currency).toBe('USD');
+      expect(result.data[1].cargo_type).toBe('FTL');
+      expect(result.data[1].container_type).toBe('40HQ');
     });
 
     it('should apply timestamp filters (confirmed, loaded, arrived) and creation date filters', async () => {
@@ -435,6 +447,41 @@ describe('CargoRegistrationsService', () => {
         '<=',
         '2026-08-10T23:59:59.999Z',
       );
+    });
+
+    it('should apply cargo_type filter when provided in query', async () => {
+      const queryChain: any = {};
+      queryChain.leftJoin = jest.fn().mockReturnValue(queryChain);
+      queryChain.where = jest.fn().mockReturnValue(queryChain);
+
+      const countChain: any = {
+        count: jest.fn().mockReturnThis(),
+        first: jest.fn().mockResolvedValue({ total: '0' }),
+      };
+
+      const selectChain: any = {
+        select: jest.fn().mockResolvedValue([]),
+        orderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockResolvedValue([]),
+      };
+
+      let cloneCount = 0;
+      queryChain.clone = jest.fn().mockImplementation(() => {
+        cloneCount++;
+        if (cloneCount === 1) return countChain;
+        return selectChain;
+      });
+
+      queryChain.select = jest.fn().mockReturnValue(selectChain);
+
+      knexMock.mockReturnValue(queryChain);
+
+      await service.findAllCargoRegistrations({
+        cargo_type: 'LTL',
+      });
+
+      expect(queryChain.where).toHaveBeenCalledWith('cr.cargo_type', 'LTL');
     });
   });
 
