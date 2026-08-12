@@ -185,6 +185,11 @@ export class CurrencyService {
     return Math.round(amount * unitRate * 100) / 100;
   }
 
+  private readonly historicalRatesCache = new Map<
+    string,
+    Record<Currency, CurrencyRateDto>
+  >();
+
   /**
    * Get rates for a specific historical date (or latest if omitted).
    */
@@ -213,9 +218,14 @@ export class CurrencyService {
       return this.getLatestRates();
     }
 
+    if (this.historicalRatesCache.has(formattedDate)) {
+      return this.historicalRatesCache.get(formattedDate)!;
+    }
+
     // 1. Try fetching DB rates for historical date
     const dbRates = await this.getRatesFromDbForDate(formattedDate);
     if (dbRates && Object.keys(dbRates).length > 0) {
+      this.historicalRatesCache.set(formattedDate, dbRates);
       return dbRates;
     }
 
@@ -224,6 +234,7 @@ export class CurrencyService {
       const historicalRates = await this.fetchRatesFromCbu(formattedDate);
       if (historicalRates) {
         await this.cacheAndPersistRates(historicalRates);
+        this.historicalRatesCache.set(formattedDate, historicalRates);
         return historicalRates;
       }
     } catch (err) {
@@ -233,7 +244,9 @@ export class CurrencyService {
     }
 
     // 3. Fallback to latest rates
-    return this.getLatestRates();
+    const latest = await this.getLatestRates();
+    this.historicalRatesCache.set(formattedDate, latest);
+    return latest;
   }
 
   /**
@@ -285,17 +298,17 @@ export class CurrencyService {
     };
 
     for (const item of data) {
-      const ccy = item.Ccy?.toUpperCase();
+      const ccy = item.Ccy?.toUpperCase() as Currency;
       if (ccy === Currency.USD || ccy === Currency.RUB) {
-        ratesResult[ccy as Currency] = {
+        ratesResult[ccy] = {
           currency: ccy,
           code: item.Code,
           nominal: parseInt(item.Nominal, 10) || 1,
-          rate: parseFloat(item.Rate) || ratesResult[ccy as Currency].rate,
+          rate: parseFloat(item.Rate) || ratesResult[ccy].rate,
           diff: parseFloat(item.Diff) || 0,
           date: item.Date,
         };
-      } else if (ccy === 'CNY' || ccy === 'RMB') {
+      } else if (ccy === Currency.CNY || ccy === Currency.RMB) {
         const rateData = {
           code: item.Code || '156',
           nominal: parseInt(item.Nominal, 10) || 1,

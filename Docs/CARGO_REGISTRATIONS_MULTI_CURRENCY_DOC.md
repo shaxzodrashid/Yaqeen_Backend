@@ -169,16 +169,31 @@ Registers a new cargo transaction.
 
 #### `GET /api/v1/cargo-registrations`
 
-Retrieves a paginated list of cargo registrations with search, filter, and multi-currency aggregate totals.
+Retrieves a paginated list of cargo registrations with search, multi-timestamp filters, creation date filters, and multi-currency aggregate totals.
 
 **Query Parameters**:
-- `page` (optional, default: 1)
-- `limit` (optional, default: 10)
-- `status` (optional)
-- `cargo_type` (optional: `LTL` | `FTL`)
-- `client_id` (optional)
-- `employee_id` (optional)
-- `search` (optional)
+- `page` (optional, default: 1): Page number.
+- `limit` (optional, default: 10): Items per page.
+- `offset` (optional): Direct offset override.
+- `status` (optional): Filter by cargo status (`Waiting`, `In Transit`, `Border`, `At Station`, `Delivered`).
+- `cargo_type` (optional): Filter by cargo type (`LTL` | `FTL`).
+- `container_type` (optional): Filter by container type.
+- `client_id` (optional, UUID): Filter by client UUID.
+- `employee_id` (optional, UUID): Filter by assigned employee UUID.
+- `search` (optional): Case-insensitive search on `container_truck_id` or `cargo`.
+
+**Timestamp & Creation Date Filters**:
+- `confirmed_start_date` / `confirmed_end_date` (optional, `YYYY-MM-DD`): Date range filter on `confirmed_date`.
+- `loaded_start_date` / `loaded_end_date` (optional, `YYYY-MM-DD`): Date range filter on `loaded_date`.
+- `arrived_start_date` / `arrived_end_date` (optional, `YYYY-MM-DD`): Date range filter on `arrived_date`.
+- `created_start_date` / `created_at_start` (optional, `YYYY-MM-DD` or ISO timestamp): Start range filter on registration creation date (`created_at`).
+- `created_end_date` / `created_at_end` (optional, `YYYY-MM-DD` or ISO timestamp): End range filter on registration creation date (`created_at`).
+
+**Example Request**:
+```http
+GET /api/v1/cargo-registrations?status=In%20Transit&confirmed_start_date=2026-08-01&confirmed_end_date=2026-08-31&created_start_date=2026-08-01&limit=20 HTTP/1.1
+Authorization: Bearer <JWT_TOKEN>
+```
 
 **Example Response (200 OK)**:
 ```json
@@ -264,4 +279,25 @@ The system automatically fetches and caches daily exchange rates from the Centra
 - **Historical Archive Rates**: `https://cbu.uz/uz/arkhiv-kursov-valyut/json/all/YYYY-MM-DD/`
 
 Historical rates fetched from CBU are automatically cached in Redis and persisted in the local `currency_rates` table to maximize performance and ensure offline resilience.
+
+---
+
+## 6. Performance Architecture & Optimization Strategy
+
+To ensure `GET /api/v1/cargo-registrations` responds in milliseconds even with high concurrent load and large datasets, three core performance optimizations are implemented:
+
+### A. Concurrent Batch Currency Rate Resolution
+- **Problem**: Previously, calculating financial metrics for $N$ matching records executed $2N$ sequential database queries for exchange rates inside a JavaScript loop.
+- **Solution**: The service pre-extracts all unique date strings (`purchase_date`, `sell_date`, `confirmed_date`, `created_at`) from the dataset and resolves rates concurrently via `Promise.all`. This reduces $O(N)$ sequential network/DB operations to $O(1)$ batch lookups.
+
+### B. In-Memory Historical Rate Caching
+- **`CurrencyService` Optimization**: Historical currency exchange rates for past dates do not change. The `CurrencyService` maintains an in-memory `historicalRatesCache` map. After the first lookup of a historical date rate, subsequent calls are served instantly (0ms latency).
+
+### C. Database Indexing
+- Database migration `20260812120000_add_date_indexes_to_cargo_registrations.ts` adds B-tree indexes to the PostgreSQL `cargo_registrations` table:
+  - Index on `confirmed_date`
+  - Index on `loaded_date`
+  - Index on `arrived_date`
+  - Index on `created_at`
+- These indexes enable Index Range Scans for all date-filtered query requests, avoiding full table scans.
 $$

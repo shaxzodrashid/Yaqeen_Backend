@@ -340,6 +340,22 @@ export class QueryCargoRegistrationDto {
   arrived_end_date?: string;
 
   @IsOptional()
+  @IsString()
+  created_start_date?: string;
+
+  @IsOptional()
+  @IsString()
+  created_end_date?: string;
+
+  @IsOptional()
+  @IsString()
+  created_at_start?: string;
+
+  @IsOptional()
+  @IsString()
+  created_at_end?: string;
+
+  @IsOptional()
   @IsUUID('4')
   employee_id?: string;
 

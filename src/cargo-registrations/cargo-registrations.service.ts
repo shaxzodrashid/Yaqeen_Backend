@@ -638,6 +638,23 @@ export class CargoRegistrationsService {
       baseQuery.where('cr.arrived_date', '<=', query.arrived_end_date);
     }
 
+    // Registration creation date filters
+    const createdStart = query.created_start_date || query.created_at_start;
+    const createdEnd = query.created_end_date || query.created_at_end;
+
+    if (createdStart && createdStart.trim()) {
+      const s = createdStart.trim();
+      const startDate =
+        s.includes('T') || s.includes(' ') ? s : `${s}T00:00:00.000Z`;
+      baseQuery.where('cr.created_at', '>=', startDate);
+    }
+    if (createdEnd && createdEnd.trim()) {
+      const e = createdEnd.trim();
+      const endDate =
+        e.includes('T') || e.includes(' ') ? e : `${e}T23:59:59.999Z`;
+      baseQuery.where('cr.created_at', '<=', endDate);
+    }
+
     // Search filter across container_truck_id and cargo
     if (query.search && query.search.trim()) {
       const searchTerm = `%${query.search.trim()}%`;
@@ -672,6 +689,64 @@ export class CargoRegistrationsService {
         'cr.created_at',
       );
 
+    // Fetch paginated rows for data list
+    const rows = await baseQuery
+      .select(
+        'cr.id',
+        'cr.container_truck_id',
+        'cr.agent_name',
+        'cr.cargo',
+        'cr.usd_rmb_rate',
+        'cr.purchase_price',
+        'cr.purchase_currency',
+        'cr.purchase_date',
+        'cr.purchase_usd_rate',
+        'cr.purchase_custom_rate',
+        'cr.sell_price',
+        'cr.sell_currency',
+        'cr.sell_date',
+        'cr.sell_usd_rate',
+        'cr.sell_custom_rate',
+        'cr.confirmed_date',
+        'cr.created_at',
+        'cr.status',
+        'c.first_name as client_first_name',
+        'c.last_name as client_last_name',
+        'c.company_name as client_company',
+        'e.first_name as emp_first_name',
+        'e.last_name as emp_last_name',
+      )
+      .orderBy('cr.created_at', 'desc')
+      .limit(limit)
+      .offset(offset);
+
+    // Batch resolve currency rates for all unique dates in matching and paginated rows
+    const uniqueDates = new Set<string>();
+    for (const row of allMatchingRows) {
+      const purchaseDate = this.formatDateStr(
+        row.purchase_date || row.confirmed_date || row.created_at,
+      );
+      const sellDate = this.formatDateStr(row.sell_date || row.created_at);
+      uniqueDates.add(purchaseDate);
+      uniqueDates.add(sellDate);
+    }
+    for (const row of rows) {
+      const purchaseDate = this.formatDateStr(
+        row.purchase_date || row.confirmed_date || row.created_at,
+      );
+      const sellDate = this.formatDateStr(row.sell_date || row.created_at);
+      uniqueDates.add(purchaseDate);
+      uniqueDates.add(sellDate);
+    }
+
+    const ratesMap = new Map<string, Record<string, any>>();
+    await Promise.all(
+      Array.from(uniqueDates).map(async (d) => {
+        const rates = await this.currencyService.getRatesForDate(d);
+        ratesMap.set(d, rates);
+      }),
+    );
+
     const grossSalesRevenue: Record<string, number> = {
       UZS: 0,
       USD: 0,
@@ -699,9 +774,8 @@ export class CargoRegistrationsService {
       );
       const sellDate = this.formatDateStr(row.sell_date || row.created_at);
 
-      const purchaseRates =
-        await this.currencyService.getRatesForDate(purchaseDate);
-      const sellRates = await this.currencyService.getRatesForDate(sellDate);
+      const purchaseRates = ratesMap.get(purchaseDate) || {};
+      const sellRates = ratesMap.get(sellDate) || {};
 
       const purchaseRes = this.convertPriceToUsdAndUzs(
         purchasePrice,
@@ -738,121 +812,87 @@ export class CargoRegistrationsService {
       grossSalesRevenue[curr] = Math.round(grossSalesRevenue[curr] * 100) / 100;
     }
 
-    // Fetch paginated rows for data list
-    const rows = await baseQuery
-      .select(
-        'cr.id',
-        'cr.container_truck_id',
-        'cr.agent_name',
-        'cr.cargo',
-        'cr.usd_rmb_rate',
-        'cr.purchase_price',
-        'cr.purchase_currency',
-        'cr.purchase_date',
-        'cr.purchase_usd_rate',
-        'cr.purchase_custom_rate',
-        'cr.sell_price',
-        'cr.sell_currency',
-        'cr.sell_date',
-        'cr.sell_usd_rate',
-        'cr.sell_custom_rate',
-        'cr.confirmed_date',
-        'cr.created_at',
-        'cr.status',
-        'c.first_name as client_first_name',
-        'c.last_name as client_last_name',
-        'c.company_name as client_company',
-        'e.first_name as emp_first_name',
-        'e.last_name as emp_last_name',
-      )
-      .orderBy('cr.created_at', 'desc')
-      .limit(limit)
-      .offset(offset);
+    const formattedData = rows.map((r) => {
+      const clientName = r.client_first_name
+        ? `${r.client_first_name} ${r.client_last_name || ''}`.trim()
+        : r.client_company || 'N/A';
+      const employeeName = r.emp_first_name
+        ? `${r.emp_first_name} ${r.emp_last_name || ''}`.trim()
+        : 'N/A';
 
-    const formattedData = await Promise.all(
-      rows.map(async (r) => {
-        const clientName = r.client_first_name
-          ? `${r.client_first_name} ${r.client_last_name || ''}`.trim()
-          : r.client_company || 'N/A';
-        const employeeName = r.emp_first_name
-          ? `${r.emp_first_name} ${r.emp_last_name || ''}`.trim()
-          : 'N/A';
+      const purchaseAmount = Number(r.purchase_price);
+      const sellAmount = Number(r.sell_price);
 
-        const purchaseAmount = Number(r.purchase_price);
-        const sellAmount = Number(r.sell_price);
+      const purchaseDate = this.formatDateStr(
+        r.purchase_date || r.confirmed_date || r.created_at,
+      );
+      const sellDate = this.formatDateStr(r.sell_date || r.created_at);
 
-        const purchaseDate = this.formatDateStr(
-          r.purchase_date || r.confirmed_date || r.created_at,
-        );
-        const sellDate = this.formatDateStr(r.sell_date || r.created_at);
+      const purchaseRates = ratesMap.get(purchaseDate) || {};
+      const sellRates = ratesMap.get(sellDate) || {};
 
-        const purchaseRates =
-          await this.currencyService.getRatesForDate(purchaseDate);
-        const sellRates = await this.currencyService.getRatesForDate(sellDate);
+      const purchaseRes = this.convertPriceToUsdAndUzs(
+        purchaseAmount,
+        r.purchase_currency,
+        purchaseRates,
+        r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
+        r.purchase_custom_rate
+          ? Number(r.purchase_custom_rate)
+          : r.purchase_usd_rate
+            ? Number(r.purchase_usd_rate)
+            : null,
+      );
 
-        const purchaseRes = this.convertPriceToUsdAndUzs(
-          purchaseAmount,
-          r.purchase_currency,
-          purchaseRates,
-          r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
-          r.purchase_custom_rate
-            ? Number(r.purchase_custom_rate)
-            : r.purchase_usd_rate
-              ? Number(r.purchase_usd_rate)
-              : null,
-        );
+      const sellRes = this.convertPriceToUsdAndUzs(
+        sellAmount,
+        r.sell_currency,
+        sellRates,
+        r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
+        r.sell_custom_rate
+          ? Number(r.sell_custom_rate)
+          : r.sell_usd_rate
+            ? Number(r.sell_usd_rate)
+            : null,
+      );
 
-        const sellRes = this.convertPriceToUsdAndUzs(
-          sellAmount,
-          r.sell_currency,
-          sellRates,
-          r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
-          r.sell_custom_rate
-            ? Number(r.sell_custom_rate)
-            : r.sell_usd_rate
-              ? Number(r.sell_usd_rate)
-              : null,
-        );
+      const netYieldUsd =
+        Math.round((sellRes.amount_usd - purchaseRes.amount_usd) * 100) / 100;
+      const netYieldUzs =
+        Math.round((sellRes.amount_uzs - purchaseRes.amount_uzs) * 100) / 100;
 
-        const netYieldUsd =
-          Math.round((sellRes.amount_usd - purchaseRes.amount_usd) * 100) / 100;
-        const netYieldUzs =
-          Math.round((sellRes.amount_uzs - purchaseRes.amount_uzs) * 100) / 100;
-
-        return {
-          id: r.id,
-          container_truck_id: r.container_truck_id,
-          agent_name: r.agent_name,
-          client_full_name: clientName,
-          cargo: r.cargo,
-          usd_rmb_rate: r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
-          employee_full_name: employeeName,
-          purchase_price: {
-            amount: purchaseAmount,
-            currency: r.purchase_currency,
-            amount_usd: purchaseRes.amount_usd,
-            amount_uzs: purchaseRes.amount_uzs,
-            date: purchaseDate,
-          },
-          sell_price: {
-            amount: sellAmount,
-            currency: r.sell_currency,
-            amount_usd: sellRes.amount_usd,
-            amount_uzs: sellRes.amount_uzs,
-            date: sellDate,
-          },
-          net_yield: {
-            amount: netYieldUsd,
-            currency: 'USD',
-            amount_usd: netYieldUsd,
-            amount_uzs: netYieldUzs,
-            purchase_currency: r.purchase_currency,
-            sell_currency: r.sell_currency,
-          },
-          status: r.status,
-        };
-      }),
-    );
+      return {
+        id: r.id,
+        container_truck_id: r.container_truck_id,
+        agent_name: r.agent_name,
+        client_full_name: clientName,
+        cargo: r.cargo,
+        usd_rmb_rate: r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
+        employee_full_name: employeeName,
+        purchase_price: {
+          amount: purchaseAmount,
+          currency: r.purchase_currency,
+          amount_usd: purchaseRes.amount_usd,
+          amount_uzs: purchaseRes.amount_uzs,
+          date: purchaseDate,
+        },
+        sell_price: {
+          amount: sellAmount,
+          currency: r.sell_currency,
+          amount_usd: sellRes.amount_usd,
+          amount_uzs: sellRes.amount_uzs,
+          date: sellDate,
+        },
+        net_yield: {
+          amount: netYieldUsd,
+          currency: 'USD',
+          amount_usd: netYieldUsd,
+          amount_uzs: netYieldUzs,
+          purchase_currency: r.purchase_currency,
+          sell_currency: r.sell_currency,
+        },
+        status: r.status,
+      };
+    });
 
     return {
       meta: {

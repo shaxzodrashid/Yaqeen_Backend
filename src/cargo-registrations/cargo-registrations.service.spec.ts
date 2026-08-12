@@ -353,6 +353,89 @@ describe('CargoRegistrationsService', () => {
       expect(result.data[0].purchase_price.amount).toBe(1000);
       expect(result.data[0].purchase_price.currency).toBe('USD');
     });
+
+    it('should apply timestamp filters (confirmed, loaded, arrived) and creation date filters', async () => {
+      const queryChain: any = {};
+      queryChain.leftJoin = jest.fn().mockReturnValue(queryChain);
+      queryChain.where = jest.fn().mockReturnValue(queryChain);
+      queryChain.count = jest.fn().mockReturnValue(queryChain);
+      queryChain.first = jest.fn().mockResolvedValue({ total: '0' });
+
+      const countChain: any = {
+        count: jest.fn().mockReturnThis(),
+        first: jest.fn().mockResolvedValue({ total: '0' }),
+      };
+
+      const selectChain: any = {
+        select: jest.fn().mockResolvedValue([]),
+        orderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockResolvedValue([]),
+      };
+
+      let cloneCount = 0;
+      queryChain.clone = jest.fn().mockImplementation(() => {
+        cloneCount++;
+        if (cloneCount === 1) return countChain;
+        return selectChain;
+      });
+
+      queryChain.select = jest.fn().mockReturnValue(selectChain);
+
+      knexMock.mockReturnValue(queryChain);
+
+      await service.findAllCargoRegistrations({
+        confirmed_start_date: '2026-08-01',
+        confirmed_end_date: '2026-08-05',
+        loaded_start_date: '2026-08-02',
+        loaded_end_date: '2026-08-06',
+        arrived_start_date: '2026-08-03',
+        arrived_end_date: '2026-08-07',
+        created_start_date: '2026-08-01',
+        created_end_date: '2026-08-10',
+      });
+
+      expect(queryChain.where).toHaveBeenCalledWith(
+        'cr.confirmed_date',
+        '>=',
+        '2026-08-01',
+      );
+      expect(queryChain.where).toHaveBeenCalledWith(
+        'cr.confirmed_date',
+        '<=',
+        '2026-08-05',
+      );
+      expect(queryChain.where).toHaveBeenCalledWith(
+        'cr.loaded_date',
+        '>=',
+        '2026-08-02',
+      );
+      expect(queryChain.where).toHaveBeenCalledWith(
+        'cr.loaded_date',
+        '<=',
+        '2026-08-06',
+      );
+      expect(queryChain.where).toHaveBeenCalledWith(
+        'cr.arrived_date',
+        '>=',
+        '2026-08-03',
+      );
+      expect(queryChain.where).toHaveBeenCalledWith(
+        'cr.arrived_date',
+        '<=',
+        '2026-08-07',
+      );
+      expect(queryChain.where).toHaveBeenCalledWith(
+        'cr.created_at',
+        '>=',
+        '2026-08-01T00:00:00.000Z',
+      );
+      expect(queryChain.where).toHaveBeenCalledWith(
+        'cr.created_at',
+        '<=',
+        '2026-08-10T23:59:59.999Z',
+      );
+    });
   });
 
   describe('findCargoRegistrationDetails', () => {
