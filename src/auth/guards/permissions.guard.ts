@@ -15,7 +15,13 @@ import { Knex } from 'knex';
 
 export const DEFAULT_SYSTEM_PERMISSIONS: Record<string, any> = {
   ROP: {
-    clients: { create: true, read: true, update: true, delete: true },
+    clients: {
+      create: true,
+      read: true,
+      update: true,
+      delete: true,
+      can_work_with_all_clients: true,
+    },
     employees: { create: false, read: true, update: true, delete: false },
     departments: { create: false, read: true, update: false, delete: false },
     cargo_kpi: { create: true, read: true, update: true, delete: true },
@@ -34,7 +40,13 @@ export const DEFAULT_SYSTEM_PERMISSIONS: Record<string, any> = {
     roles: { create: false, read: true, update: false, delete: false },
   },
   EMPLOYEE: {
-    clients: { create: false, read: true, update: true, delete: false },
+    clients: {
+      create: false,
+      read: true,
+      update: true,
+      delete: false,
+      can_work_with_all_clients: false,
+    },
     employees: { create: false, read: true, update: false, delete: false },
     departments: { create: false, read: true, update: false, delete: false },
     cargo_kpi: { create: false, read: true, update: false, delete: false },

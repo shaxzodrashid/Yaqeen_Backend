@@ -1,5 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
-import { INestApplication, HttpStatus } from '@nestjs/common';
+import { INestApplication, ValidationPipe, HttpStatus } from '@nestjs/common';
 import request from 'supertest';
 import { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
@@ -7,6 +7,9 @@ import { KNEX_CONNECTION } from '../src/database/database.module';
 import { Knex } from 'knex';
 import * as jwt from 'jsonwebtoken';
 import { MinioService } from '../src/minio/minio.service';
+import { CustomExceptionFilter } from '../src/common/filters/custom-exception.filter';
+
+jest.setTimeout(60000);
 
 describe('Clients API (e2e)', () => {
   let app: INestApplication<App>;
@@ -15,13 +18,17 @@ describe('Clients API (e2e)', () => {
 
   const ceoUserId = '11111111-1111-1111-1111-111111111111';
   const empUserId = '33333333-3333-3333-3333-333333333333';
+  const customUserId = '44444444-4444-4444-4444-444444444444';
 
   let ceoToken: string;
   let empToken: string;
+  let customToken: string;
 
   let testEmployeeId: string;
+  let otherEmployeeId: string;
   let testClientId: string;
   let unassignedClientId: string;
+  let customRoleId: string;
 
   const mockMinioService = {
     onModuleInit: jest.fn().mockResolvedValue(undefined),
@@ -41,6 +48,14 @@ describe('Clients API (e2e)', () => {
 
     app = moduleFixture.createNestApplication();
     app.setGlobalPrefix('api/v1');
+    app.useGlobalFilters(new CustomExceptionFilter());
+    app.useGlobalPipes(
+      new ValidationPipe({
+        whitelist: true,
+        transform: true,
+        forbidNonWhitelisted: true,
+      }),
+    );
     app.enableShutdownHooks();
     await app.init();
 
@@ -56,8 +71,59 @@ describe('Clients API (e2e)', () => {
       { sub: empUserId, phone_number: '998991112255', role: 'EMPLOYEE' },
       jwtSecret,
     );
+    customToken = jwt.sign(
+      { sub: customUserId, phone_number: '998991112266', role: 'CUSTOM_LEAD' },
+      jwtSecret,
+    );
 
     await cleanDb();
+
+    // Create a dummy department and employee to test assignment
+    const [dept] = await knex('departments')
+      .insert({ name: 'Sales Dept', display_name: 'Sales Dept' })
+      .returning('*');
+
+    const [emp] = await knex('employees')
+      .insert({
+        first_name: 'Jasur',
+        last_name: 'Yoldoshev',
+        phone: '+998901112233',
+        department_id: dept.id,
+        color: '#FF0000',
+      })
+      .returning('*');
+    testEmployeeId = emp.id;
+
+    const [emp2] = await knex('employees')
+      .insert({
+        first_name: 'Bobur',
+        last_name: 'Karimov',
+        phone: '+998901112244',
+        department_id: dept.id,
+        color: '#00FF00',
+      })
+      .returning('*');
+    otherEmployeeId = emp2.id;
+
+    // Create custom role with can_work_with_all_clients: true
+    const [customRole] = await knex('roles')
+      .insert({
+        name: 'CUSTOM_LEAD',
+        display_name: 'Custom Team Lead',
+        description: 'Lead with full client view',
+        is_system: false,
+        permissions: JSON.stringify({
+          clients: {
+            create: true,
+            read: true,
+            update: true,
+            delete: true,
+            can_work_with_all_clients: true,
+          },
+        }),
+      })
+      .returning('*');
+    customRoleId = customRole.id;
 
     await knex('users').insert([
       {
@@ -75,45 +141,51 @@ describe('Clients API (e2e)', () => {
         username: 'emp_user_client_test',
         password_hash: 'hash',
         role: 'EMPLOYEE',
+        employee_id: testEmployeeId,
+        status: 'Open',
+        is_active: true,
+      },
+      {
+        id: customUserId,
+        phone_number: '998991112266',
+        username: 'custom_lead_test',
+        password_hash: 'hash',
+        role: 'CUSTOM_LEAD',
+        role_id: customRoleId,
+        employee_id: otherEmployeeId,
         status: 'Open',
         is_active: true,
       },
     ]);
-
-    // Create a dummy department and employee to test assignment
-    const [dept] = await knex('departments')
-      .insert({ name: 'Sales Dept', display_name: 'Sales Dept' })
-      .returning('*');
-
-    const [emp] = await knex('employees')
-      .insert({
-        first_name: 'Jasur',
-        last_name: 'Yoldoshev',
-        phone: '+998901112233',
-        department_id: dept.id,
-        color: '#FF0000',
-      })
-      .returning('*');
-    testEmployeeId = emp.id;
   });
 
   afterAll(async () => {
     await cleanDb();
-    await app.close();
+    if (app) {
+      await app.close();
+    }
   });
 
   async function cleanDb() {
+    if (!knex) return;
     await knex('attachments').delete();
+    await knex('cargo_registrations').delete();
+    await knex('commercial_offers').delete();
     await knex('cargo_transactions').delete();
-    await knex('clients').delete();
     await knex('employee_plans').delete();
     await knex('ltl_cargo_items').delete();
     await knex('ftl_fura_items').delete();
     await knex('rop_worker_sales').delete();
     await knex('rop_truck_items').delete();
+    await knex('clients').delete();
+    await knex('users')
+      .whereIn('id', [ceoUserId, empUserId, customUserId])
+      .delete();
     await knex('employees').delete();
     await knex('departments').delete();
-    await knex('users').whereIn('id', [ceoUserId, empUserId]).delete();
+    if (customRoleId) {
+      await knex('roles').where('id', customRoleId).delete();
+    }
   }
 
   describe('POST /api/v1/clients', () => {
@@ -137,9 +209,9 @@ describe('Clients API (e2e)', () => {
         .send({
           first_name: 'Test',
           last_name: 'Client',
-          phone: '+998901234567',
+          phone: '+998901234500',
           company_name: 'Test Co',
-          assigned_employee_id: '00000000-0000-0000-0000-000000000000',
+          assigned_employee_id: '00000000-0000-4000-8000-000000000000',
         })
         .expect(HttpStatus.NOT_FOUND);
 
@@ -153,7 +225,7 @@ describe('Clients API (e2e)', () => {
         .send({
           first_name: 'Mijoz1',
           last_name: 'Familiya1',
-          phone: '+998 (90) 123-45-67',
+          phone: '+998901234567',
           company_name: 'Orient Cargo LLC',
           address: 'Tashkent',
           assigned_employee_id: testEmployeeId,
@@ -175,7 +247,7 @@ describe('Clients API (e2e)', () => {
         .send({
           first_name: 'MijozUnassigned',
           last_name: 'FamiliyaUnassigned',
-          phone: '+998 (90) 999-88-77',
+          phone: '+998909998877',
           company_name: 'Unassigned Co LLC',
         })
         .expect(HttpStatus.CREATED);
@@ -194,7 +266,7 @@ describe('Clients API (e2e)', () => {
         .send({
           first_name: 'Mijoz2',
           last_name: 'Familiya2',
-          phone: '998901234567', // same digits, normalized check
+          phone: '+998901234567', // same digits, normalized check
           company_name: 'Another LLC',
         })
         .expect(HttpStatus.BAD_REQUEST);
@@ -203,11 +275,32 @@ describe('Clients API (e2e)', () => {
     });
   });
 
-  describe('GET /api/v1/clients', () => {
-    it('should list clients for authenticated EMPLOYEE', async () => {
+  describe('GET /api/v1/clients Permissions: can_work_with_all_clients', () => {
+    it('should list only assigned clients for EMPLOYEE (can_work_with_all_clients: false)', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/clients')
         .set('Authorization', `Bearer ${empToken}`)
+        .expect(HttpStatus.OK);
+
+      expect(res.body.data).toHaveLength(1);
+      expect(res.body.pagination.total).toBe(1);
+      expect(res.body.data[0].id).toBe(testClientId);
+    });
+
+    it('should list all clients for CEO (can_work_with_all_clients: true)', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/clients')
+        .set('Authorization', `Bearer ${ceoToken}`)
+        .expect(HttpStatus.OK);
+
+      expect(res.body.data).toHaveLength(2);
+      expect(res.body.pagination.total).toBe(2);
+    });
+
+    it('should list all clients for CUSTOM_LEAD with can_work_with_all_clients: true', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/clients')
+        .set('Authorization', `Bearer ${customToken}`)
         .expect(HttpStatus.OK);
 
       expect(res.body.data).toHaveLength(2);
@@ -260,10 +353,20 @@ describe('Clients API (e2e)', () => {
       );
       expect(res.body.by_employee).toHaveLength(2);
     });
+
+    it('should return client color distribution stats scoped to employee when can_work_with_all_clients is false', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/clients/stats/color-distribution')
+        .set('Authorization', `Bearer ${empToken}`)
+        .expect(HttpStatus.OK);
+
+      expect(res.body.total_clients).toBe(1);
+      expect(res.body.by_color).toEqual([{ color: '#FF0000', count: 1 }]);
+    });
   });
 
   describe('GET /api/v1/clients/:id', () => {
-    it('should return single client details by ID', async () => {
+    it('should return single client details by ID for assigned employee', async () => {
       const res = await request(app.getHttpServer())
         .get(`/api/v1/clients/${testClientId}`)
         .set('Authorization', `Bearer ${empToken}`)
@@ -273,10 +376,19 @@ describe('Clients API (e2e)', () => {
       expect(res.body.company_name).toBe('Orient Cargo LLC');
     });
 
+    it('should deny employee viewing client assigned to another or unassigned (403 Forbidden)', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/clients/${unassignedClientId}`)
+        .set('Authorization', `Bearer ${empToken}`)
+        .expect(HttpStatus.FORBIDDEN);
+
+      expect(res.body.location).toBe('permission_denied_for_other_employees');
+    });
+
     it('should return 404 for non-existing client ID', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/clients/00000000-0000-0000-0000-000000000000')
-        .set('Authorization', `Bearer ${empToken}`)
+        .set('Authorization', `Bearer ${ceoToken}`)
         .expect(HttpStatus.NOT_FOUND);
 
       expect(res.body.location).toBe('client_not_found');

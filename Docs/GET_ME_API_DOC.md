@@ -325,6 +325,7 @@ Controls access to client catalog, company records, contact numbers, and client 
 - **`read`**: View client directory and individual client profiles (`GET /clients`, `GET /clients/:id`).
 - **`update`**: Modify existing client information or client status (`PUT /clients/:id`).
 - **`delete`**: Remove or soft-archive client records (`DELETE /clients/:id`).
+- **`can_work_with_all_clients`**: When enabled, the account can view, search, and manage all clients across the company; when disabled, visibility and access are strictly scoped to clients assigned to the linked employee profile.
 
 #### 2. `employees` (Employee Management)
 

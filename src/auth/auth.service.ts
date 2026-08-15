@@ -130,7 +130,16 @@ export class AuthService {
    */
   public getUserPermissions(user: Partial<UserRow>) {
     const systemModules = [
-      { module: 'clients', actions: ['create', 'read', 'update', 'delete'] },
+      {
+        module: 'clients',
+        actions: [
+          'create',
+          'read',
+          'update',
+          'delete',
+          'can_work_with_all_clients',
+        ],
+      },
       { module: 'employees', actions: ['create', 'read', 'update', 'delete'] },
       {
         module: 'departments',
@@ -201,6 +210,12 @@ export class AuthService {
         permissions[mod].register_for_everyone = isCeoOrRop
           ? true
           : Boolean(rawMod.register_for_everyone);
+      }
+
+      if (item.actions.includes('can_work_with_all_clients')) {
+        permissions[mod].can_work_with_all_clients = isCeoOrRop
+          ? true
+          : Boolean(rawMod.can_work_with_all_clients);
       }
     }
 

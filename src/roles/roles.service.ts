@@ -17,6 +17,7 @@ export interface ModulePermissionAction {
   update: boolean;
   delete: boolean;
   register_for_everyone?: boolean;
+  can_work_with_all_clients?: boolean;
 }
 
 export type RolePermissions = Record<string, ModulePermissionAction>;
@@ -25,7 +26,13 @@ export const SYSTEM_MODULES = [
   {
     module: 'clients',
     label: 'Clients Management',
-    actions: ['create', 'read', 'update', 'delete'],
+    actions: [
+      'create',
+      'read',
+      'update',
+      'delete',
+      'can_work_with_all_clients',
+    ],
   },
   {
     module: 'employees',
@@ -95,7 +102,13 @@ export class RolesService implements OnModuleInit {
             'Full administrative access to all modules and system settings',
           is_system: true,
           permissions: {
-            clients: { create: true, read: true, update: true, delete: true },
+            clients: {
+              create: true,
+              read: true,
+              update: true,
+              delete: true,
+              can_work_with_all_clients: true,
+            },
             employees: { create: true, read: true, update: true, delete: true },
             departments: {
               create: true,
@@ -135,7 +148,13 @@ export class RolesService implements OnModuleInit {
           description: 'Department head level access for operations and sales',
           is_system: true,
           permissions: {
-            clients: { create: true, read: true, update: true, delete: true },
+            clients: {
+              create: true,
+              read: true,
+              update: true,
+              delete: true,
+              can_work_with_all_clients: true,
+            },
             employees: {
               create: false,
               read: true,
@@ -190,7 +209,13 @@ export class RolesService implements OnModuleInit {
           description: 'Standard operational user access',
           is_system: true,
           permissions: {
-            clients: { create: false, read: true, update: true, delete: false },
+            clients: {
+              create: false,
+              read: true,
+              update: true,
+              delete: false,
+              can_work_with_all_clients: false,
+            },
             employees: {
               create: false,
               read: true,
@@ -302,6 +327,12 @@ export class RolesService implements OnModuleInit {
       if (item.actions.includes('register_for_everyone')) {
         normalized[moduleKey].register_for_everyone = Boolean(
           rawModule.register_for_everyone,
+        );
+      }
+
+      if (item.actions.includes('can_work_with_all_clients')) {
+        normalized[moduleKey].can_work_with_all_clients = Boolean(
+          rawModule.can_work_with_all_clients,
         );
       }
     }

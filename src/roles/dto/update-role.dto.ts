@@ -29,6 +29,13 @@ export class UpdateRoleDto {
   @IsObject()
   permissions?: Record<
     string,
-    { create?: boolean; read?: boolean; update?: boolean; delete?: boolean }
+    {
+      create?: boolean;
+      read?: boolean;
+      update?: boolean;
+      delete?: boolean;
+      register_for_everyone?: boolean;
+      can_work_with_all_clients?: boolean;
+    }
   >;
 }

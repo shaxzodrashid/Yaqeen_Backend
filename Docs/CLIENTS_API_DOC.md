@@ -10,19 +10,22 @@ The backend employs a combination of the global `JwtAuthGuard` and `RolesGuard` 
 
 ### Role Hierarchies
 
-- **CEO / ROP (Administrators):** Have full write, update, delete, and read permissions on all client records, employee assignments, and color statistics.
-- **EMPLOYEE (Standard Staff):** Read permissions to search, view client profiles, and access assigned client lists.
+- **CEO / ROP (Administrators):** Have full write, update, delete, and read permissions on all client records, employee assignments, and color statistics (`can_work_with_all_clients: true`).
+- **EMPLOYEE (Standard Staff):** Read permissions to view and search clients assigned to their linked employee profile (`can_work_with_all_clients: false` by default).
 
 ### Security Exceptions Registry
 
-| Location Key                  | HTTP Code | Scenario                                                                                              |
-| :---------------------------- | :-------- | :---------------------------------------------------------------------------------------------------- |
-| `unauthorized`                | 401       | JWT token is missing, expired, or invalid.                                                            |
-| `role_missing`                | 403       | Authenticated user payload contains no role identifier.                                               |
-| `insufficient_role`           | 403       | Non-admin user attempting write/delete operations (e.g. standard employee trying to delete a client). |
-| `client_not_found`            | 404       | Target client record does not exist in the database.                                                  |
-| `assigned_employee_not_found` | 404       | Provided `assigned_employee_id` does not match any existing employee.                                 |
-| `client_phone_exists`         | 400       | A client with the given phone number already exists in the system.                                    |
+| Location Key                            | HTTP Code | Scenario                                                                                               |
+| :-------------------------------------- | :-------- | :----------------------------------------------------------------------------------------------------- |
+| `unauthorized`                          | 401       | JWT token is missing, expired, or invalid.                                                             |
+| `role_missing`                          | 403       | Authenticated user payload contains no role identifier.                                                |
+| `insufficient_role`                     | 403       | User attempting operations without required role permission.                                           |
+| `permission_denied_for_other_employees` | 403       | User without `can_work_with_all_clients` attempting to view/modify/delete other employee's client.     |
+| `reassignment_prohibited`               | 403       | User without `can_work_with_all_clients` attempting to reassign client to another employee.            |
+| `user_not_linked_to_employee`           | 400       | User without `can_work_with_all_clients` attempting client operations without linked employee profile. |
+| `client_not_found`                      | 404       | Target client record does not exist in the database.                                                   |
+| `assigned_employee_not_found`           | 404       | Provided `assigned_employee_id` does not match any existing employee.                                  |
+| `client_phone_exists`                   | 400       | A client with the given phone number already exists in the system.                                     |
 
 ---
 

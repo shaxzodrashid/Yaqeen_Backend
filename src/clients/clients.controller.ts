@@ -15,6 +15,7 @@ import {
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermission } from '../auth/decorators/permissions.decorator';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { ClientsService } from './clients.service';
 import { CreateClientDto } from './dto/create-client.dto';
 import { UpdateClientDto } from './dto/update-client.dto';
@@ -27,26 +28,29 @@ export class ClientsController {
 
   @Get('stats/color-distribution')
   @RequirePermission('clients', 'read')
-  async getColorStats() {
-    return this.clientsService.getClientColorStats();
+  async getColorStats(@CurrentUser() user: any) {
+    return this.clientsService.getClientColorStats(user);
   }
 
   @Get()
   @RequirePermission('clients', 'read')
-  async findAll(@Query() query: QueryClientDto) {
-    return this.clientsService.findAllClients(query);
+  async findAll(@Query() query: QueryClientDto, @CurrentUser() user: any) {
+    return this.clientsService.findAllClients(query, user);
   }
 
   @Get(':id')
   @RequirePermission('clients', 'read')
-  async findOne(@Param('id', ParseUUIDPipe) id: string) {
-    return this.clientsService.findClientById(id);
+  async findOne(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: any,
+  ) {
+    return this.clientsService.findClientById(id, user);
   }
 
   @Post()
   @RequirePermission('clients', 'create')
-  async create(@Body() dto: CreateClientDto) {
-    return this.clientsService.createClient(dto);
+  async create(@Body() dto: CreateClientDto, @CurrentUser() user: any) {
+    return this.clientsService.createClient(dto, user);
   }
 
   @Put(':id')
@@ -54,14 +58,18 @@ export class ClientsController {
   async update(
     @Param('id', ParseUUIDPipe) id: string,
     @Body() dto: UpdateClientDto,
+    @CurrentUser() user: any,
   ) {
-    return this.clientsService.updateClient(id, dto);
+    return this.clientsService.updateClient(id, dto, user);
   }
 
   @Delete(':id')
   @RequirePermission('clients', 'delete')
   @HttpCode(HttpStatus.NO_CONTENT)
-  async remove(@Param('id', ParseUUIDPipe) id: string) {
-    await this.clientsService.deleteClient(id);
+  async remove(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user: any,
+  ) {
+    await this.clientsService.deleteClient(id, user);
   }
 }
