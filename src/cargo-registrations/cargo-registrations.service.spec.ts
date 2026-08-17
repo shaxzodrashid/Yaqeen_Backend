@@ -16,6 +16,8 @@ describe('CargoRegistrationsService', () => {
 
   beforeEach(async () => {
     knexMock = jest.fn();
+    knexMock.raw = jest.fn((str) => str);
+    knexMock.fn = { now: jest.fn() };
     currencyServiceMock = {
       getRatesForDate: jest.fn().mockResolvedValue({
         USD: { currency: 'USD', rate: 11886.72, nominal: 1 },
@@ -259,41 +261,6 @@ describe('CargoRegistrationsService', () => {
 
   describe('GET list response & metadata aggregations', () => {
     it('should return aggregated meta and structured data list', async () => {
-      const queryChain: any = {};
-      queryChain.leftJoin = jest.fn().mockReturnValue(queryChain);
-      queryChain.where = jest.fn().mockReturnValue(queryChain);
-      queryChain.count = jest.fn().mockReturnValue(queryChain);
-      queryChain.first = jest.fn().mockResolvedValue({ total: '2' });
-
-      const countChain: any = {
-        count: jest.fn().mockReturnThis(),
-        first: jest.fn().mockResolvedValue({ total: '2' }),
-      };
-
-      const rowsChain: any = {
-        select: jest.fn().mockResolvedValue([
-          {
-            purchase_price: '1000.00',
-            purchase_currency: 'USD',
-            sell_price: '1500.00',
-            sell_currency: 'USD',
-          },
-          {
-            purchase_price: '7000.00',
-            purchase_currency: 'RMB',
-            sell_price: '1200.00',
-            sell_currency: 'USD',
-          },
-        ]),
-      };
-
-      let cloneCount = 0;
-      queryChain.clone = jest.fn().mockImplementation(() => {
-        cloneCount++;
-        if (cloneCount === 1) return countChain;
-        return rowsChain;
-      });
-
       const paginatedData = [
         {
           id: 'cargo-1',
@@ -351,12 +318,38 @@ describe('CargoRegistrationsService', () => {
         },
       ];
 
-      const selectChain: any = {};
-      selectChain.orderBy = jest.fn().mockReturnValue(selectChain);
-      selectChain.limit = jest.fn().mockReturnValue(selectChain);
-      selectChain.offset = jest.fn().mockResolvedValue(paginatedData);
+      const aggChain: any = {
+        select: jest.fn().mockReturnThis(),
+        first: jest.fn().mockResolvedValue({
+          total_count: '2',
+          gross_usd: 2700,
+          gross_uzs: 0,
+          gross_rub: 0,
+          gross_rmb: 0,
+          total_sell_usd: 2700,
+          total_sell_uzs: 32094144,
+          total_purchase_usd: 1968.19,
+          total_purchase_uzs: 23395252.88,
+        }),
+      };
 
-      queryChain.select = jest.fn().mockReturnValue(selectChain);
+      const paginatedChain: any = {
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockResolvedValue(paginatedData),
+      };
+
+      const queryChain: any = {};
+      queryChain.where = jest.fn().mockReturnValue(queryChain);
+
+      let cloneCount = 0;
+      queryChain.clone = jest.fn().mockImplementation(() => {
+        cloneCount++;
+        if (cloneCount === 1) return aggChain;
+        return paginatedChain;
+      });
 
       knexMock.mockReturnValue(queryChain);
 
@@ -368,8 +361,8 @@ describe('CargoRegistrationsService', () => {
       expect(result).toHaveProperty('meta');
       expect(result).toHaveProperty('data');
       expect(result.meta.total).toBe(2);
-      expect((result.meta.gross_sales_revenue as any).USD).toBe(2700);
-      expect((result.meta.calculated_net_yield as any).USD).toBe(631.16);
+      expect(result.meta.gross_sales_revenue.USD).toBe(2700);
+      expect(result.meta.calculated_net_yield.USD).toBe(731.81);
       expect(result.data.length).toBe(2);
       expect(result.data[0].cargo_type).toBe('LTL');
       expect(result.data[0].volume).toBe(12.5);
@@ -389,32 +382,28 @@ describe('CargoRegistrationsService', () => {
     });
 
     it('should apply timestamp filters (confirmed, loaded, arrived) and creation date filters', async () => {
-      const queryChain: any = {};
-      queryChain.leftJoin = jest.fn().mockReturnValue(queryChain);
-      queryChain.where = jest.fn().mockReturnValue(queryChain);
-      queryChain.count = jest.fn().mockReturnValue(queryChain);
-      queryChain.first = jest.fn().mockResolvedValue({ total: '0' });
-
-      const countChain: any = {
-        count: jest.fn().mockReturnThis(),
-        first: jest.fn().mockResolvedValue({ total: '0' }),
+      const aggChain: any = {
+        select: jest.fn().mockReturnThis(),
+        first: jest.fn().mockResolvedValue({ total_count: '0' }),
       };
 
-      const selectChain: any = {
-        select: jest.fn().mockResolvedValue([]),
+      const paginatedChain: any = {
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         limit: jest.fn().mockReturnThis(),
         offset: jest.fn().mockResolvedValue([]),
       };
 
+      const queryChain: any = {};
+      queryChain.where = jest.fn().mockReturnValue(queryChain);
+
       let cloneCount = 0;
       queryChain.clone = jest.fn().mockImplementation(() => {
         cloneCount++;
-        if (cloneCount === 1) return countChain;
-        return selectChain;
+        if (cloneCount === 1) return aggChain;
+        return paginatedChain;
       });
-
-      queryChain.select = jest.fn().mockReturnValue(selectChain);
 
       knexMock.mockReturnValue(queryChain);
 
@@ -472,30 +461,28 @@ describe('CargoRegistrationsService', () => {
     });
 
     it('should apply cargo_type filter when provided in query', async () => {
-      const queryChain: any = {};
-      queryChain.leftJoin = jest.fn().mockReturnValue(queryChain);
-      queryChain.where = jest.fn().mockReturnValue(queryChain);
-
-      const countChain: any = {
-        count: jest.fn().mockReturnThis(),
-        first: jest.fn().mockResolvedValue({ total: '0' }),
+      const aggChain: any = {
+        select: jest.fn().mockReturnThis(),
+        first: jest.fn().mockResolvedValue({ total_count: '0' }),
       };
 
-      const selectChain: any = {
-        select: jest.fn().mockResolvedValue([]),
+      const paginatedChain: any = {
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
         orderBy: jest.fn().mockReturnThis(),
         limit: jest.fn().mockReturnThis(),
         offset: jest.fn().mockResolvedValue([]),
       };
 
+      const queryChain: any = {};
+      queryChain.where = jest.fn().mockReturnValue(queryChain);
+
       let cloneCount = 0;
       queryChain.clone = jest.fn().mockImplementation(() => {
         cloneCount++;
-        if (cloneCount === 1) return countChain;
-        return selectChain;
+        if (cloneCount === 1) return aggChain;
+        return paginatedChain;
       });
-
-      queryChain.select = jest.fn().mockReturnValue(selectChain);
 
       knexMock.mockReturnValue(queryChain);
 
@@ -508,21 +495,26 @@ describe('CargoRegistrationsService', () => {
 
     it('should apply purchase_date and sell_date filters (range and exact)', async () => {
       const createMockQuery = () => {
-        const queryChain: any = {};
-        queryChain.leftJoin = jest.fn().mockReturnValue(queryChain);
-        queryChain.where = jest.fn().mockReturnValue(queryChain);
-        queryChain.clone = jest.fn().mockImplementation(() => ({
-          count: jest.fn().mockReturnThis(),
-          first: jest.fn().mockResolvedValue({ total: '0' }),
-          select: jest.fn().mockResolvedValue([]),
-        }));
-        const selectChain: any = {
+        const aggChain: any = {
+          select: jest.fn().mockReturnThis(),
+          first: jest.fn().mockResolvedValue({ total_count: '0' }),
+        };
+        const paginatedChain: any = {
+          leftJoin: jest.fn().mockReturnThis(),
+          select: jest.fn().mockReturnThis(),
           orderBy: jest.fn().mockReturnThis(),
           limit: jest.fn().mockReturnThis(),
           offset: jest.fn().mockResolvedValue([]),
         };
-        queryChain.select = jest.fn().mockReturnValue(selectChain);
-        return { queryChain, selectChain };
+        const queryChain: any = {};
+        queryChain.where = jest.fn().mockReturnValue(queryChain);
+        let cloneCount = 0;
+        queryChain.clone = jest.fn().mockImplementation(() => {
+          cloneCount++;
+          if (cloneCount === 1) return aggChain;
+          return paginatedChain;
+        });
+        return { queryChain, selectChain: paginatedChain };
       };
 
       // 1. Range test
@@ -564,21 +556,26 @@ describe('CargoRegistrationsService', () => {
 
     it('should apply dynamic sorting by purchase_date, sell_date, client name, employee name, and order ASC/DESC', async () => {
       const createMockQuery = () => {
-        const queryChain: any = {};
-        queryChain.leftJoin = jest.fn().mockReturnValue(queryChain);
-        queryChain.where = jest.fn().mockReturnValue(queryChain);
-        queryChain.clone = jest.fn().mockImplementation(() => ({
-          count: jest.fn().mockReturnThis(),
-          first: jest.fn().mockResolvedValue({ total: '0' }),
-          select: jest.fn().mockResolvedValue([]),
-        }));
-        const selectChain: any = {
+        const aggChain: any = {
+          select: jest.fn().mockReturnThis(),
+          first: jest.fn().mockResolvedValue({ total_count: '2' }),
+        };
+        const paginatedChain: any = {
+          leftJoin: jest.fn().mockReturnThis(),
+          select: jest.fn().mockReturnThis(),
           orderBy: jest.fn().mockReturnThis(),
           limit: jest.fn().mockReturnThis(),
           offset: jest.fn().mockResolvedValue([]),
         };
-        queryChain.select = jest.fn().mockReturnValue(selectChain);
-        return { queryChain, selectChain };
+        const queryChain: any = {};
+        queryChain.where = jest.fn().mockReturnValue(queryChain);
+        let cloneCount = 0;
+        queryChain.clone = jest.fn().mockImplementation(() => {
+          cloneCount++;
+          if (cloneCount === 1) return aggChain;
+          return paginatedChain;
+        });
+        return { queryChain, selectChain: paginatedChain };
       };
 
       // Test 1: sort by purchase_date ASC
@@ -875,6 +872,113 @@ describe('CargoRegistrationsService', () => {
       expect(stats.status_distribution['In Transit']).toBe(1);
       expect(stats.by_manager[0].employee_name).toBe('John Doe');
       expect(stats.by_manager[0].gross_sales_usd).toBe(3000);
+    });
+  });
+
+  describe('Performance & Redis Caching', () => {
+    it('should serve findAllCargoRegistrations from Redis cache if available', async () => {
+      const cachedResponse = {
+        meta: {
+          total: 1,
+          limit: 10,
+          offset: 0,
+          calculated_net_yield: {
+            USD: 100,
+            UZS: 1200000,
+            total_usd: 100,
+            total_uzs: 1200000,
+          },
+          gross_sales_revenue: {
+            UZS: 0,
+            USD: 500,
+            RUB: 0,
+            RMB: 0,
+            total_usd_equivalent: 500,
+            total_uzs_equivalent: 6000000,
+          },
+        },
+        data: [{ id: 'cargo-cached-1', status: 'Waiting' }],
+      };
+
+      const redisMock = {
+        get: jest.fn().mockResolvedValue(JSON.stringify(cachedResponse)),
+        set: jest.fn().mockResolvedValue('OK'),
+        delByPattern: jest.fn().mockResolvedValue(undefined),
+      };
+
+      const module: TestingModule = await Test.createTestingModule({
+        providers: [
+          CargoRegistrationsService,
+          { provide: KNEX_CONNECTION, useValue: knexMock },
+          { provide: CurrencyService, useValue: currencyServiceMock },
+          { provide: 'RedisService', useValue: redisMock },
+        ],
+      })
+        .useMocker((token) => {
+          if (
+            token === 'RedisService' ||
+            (token as any)?.name === 'RedisService'
+          ) {
+            return redisMock;
+          }
+        })
+        .compile();
+
+      const cachedService = module.get<CargoRegistrationsService>(
+        CargoRegistrationsService,
+      );
+      (cachedService as any).redisService = redisMock;
+
+      const result = await cachedService.findAllCargoRegistrations({
+        limit: '10',
+        page: '1',
+      });
+      expect(redisMock.get).toHaveBeenCalled();
+      expect(result).toEqual(cachedResponse);
+      expect(knexMock).not.toHaveBeenCalled();
+    });
+
+    it('should serve getCargoRegistrationStats from Redis cache if available', async () => {
+      const cachedStats = {
+        summary: { total_cargos: 5 },
+        ltl_statistics: { total_count: 2 },
+        ftl_statistics: { total_count: 3 },
+      };
+
+      const redisMock = {
+        get: jest.fn().mockResolvedValue(JSON.stringify(cachedStats)),
+        set: jest.fn().mockResolvedValue('OK'),
+        delByPattern: jest.fn().mockResolvedValue(undefined),
+      };
+
+      const serviceWithRedis = new CargoRegistrationsService(
+        knexMock,
+        currencyServiceMock,
+        redisMock as any,
+      );
+
+      const result = await serviceWithRedis.getCargoRegistrationStats({});
+      expect(redisMock.get).toHaveBeenCalled();
+      expect(result).toEqual(cachedStats);
+    });
+
+    it('should invalidate Redis cache pattern when invalidateCache is called', async () => {
+      const redisMock = {
+        get: jest.fn().mockResolvedValue(null),
+        set: jest.fn().mockResolvedValue('OK'),
+        delByPattern: jest.fn().mockResolvedValue(undefined),
+      };
+
+      const serviceWithRedis = new CargoRegistrationsService(
+        knexMock,
+        currencyServiceMock,
+        redisMock as any,
+      );
+
+      await serviceWithRedis.invalidateCache();
+      expect(redisMock.delByPattern).toHaveBeenCalledWith(
+        'cargo_registrations:*',
+      );
     });
   });
 });

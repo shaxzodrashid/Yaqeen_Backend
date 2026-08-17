@@ -3,9 +3,10 @@ import { CargoRegistrationsService } from './cargo-registrations.service';
 import { CargoRegistrationsController } from './cargo-registrations.controller';
 import { DatabaseModule } from '../database/database.module';
 import { CurrencyModule } from '../currency/currency.module';
+import { RedisModule } from '../redis/redis.module';
 
 @Module({
-  imports: [DatabaseModule, CurrencyModule],
+  imports: [DatabaseModule, CurrencyModule, RedisModule],
   controllers: [CargoRegistrationsController],
   providers: [CargoRegistrationsService],
   exports: [CargoRegistrationsService],

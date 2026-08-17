@@ -4,10 +4,13 @@ import {
   NotFoundException,
   ForbiddenException,
   Inject,
+  Optional,
+  Logger,
 } from '@nestjs/common';
 import { KNEX_CONNECTION } from '../database/database.module';
 import { Knex } from 'knex';
 import { CurrencyService } from '../currency/currency.service';
+import { RedisService } from '../redis/redis.service';
 import {
   CreateCargoRegistrationDto,
   UpdateCargoRegistrationDto,
@@ -17,10 +20,44 @@ import {
 
 @Injectable()
 export class CargoRegistrationsService {
+  private readonly logger = new Logger(CargoRegistrationsService.name);
+
   constructor(
     @Inject(KNEX_CONNECTION) private readonly knex: Knex,
     private readonly currencyService: CurrencyService,
+    @Optional() private readonly redisService?: RedisService,
   ) {}
+
+  /**
+   * Generates deterministic Redis cache key for cargo registration list queries.
+   */
+  private getListCacheKey(query: QueryCargoRegistrationDto): string {
+    const keys = Object.keys(query).sort();
+    const serialized = keys.map((k) => `${k}=${(query as any)[k]}`).join('&');
+    return `cargo_registrations:list:${serialized || 'all'}`;
+  }
+
+  /**
+   * Generates deterministic Redis cache key for cargo registration stats queries.
+   */
+  private getStatsCacheKey(query: QueryCargoRegistrationDto): string {
+    const keys = Object.keys(query).sort();
+    const serialized = keys.map((k) => `${k}=${(query as any)[k]}`).join('&');
+    return `cargo_registrations:stats:${serialized || 'all'}`;
+  }
+
+  /**
+   * Invalidate all cargo registration cached responses in Redis.
+   */
+  async invalidateCache(): Promise<void> {
+    if (this.redisService) {
+      try {
+        await this.redisService.delByPattern('cargo_registrations:*');
+      } catch (err) {
+        this.logger.warn(`Redis cache invalidation error: ${err.message}`);
+      }
+    }
+  }
 
   /**
    * Helper to check if a user has "register_for_everyone" permission.
@@ -382,6 +419,8 @@ export class CargoRegistrationsService {
       })
       .returning('id');
 
+    await this.invalidateCache();
+
     const insertedId = typeof inserted === 'object' ? inserted.id : inserted;
     return this.findCargoRegistrationDetails(insertedId);
   }
@@ -583,25 +622,18 @@ export class CargoRegistrationsService {
       .where('id', id)
       .update(updatePayload);
 
+    await this.invalidateCache();
+
     return this.findCargoRegistrationDetails(id);
   }
 
   /**
-   * Find all cargo registrations with filters and pagination.
+   * Apply all filter conditions to cargo registrations query builder.
    */
-  async findAllCargoRegistrations(query: QueryCargoRegistrationDto) {
-    const page = Math.max(1, Number(query.page) || 1);
-    const limit = Math.max(1, Number(query.limit) || 10);
-    const offset =
-      query.offset !== undefined
-        ? Math.max(0, Number(query.offset))
-        : (page - 1) * limit;
-
-    const baseQuery = this.knex('cargo_registrations as cr')
-      .leftJoin('clients as c', 'cr.client_id', 'c.id')
-      .leftJoin('employees as e', 'cr.employee_id', 'e.id');
-
-    // Apply Filters
+  private applyCargoRegistrationFilters(
+    baseQuery: Knex.QueryBuilder,
+    query: QueryCargoRegistrationDto,
+  ) {
     if (query.status) {
       baseQuery.where('cr.status', query.status);
     }
@@ -691,265 +723,278 @@ export class CargoRegistrationsService {
           .orWhere('cr.cargo', 'ILIKE', searchTerm);
       });
     }
+  }
 
-    // Clone query for totals count & aggregated financial calculation
-    const countQuery = baseQuery.clone();
-    const countResult = await countQuery.count('cr.id as total').first();
-    const total = parseInt((countResult?.total as string) || '0', 10);
-
-    // Fetch all matching rows for aggregate calculation (meta)
-    const allMatchingRows = await baseQuery
-      .clone()
-      .select(
-        'cr.purchase_price',
-        'cr.purchase_currency',
-        'cr.purchase_date',
-        'cr.purchase_usd_rate',
-        'cr.purchase_custom_rate',
-        'cr.sell_price',
-        'cr.sell_currency',
-        'cr.sell_date',
-        'cr.sell_usd_rate',
-        'cr.sell_custom_rate',
-        'cr.usd_rmb_rate',
-        'cr.confirmed_date',
-        'cr.created_at',
-      );
-
-    // Fetch paginated rows for data list
-    const paginatedQuery = baseQuery.select(
-      'cr.id',
-      'cr.cargo_type',
-      'cr.volume',
-      'cr.weight',
-      'cr.container_type',
-      'cr.container_truck_id',
-      'cr.agent_name',
-      'cr.cargo',
-      'cr.confirmed_date',
-      'cr.loaded_date',
-      'cr.arrived_date',
-      'cr.purchase_date',
-      'cr.purchase_price',
-      'cr.purchase_currency',
-      'cr.purchase_usd_rate',
-      'cr.purchase_custom_rate',
-      'cr.sell_date',
-      'cr.sell_price',
-      'cr.sell_currency',
-      'cr.sell_usd_rate',
-      'cr.sell_custom_rate',
-      'cr.usd_rmb_rate',
-      'cr.status',
-      'cr.created_at',
-      'cr.updated_at',
-      'c.first_name as client_first_name',
-      'c.last_name as client_last_name',
-      'c.company_name as client_company',
-      'e.first_name as emp_first_name',
-      'e.last_name as emp_last_name',
-    );
-
-    this.applySorting(
-      paginatedQuery,
-      query.sort_by,
-      query.sort_order || query.order,
-    );
-
-    const rows = await paginatedQuery.limit(limit).offset(offset);
-
-    // Batch resolve currency rates for all unique dates in matching and paginated rows
-    const uniqueDates = new Set<string>();
-    for (const row of allMatchingRows) {
-      const purchaseDate = this.formatDateStr(
-        row.purchase_date || row.confirmed_date || row.created_at,
-      );
-      const sellDate = this.formatDateStr(row.sell_date || row.created_at);
-      uniqueDates.add(purchaseDate);
-      uniqueDates.add(sellDate);
-    }
-    for (const row of rows) {
-      const purchaseDate = this.formatDateStr(
-        row.purchase_date || row.confirmed_date || row.created_at,
-      );
-      const sellDate = this.formatDateStr(row.sell_date || row.created_at);
-      uniqueDates.add(purchaseDate);
-      uniqueDates.add(sellDate);
+  /**
+   * Find all cargo registrations with filters, high-performance database-level aggregations, and pagination.
+   */
+  async findAllCargoRegistrations(query: QueryCargoRegistrationDto) {
+    const cacheKey = this.getListCacheKey(query);
+    if (this.redisService) {
+      try {
+        const cached = await this.redisService.get(cacheKey);
+        if (cached) {
+          return JSON.parse(cached);
+        }
+      } catch (err) {
+        this.logger.warn(`Redis cache get error: ${err.message}`);
+      }
     }
 
-    const ratesMap = new Map<string, Record<string, any>>();
-    await Promise.all(
-      Array.from(uniqueDates).map(async (d) => {
-        const rates = await this.currencyService.getRatesForDate(d);
-        ratesMap.set(d, rates);
-      }),
+    const page = Math.max(1, Number(query.page) || 1);
+    const limit = Math.max(1, Number(query.limit) || 10);
+    const offset =
+      query.offset !== undefined
+        ? Math.max(0, Number(query.offset))
+        : (page - 1) * limit;
+
+    const baseWhereQuery = this.knex('cargo_registrations as cr');
+    this.applyCargoRegistrationFilters(baseWhereQuery, query);
+
+    // 1. Direct SQL aggregation for totals and multi-currency financials (Single DB roundtrip)
+    const aggQuery = baseWhereQuery.clone().select([
+      this.knex.raw('COUNT(cr.id) as total_count'),
+      this.knex.raw(`
+        COALESCE(SUM(CASE WHEN cr.sell_currency = 'UZS' THEN cr.sell_price ELSE 0 END), 0) as gross_uzs,
+        COALESCE(SUM(CASE WHEN cr.sell_currency = 'USD' THEN cr.sell_price ELSE 0 END), 0) as gross_usd,
+        COALESCE(SUM(CASE WHEN cr.sell_currency = 'RUB' THEN cr.sell_price ELSE 0 END), 0) as gross_rub,
+        COALESCE(SUM(CASE WHEN cr.sell_currency IN ('RMB', 'CNY') THEN cr.sell_price ELSE 0 END), 0) as gross_rmb,
+        COALESCE(SUM(
+          CASE
+            WHEN cr.sell_currency = 'USD' THEN cr.sell_price
+            WHEN cr.sell_currency = 'UZS' THEN cr.sell_price / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+            WHEN cr.sell_currency IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.sell_price / cr.usd_rmb_rate
+            WHEN cr.sell_currency = 'RUB' THEN (cr.sell_price * 145.0) / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+            ELSE 0
+          END
+        ), 0) as total_sell_usd,
+        COALESCE(SUM(
+          CASE
+            WHEN cr.sell_currency = 'UZS' THEN cr.sell_price
+            WHEN cr.sell_currency = 'USD' THEN cr.sell_price * COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850)
+            WHEN cr.sell_currency IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.sell_price / cr.usd_rmb_rate) * COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850)
+            WHEN cr.sell_currency = 'RUB' THEN cr.sell_price * 145.0
+            ELSE 0
+          END
+        ), 0) as total_sell_uzs,
+        COALESCE(SUM(
+          CASE
+            WHEN cr.purchase_currency = 'USD' THEN cr.purchase_price
+            WHEN cr.purchase_currency = 'UZS' THEN cr.purchase_price / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
+            WHEN cr.purchase_currency IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.purchase_price / cr.usd_rmb_rate
+            WHEN cr.purchase_currency = 'RUB' THEN (cr.purchase_price * 145.0) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
+            ELSE 0
+          END
+        ), 0) as total_purchase_usd,
+        COALESCE(SUM(
+          CASE
+            WHEN cr.purchase_currency = 'UZS' THEN cr.purchase_price
+            WHEN cr.purchase_currency = 'USD' THEN cr.purchase_price * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850)
+            WHEN cr.purchase_currency IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.purchase_price / cr.usd_rmb_rate) * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850)
+            WHEN cr.purchase_currency = 'RUB' THEN cr.purchase_price * 145.0
+            ELSE 0
+          END
+        ), 0) as total_purchase_uzs
+      `),
+    ]);
+
+    const aggResult = await aggQuery.first();
+    const total = parseInt(
+      (aggResult?.total_count as string) || (aggResult?.total as string) || '0',
+      10,
     );
+
+    const totalGrossSalesRevenueUsd = Number(aggResult?.total_sell_usd || 0);
+    const totalGrossSalesRevenueUzs = Number(aggResult?.total_sell_uzs || 0);
+    const totalPurchaseUsd = Number(aggResult?.total_purchase_usd || 0);
+    const totalPurchaseUzs = Number(aggResult?.total_purchase_uzs || 0);
 
     const grossSalesRevenue: Record<string, number> = {
-      UZS: 0,
-      USD: 0,
-      RUB: 0,
-      RMB: 0,
+      UZS: Math.round(Number(aggResult?.gross_uzs || 0) * 100) / 100,
+      USD: Math.round(Number(aggResult?.gross_usd || 0) * 100) / 100,
+      RUB: Math.round(Number(aggResult?.gross_rub || 0) * 100) / 100,
+      RMB: Math.round(Number(aggResult?.gross_rmb || 0) * 100) / 100,
     };
 
-    let totalGrossSalesRevenueUsd = 0;
-    let totalGrossSalesRevenueUzs = 0;
-    let totalCalculatedNetYieldUsd = 0;
-    let totalCalculatedNetYieldUzs = 0;
+    const totalCalculatedNetYieldUsd =
+      totalGrossSalesRevenueUsd - totalPurchaseUsd;
+    const totalCalculatedNetYieldUzs =
+      totalGrossSalesRevenueUzs - totalPurchaseUzs;
 
-    for (const row of allMatchingRows) {
-      const sellPrice = Number(row.sell_price || 0);
-      const purchasePrice = Number(row.purchase_price || 0);
-      const sellCurr = row.sell_currency || 'UZS';
-      const purchaseCurr = row.purchase_currency || 'UZS';
+    let formattedData: any[] = [];
 
-      // Gross Sales Revenue aggregated by raw sell currency
-      grossSalesRevenue[sellCurr] =
-        (grossSalesRevenue[sellCurr] || 0) + sellPrice;
+    if (total > 0) {
+      const paginatedQuery = baseWhereQuery
+        .clone()
+        .leftJoin('clients as c', 'cr.client_id', 'c.id')
+        .leftJoin('employees as e', 'cr.employee_id', 'e.id')
+        .select(
+          'cr.id',
+          'cr.cargo_type',
+          'cr.volume',
+          'cr.weight',
+          'cr.container_type',
+          'cr.container_truck_id',
+          'cr.agent_name',
+          'cr.cargo',
+          'cr.confirmed_date',
+          'cr.loaded_date',
+          'cr.arrived_date',
+          'cr.purchase_date',
+          'cr.purchase_price',
+          'cr.purchase_currency',
+          'cr.purchase_usd_rate',
+          'cr.purchase_custom_rate',
+          'cr.sell_date',
+          'cr.sell_price',
+          'cr.sell_currency',
+          'cr.sell_usd_rate',
+          'cr.sell_custom_rate',
+          'cr.usd_rmb_rate',
+          'cr.status',
+          'cr.created_at',
+          'cr.updated_at',
+          'c.first_name as client_first_name',
+          'c.last_name as client_last_name',
+          'c.company_name as client_company',
+          'e.first_name as emp_first_name',
+          'e.last_name as emp_last_name',
+        );
 
-      const purchaseDate = this.formatDateStr(
-        row.purchase_date || row.confirmed_date || row.created_at,
+      this.applySorting(
+        paginatedQuery,
+        query.sort_by,
+        query.sort_order || query.order,
       );
-      const sellDate = this.formatDateStr(row.sell_date || row.created_at);
 
-      const purchaseRates = ratesMap.get(purchaseDate) || {};
-      const sellRates = ratesMap.get(sellDate) || {};
+      const rows = await paginatedQuery.limit(limit).offset(offset);
 
-      const purchaseRes = this.convertPriceToUsdAndUzs(
-        purchasePrice,
-        purchaseCurr,
-        purchaseRates,
-        row.usd_rmb_rate ? Number(row.usd_rmb_rate) : null,
-        row.purchase_custom_rate
-          ? Number(row.purchase_custom_rate)
-          : row.purchase_usd_rate
-            ? Number(row.purchase_usd_rate)
-            : null,
-      );
+      if (Array.isArray(rows) && rows.length > 0) {
+        // Collect unique dates only for the current paginated slice (max 10-20 dates instead of 100k)
+        const uniqueDates = new Set<string>();
+        for (const row of rows) {
+          const purchaseDate = this.formatDateStr(
+            row.purchase_date || row.confirmed_date || row.created_at,
+          );
+          const sellDate = this.formatDateStr(row.sell_date || row.created_at);
+          uniqueDates.add(purchaseDate);
+          uniqueDates.add(sellDate);
+        }
 
-      const sellRes = this.convertPriceToUsdAndUzs(
-        sellPrice,
-        sellCurr,
-        sellRates,
-        row.usd_rmb_rate ? Number(row.usd_rmb_rate) : null,
-        row.sell_custom_rate
-          ? Number(row.sell_custom_rate)
-          : row.sell_usd_rate
-            ? Number(row.sell_usd_rate)
-            : null,
-      );
+        const ratesMap = new Map<string, Record<string, any>>();
+        await Promise.all(
+          Array.from(uniqueDates).map(async (d) => {
+            const rates = await this.currencyService.getRatesForDate(d);
+            ratesMap.set(d, rates);
+          }),
+        );
 
-      totalGrossSalesRevenueUsd += sellRes.amount_usd;
-      totalGrossSalesRevenueUzs += sellRes.amount_uzs;
-      totalCalculatedNetYieldUsd += sellRes.amount_usd - purchaseRes.amount_usd;
-      totalCalculatedNetYieldUzs += sellRes.amount_uzs - purchaseRes.amount_uzs;
+        formattedData = rows.map((r) => {
+          const clientName = r.client_first_name
+            ? `${r.client_first_name} ${r.client_last_name || ''}`.trim()
+            : r.client_company || 'N/A';
+          const employeeName = r.emp_first_name
+            ? `${r.emp_first_name} ${r.emp_last_name || ''}`.trim()
+            : 'N/A';
+
+          const purchaseAmount = Number(r.purchase_price);
+          const sellAmount = Number(r.sell_price);
+
+          const purchaseDate = this.formatDateStr(
+            r.purchase_date || r.confirmed_date || r.created_at,
+          );
+          const sellDate = this.formatDateStr(r.sell_date || r.created_at);
+
+          const purchaseRates = ratesMap.get(purchaseDate) || {};
+          const sellRates = ratesMap.get(sellDate) || {};
+
+          const purchaseRes = this.convertPriceToUsdAndUzs(
+            purchaseAmount,
+            r.purchase_currency,
+            purchaseRates,
+            r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
+            r.purchase_custom_rate
+              ? Number(r.purchase_custom_rate)
+              : r.purchase_usd_rate
+                ? Number(r.purchase_usd_rate)
+                : null,
+          );
+
+          const sellRes = this.convertPriceToUsdAndUzs(
+            sellAmount,
+            r.sell_currency,
+            sellRates,
+            r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
+            r.sell_custom_rate
+              ? Number(r.sell_custom_rate)
+              : r.sell_usd_rate
+                ? Number(r.sell_usd_rate)
+                : null,
+          );
+
+          const netYieldUsd =
+            Math.round((sellRes.amount_usd - purchaseRes.amount_usd) * 100) /
+            100;
+          const netYieldUzs =
+            Math.round((sellRes.amount_uzs - purchaseRes.amount_uzs) * 100) /
+            100;
+
+          return {
+            id: r.id,
+            cargo_type: r.cargo_type,
+            volume: r.volume ? Number(r.volume) : null,
+            weight: r.weight ? Number(r.weight) : null,
+            container_type: r.container_type,
+            container_truck_id: r.container_truck_id,
+            agent_name: r.agent_name,
+            client_full_name: clientName,
+            cargo: r.cargo,
+            confirmed_date: r.confirmed_date
+              ? this.formatDateStr(r.confirmed_date)
+              : null,
+            loaded_date: r.loaded_date
+              ? this.formatDateStr(r.loaded_date)
+              : null,
+            arrived_date: r.arrived_date
+              ? this.formatDateStr(r.arrived_date)
+              : null,
+            purchase_date: r.purchase_date
+              ? this.formatDateStr(r.purchase_date)
+              : null,
+            sell_date: r.sell_date ? this.formatDateStr(r.sell_date) : null,
+            usd_rmb_rate: r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
+            employee_full_name: employeeName,
+            purchase_price: {
+              amount: purchaseAmount,
+              currency: r.purchase_currency,
+              amount_usd: purchaseRes.amount_usd,
+              amount_uzs: purchaseRes.amount_uzs,
+              date: purchaseDate,
+            },
+            sell_price: {
+              amount: sellAmount,
+              currency: r.sell_currency,
+              amount_usd: sellRes.amount_usd,
+              amount_uzs: sellRes.amount_uzs,
+              date: sellDate,
+            },
+            net_yield: {
+              amount: netYieldUsd,
+              currency: 'USD',
+              amount_usd: netYieldUsd,
+              amount_uzs: netYieldUzs,
+              purchase_currency: r.purchase_currency,
+              sell_currency: r.sell_currency,
+            },
+            status: r.status,
+            created_at: r.created_at || null,
+            updated_at: r.updated_at || null,
+          };
+        });
+      }
     }
 
-    // Round values in meta
-    for (const curr of Object.keys(grossSalesRevenue)) {
-      grossSalesRevenue[curr] = Math.round(grossSalesRevenue[curr] * 100) / 100;
-    }
-
-    const formattedData = rows.map((r) => {
-      const clientName = r.client_first_name
-        ? `${r.client_first_name} ${r.client_last_name || ''}`.trim()
-        : r.client_company || 'N/A';
-      const employeeName = r.emp_first_name
-        ? `${r.emp_first_name} ${r.emp_last_name || ''}`.trim()
-        : 'N/A';
-
-      const purchaseAmount = Number(r.purchase_price);
-      const sellAmount = Number(r.sell_price);
-
-      const purchaseDate = this.formatDateStr(
-        r.purchase_date || r.confirmed_date || r.created_at,
-      );
-      const sellDate = this.formatDateStr(r.sell_date || r.created_at);
-
-      const purchaseRates = ratesMap.get(purchaseDate) || {};
-      const sellRates = ratesMap.get(sellDate) || {};
-
-      const purchaseRes = this.convertPriceToUsdAndUzs(
-        purchaseAmount,
-        r.purchase_currency,
-        purchaseRates,
-        r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
-        r.purchase_custom_rate
-          ? Number(r.purchase_custom_rate)
-          : r.purchase_usd_rate
-            ? Number(r.purchase_usd_rate)
-            : null,
-      );
-
-      const sellRes = this.convertPriceToUsdAndUzs(
-        sellAmount,
-        r.sell_currency,
-        sellRates,
-        r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
-        r.sell_custom_rate
-          ? Number(r.sell_custom_rate)
-          : r.sell_usd_rate
-            ? Number(r.sell_usd_rate)
-            : null,
-      );
-
-      const netYieldUsd =
-        Math.round((sellRes.amount_usd - purchaseRes.amount_usd) * 100) / 100;
-      const netYieldUzs =
-        Math.round((sellRes.amount_uzs - purchaseRes.amount_uzs) * 100) / 100;
-
-      return {
-        id: r.id,
-        cargo_type: r.cargo_type,
-        volume: r.volume ? Number(r.volume) : null,
-        weight: r.weight ? Number(r.weight) : null,
-        container_type: r.container_type,
-        container_truck_id: r.container_truck_id,
-        agent_name: r.agent_name,
-        client_full_name: clientName,
-        cargo: r.cargo,
-        confirmed_date: r.confirmed_date
-          ? this.formatDateStr(r.confirmed_date)
-          : null,
-        loaded_date: r.loaded_date ? this.formatDateStr(r.loaded_date) : null,
-        arrived_date: r.arrived_date
-          ? this.formatDateStr(r.arrived_date)
-          : null,
-        purchase_date: r.purchase_date
-          ? this.formatDateStr(r.purchase_date)
-          : null,
-        sell_date: r.sell_date ? this.formatDateStr(r.sell_date) : null,
-        usd_rmb_rate: r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
-        employee_full_name: employeeName,
-        purchase_price: {
-          amount: purchaseAmount,
-          currency: r.purchase_currency,
-          amount_usd: purchaseRes.amount_usd,
-          amount_uzs: purchaseRes.amount_uzs,
-          date: purchaseDate,
-        },
-        sell_price: {
-          amount: sellAmount,
-          currency: r.sell_currency,
-          amount_usd: sellRes.amount_usd,
-          amount_uzs: sellRes.amount_uzs,
-          date: sellDate,
-        },
-        net_yield: {
-          amount: netYieldUsd,
-          currency: 'USD',
-          amount_usd: netYieldUsd,
-          amount_uzs: netYieldUzs,
-          purchase_currency: r.purchase_currency,
-          sell_currency: r.sell_currency,
-        },
-        status: r.status,
-        created_at: r.created_at || null,
-        updated_at: r.updated_at || null,
-      };
-    });
-
-    return {
+    const response = {
       meta: {
         total,
         limit,
@@ -970,12 +1015,34 @@ export class CargoRegistrationsService {
       },
       data: formattedData,
     };
+
+    if (this.redisService) {
+      try {
+        await this.redisService.set(cacheKey, JSON.stringify(response), 60);
+      } catch (err) {
+        this.logger.warn(`Redis cache set error: ${err.message}`);
+      }
+    }
+
+    return response;
   }
 
   /**
    * Aggregate statistics for cargo registrations (LTL vs FTL, financials, status distribution, manager stats).
    */
   async getCargoRegistrationStats(query: QueryCargoRegistrationDto) {
+    const cacheKey = this.getStatsCacheKey(query);
+    if (this.redisService) {
+      try {
+        const cached = await this.redisService.get(cacheKey);
+        if (cached) {
+          return JSON.parse(cached);
+        }
+      } catch (err) {
+        this.logger.warn(`Redis cache get error: ${err.message}`);
+      }
+    }
+
     const listResult = await this.findAllCargoRegistrations({
       ...query,
       limit: '100000',
@@ -1066,7 +1133,7 @@ export class CargoRegistrationsService {
       net_yield_usd: Math.round(m.net_yield_usd * 100) / 100,
     }));
 
-    return {
+    const result = {
       summary: {
         total_cargos: meta.total,
         gross_sales_revenue: meta.gross_sales_revenue,
@@ -1092,6 +1159,16 @@ export class CargoRegistrationsService {
       status_distribution: statusDistribution,
       by_manager: managerStats,
     };
+
+    if (this.redisService) {
+      try {
+        await this.redisService.set(cacheKey, JSON.stringify(result), 60);
+      } catch (err) {
+        this.logger.warn(`Redis cache set error: ${err.message}`);
+      }
+    }
+
+    return result;
   }
 
   /**
@@ -1248,6 +1325,8 @@ export class CargoRegistrationsService {
     }
 
     await this.knex('cargo_registrations').where('id', id).del();
+
+    await this.invalidateCache();
 
     return {
       message: 'Cargo registration successfully deleted',

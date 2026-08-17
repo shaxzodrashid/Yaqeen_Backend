@@ -66,9 +66,35 @@ export class RedisService implements OnModuleDestroy {
   }
 
   /**
+   * Delete keys matching a glob pattern using non-blocking SCAN.
+   */
+  async delByPattern(pattern: string): Promise<void> {
+    try {
+      let cursor = '0';
+      do {
+        const [nextCursor, keys] = await this.client.scan(
+          cursor,
+          'MATCH',
+          pattern,
+          'COUNT',
+          100,
+        );
+        cursor = nextCursor;
+        if (keys && keys.length > 0) {
+          await this.client.del(...keys);
+        }
+      } while (cursor !== '0');
+    } catch (err) {
+      this.logger.warn(
+        `Failed to delete keys by pattern ${pattern}: ${err.message}`,
+      );
+    }
+  }
+
+  /**
    * Cleanup on application shutdown.
    */
-  async onModuleDestroy() {
+  onModuleDestroy(): void {
     this.logger.log('Closing Redis connection...');
     this.client.disconnect();
   }
