@@ -418,12 +418,37 @@ describe('Cargo & KPI API (e2e)', () => {
       expect(res.body.total_plans).toBeGreaterThan(0);
     });
 
+    it('GET /api/v1/cargo-kpi/plans/stats - returns aggregated plans statistics', async () => {
+      const res = await request(app.getHttpServer())
+        .get('/api/v1/cargo-kpi/plans/stats')
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(res.body).toHaveProperty('summary');
+      expect(res.body).toHaveProperty('ltl_statistics');
+      expect(res.body).toHaveProperty('ftl_statistics');
+      expect(res.body).toHaveProperty('leaderboard');
+    });
+
+    it('GET /api/v1/cargo-kpi/plans/employee/:id/stats - returns employee personal stats', async () => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/v1/cargo-kpi/plans/employee/${testEmpId}/stats`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(200);
+
+      expect(res.body).toHaveProperty('employee');
+      expect(res.body.employee.id).toBe(testEmpId);
+      expect(res.body).toHaveProperty('totals');
+      expect(res.body).toHaveProperty('history');
+    });
+
     it('PUT /api/v1/cargo-kpi/plans/:id - updates employee plan', async () => {
       const res = await request(app.getHttpServer())
         .put(`/api/v1/cargo-kpi/plans/${createdPlanId}`)
         .set('Authorization', `Bearer ${authToken}`)
         .send({
-          target_amount: 12000,
+          ltl_target_volume: 50,
+          ftl_target_amount: 12000,
         })
         .expect(200);
 
@@ -431,6 +456,7 @@ describe('Cargo & KPI API (e2e)', () => {
         (p: any) => p.id === createdPlanId,
       );
       expect(plan.target_amount).toBe(12000);
+      expect(plan.ltl_plan.target_volume).toBe(50);
     });
 
     it('DELETE /api/v1/cargo-kpi/plans/:id - deletes employee plan', async () => {

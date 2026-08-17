@@ -595,7 +595,7 @@ describe('CargoKpiService', () => {
   });
 
   describe('Employee Plans Tests', () => {
-    it('formats YYYY-MM period to YYYY-MM-01 when creating employee plan', async () => {
+    it('formats YYYY-MM period to YYYY-MM-01 when creating employee plan and defaults currency to USD', async () => {
       mockQueryBuilder.first.mockResolvedValue({ id: 'emp-uuid-1' });
       mockQueryBuilder.then.mockImplementation((resolve: any) =>
         resolve([
@@ -604,36 +604,8 @@ describe('CargoKpiService', () => {
             employee_id: 'emp-uuid-1',
             first_name: 'John',
             last_name: 'Doe',
-            target_amount: 50000,
-            currency: 'UZS',
-            period: '2026-07-01',
-          },
-        ]),
-      );
-
-      await service.createEmployeePlan({
-        employee_id: 'emp-uuid-1',
-        target_amount: 50000,
-        period: '2026-07',
-      });
-
-      expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
-        expect.objectContaining({
-          period: '2026-07-01',
-          currency: 'UZS',
-        }),
-      );
-    });
-
-    it('creates employee plan with custom currency USD', async () => {
-      mockQueryBuilder.first.mockResolvedValue({ id: 'emp-uuid-1' });
-      mockQueryBuilder.then.mockImplementation((resolve: any) =>
-        resolve([
-          {
-            id: 'plan-1',
-            employee_id: 'emp-uuid-1',
-            first_name: 'John',
-            last_name: 'Doe',
+            ltl_target_volume: 50,
+            ftl_target_amount: 10000,
             target_amount: 10000,
             currency: 'USD',
             period: '2026-07-01',
@@ -643,20 +615,57 @@ describe('CargoKpiService', () => {
 
       await service.createEmployeePlan({
         employee_id: 'emp-uuid-1',
-        target_amount: 10000,
-        currency: 'USD' as any,
+        ltl_target_volume: 50,
+        ftl_target_amount: 10000,
         period: '2026-07',
       });
 
       expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
         expect.objectContaining({
+          period: '2026-07-01',
           currency: 'USD',
-          target_amount: 10000,
+          ltl_target_volume: 50,
+          ftl_target_amount: 10000,
         }),
       );
     });
 
-    it('calculates employee plan progress and completeness percentage when transactions are added', async () => {
+    it('creates employee plan with custom currency UZS', async () => {
+      mockQueryBuilder.first.mockResolvedValue({ id: 'emp-uuid-1' });
+      mockQueryBuilder.then.mockImplementation((resolve: any) =>
+        resolve([
+          {
+            id: 'plan-1',
+            employee_id: 'emp-uuid-1',
+            first_name: 'John',
+            last_name: 'Doe',
+            ltl_target_volume: 20,
+            ftl_target_amount: 100000000,
+            target_amount: 100000000,
+            currency: 'UZS',
+            period: '2026-07-01',
+          },
+        ]),
+      );
+
+      await service.createEmployeePlan({
+        employee_id: 'emp-uuid-1',
+        ltl_target_volume: 20,
+        ftl_target_amount: 100000000,
+        currency: 'UZS' as any,
+        period: '2026-07-01',
+      });
+
+      expect(mockQueryBuilder.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          currency: 'UZS',
+          ltl_target_volume: 20,
+          ftl_target_amount: 100000000,
+        }),
+      );
+    });
+
+    it('calculates employee plan progress from cargo_registrations for both LTL volume and FTL financial amount', async () => {
       mockKnex.mockImplementation((table: string) => {
         const qb = { ...mockQueryBuilder };
         if (table === 'employee_plans') {
@@ -667,17 +676,40 @@ describe('CargoKpiService', () => {
                 employee_id: 'emp-uuid-1',
                 first_name: 'John',
                 last_name: 'Doe',
-                target_amount: 1000,
+                ltl_target_volume: 100,
+                ftl_target_amount: 1000,
                 currency: 'USD',
                 period: '2026-07-01',
               },
             ]),
           );
-        } else if (table === 'cargo_transactions') {
+        } else if (table === 'cargo_registrations') {
           qb.then = jest.fn((resolve: any) =>
             resolve([
-              { sell_price: 500, currency: 'USD' },
-              { sell_price: 250, currency: 'USD' },
+              {
+                cargo_type: 'LTL',
+                volume: 40,
+                sell_price: 300,
+                sell_currency: 'USD',
+              },
+              {
+                cargo_type: 'LTL',
+                volume: 35,
+                sell_price: 250,
+                sell_currency: 'USD',
+              },
+              {
+                cargo_type: 'FTL',
+                volume: null,
+                sell_price: 500,
+                sell_currency: 'USD',
+              },
+              {
+                cargo_type: 'FTL',
+                volume: null,
+                sell_price: 250,
+                sell_currency: 'USD',
+              },
             ]),
           );
         } else {
@@ -689,12 +721,145 @@ describe('CargoKpiService', () => {
       const res = await service.getEmployeePlansProgress();
       expect(res.total_plans).toBe(1);
       const plan = res.leaderboard[0];
-      expect(plan.target_amount).toBe(1000);
-      expect(plan.currency).toBe('USD');
-      expect(plan.actual_sales).toBe(750);
-      expect(plan.remaining_amount).toBe(250);
-      expect(plan.completion_percentage).toBe(75);
+
+      // LTL plan assertions
+      expect(plan.ltl_plan.target_volume).toBe(100);
+      expect(plan.ltl_plan.actual_volume).toBe(75);
+      expect(plan.ltl_plan.remaining_volume).toBe(25);
+      expect(plan.ltl_plan.completion_percentage).toBe(75);
+      expect(plan.ltl_plan.is_completed).toBe(false);
+      expect(plan.ltl_plan.cargo_count).toBe(2);
+
+      // FTL plan assertions
+      expect(plan.ftl_plan.target_amount).toBe(1000);
+      expect(plan.ftl_plan.currency).toBe('USD');
+      expect(plan.ftl_plan.actual_amount).toBe(750);
+      expect(plan.ftl_plan.remaining_amount).toBe(250);
+      expect(plan.ftl_plan.completion_percentage).toBe(75);
+      expect(plan.ftl_plan.is_completed).toBe(false);
+      expect(plan.ftl_plan.cargo_count).toBe(2);
+
+      // Overall assertions
+      expect(plan.total_cargos_count).toBe(4);
+      expect(plan.overall_completion_percentage).toBe(75);
       expect(plan.is_completed).toBe(false);
+      expect(plan.actual_sales).toBe(750);
+      expect(plan.target_volume).toBe(100);
+      expect(plan.actual_volume).toBe(75);
+    });
+
+    it('marks plan as completed when both LTL volume and FTL amount exceed targets', async () => {
+      mockKnex.mockImplementation((table: string) => {
+        const qb = { ...mockQueryBuilder };
+        if (table === 'employee_plans') {
+          qb.then = jest.fn((resolve: any) =>
+            resolve([
+              {
+                id: 'plan-1',
+                employee_id: 'emp-uuid-1',
+                first_name: 'John',
+                last_name: 'Doe',
+                ltl_target_volume: 50,
+                ftl_target_amount: 500,
+                currency: 'USD',
+                period: '2026-07-01',
+              },
+            ]),
+          );
+        } else if (table === 'cargo_registrations') {
+          qb.then = jest.fn((resolve: any) =>
+            resolve([
+              {
+                cargo_type: 'LTL',
+                volume: 60,
+                sell_price: 600,
+                sell_currency: 'USD',
+              },
+              {
+                cargo_type: 'FTL',
+                volume: null,
+                sell_price: 800,
+                sell_currency: 'USD',
+              },
+            ]),
+          );
+        } else {
+          qb.then = jest.fn((resolve: any) => resolve([]));
+        }
+        return qb;
+      });
+
+      const res = await service.getEmployeePlansProgress();
+      const plan = res.leaderboard[0];
+      expect(plan.ltl_plan.is_completed).toBe(true);
+      expect(plan.ftl_plan.is_completed).toBe(true);
+      expect(plan.is_completed).toBe(true);
+      expect(plan.overall_completion_percentage).toBe(140); // (120% + 160%) / 2 = 140%
+    });
+
+    it('updates employee plan targets and period', async () => {
+      mockQueryBuilder.first.mockResolvedValue({
+        id: 'plan-1',
+        employee_id: 'emp-1',
+      });
+      mockQueryBuilder.then.mockImplementation((resolve: any) =>
+        resolve([
+          {
+            id: 'plan-1',
+            employee_id: 'emp-1',
+            first_name: 'Jane',
+            last_name: 'Smith',
+            ltl_target_volume: 80,
+            ftl_target_amount: 15000,
+            currency: 'USD',
+            period: '2026-08-01',
+          },
+        ]),
+      );
+
+      await service.updateEmployeePlan('plan-1', {
+        ltl_target_volume: 80,
+        ftl_target_amount: 15000,
+        period: '2026-08',
+      });
+
+      expect(mockQueryBuilder.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          ltl_target_volume: 80,
+          ftl_target_amount: 15000,
+          period: '2026-08-01',
+        }),
+      );
+    });
+
+    it('deletes employee plan', async () => {
+      mockQueryBuilder.delete.mockResolvedValue(1);
+      mockQueryBuilder.then.mockImplementation((resolve: any) => resolve([]));
+
+      const res = await service.deleteEmployeePlan('plan-1');
+      expect(res.total_plans).toBe(0);
+      expect(res.leaderboard).toEqual([]);
+    });
+
+    it('throws NotFoundException when creating plan for non-existent employee', async () => {
+      mockQueryBuilder.first.mockResolvedValue(null);
+
+      await expect(
+        service.createEmployeePlan({
+          employee_id: 'non-existent',
+          period: '2026-07-01',
+        }),
+      ).rejects.toThrow();
+    });
+
+    it('throws NotFoundException when updating non-existent plan', async () => {
+      mockQueryBuilder.first.mockResolvedValue(null);
+
+      await expect(
+        service.updateEmployeePlan('non-existent', {
+          ftl_target_amount: 5000,
+        }),
+      ).rejects.toThrow();
     });
   });
 
@@ -784,7 +949,7 @@ describe('CargoKpiService', () => {
       expect(res).toHaveProperty('data');
       expect(res.meta.total).toBe(1);
       expect(Array.isArray(res.data)).toBe(true);
-      expect(res.data[0].status).toBe('In Transit');
+      expect((res.data as any[])[0].status).toBe('In Transit');
     });
 
     it('returns status-grouped viewable response when group_by_status is true', async () => {
@@ -851,8 +1016,141 @@ describe('CargoKpiService', () => {
       expect(res.data).toHaveProperty('Border');
       expect(res.data).toHaveProperty('At Station');
       expect(res.data).toHaveProperty('Delivered');
-      expect(res.data['Waiting'].metrics.total_transactions).toBe(1);
-      expect(res.data['In Transit'].metrics.total_transactions).toBe(1);
+      expect((res.data as any)['Waiting'].metrics.total_transactions).toBe(1);
+      expect((res.data as any)['In Transit'].metrics.total_transactions).toBe(
+        1,
+      );
+    });
+  });
+
+  describe('Employee Plans Statistics Tests', () => {
+    it('calculates comprehensive aggregated plans statistics across all employees and departments', async () => {
+      mockKnex.mockImplementation((table: string) => {
+        const qb = { ...mockQueryBuilder };
+        if (table === 'employee_plans') {
+          qb.then = jest.fn((resolve: any) =>
+            resolve([
+              {
+                id: 'plan-1',
+                employee_id: 'emp-1',
+                first_name: 'Jasur',
+                last_name: 'Yoldoshev',
+                department_name: 'Sales',
+                ltl_target_volume: 100,
+                ftl_target_amount: 10000,
+                currency: 'USD',
+                period: '2026-08-01',
+              },
+              {
+                id: 'plan-2',
+                employee_id: 'emp-2',
+                first_name: 'Aziz',
+                last_name: 'Karimov',
+                department_name: 'Sborniy',
+                ltl_target_volume: 50,
+                ftl_target_amount: 5000,
+                currency: 'USD',
+                period: '2026-08-01',
+              },
+            ]),
+          );
+        } else if (table === 'cargo_registrations') {
+          qb.then = jest.fn((resolve: any) =>
+            resolve([
+              {
+                cargo_type: 'LTL',
+                volume: 80,
+                sell_price: 1000,
+                sell_currency: 'USD',
+              },
+              {
+                cargo_type: 'FTL',
+                volume: null,
+                sell_price: 9000,
+                sell_currency: 'USD',
+              },
+            ]),
+          );
+        } else {
+          qb.then = jest.fn((resolve: any) => resolve([]));
+        }
+        return qb;
+      });
+
+      const stats = await service.getEmployeePlansStatistics({
+        period: '2026-08',
+      });
+      expect(stats).toHaveProperty('summary');
+      expect(stats).toHaveProperty('ltl_statistics');
+      expect(stats).toHaveProperty('ftl_statistics');
+      expect(stats).toHaveProperty('leaderboard');
+      expect(stats).toHaveProperty('department_breakdown');
+
+      expect(stats.summary.total_plans).toBe(2);
+      expect(stats.ltl_statistics.total_target_volume).toBe(150);
+      expect(stats.ftl_statistics.total_target_amount).toBe(15000);
+      expect(stats.currency).toBe('USD');
+      expect(stats.leaderboard[0].rank).toBe(1);
+    });
+
+    it('returns personal employee plan statistics with lifetime totals and history', async () => {
+      mockQueryBuilder.first.mockResolvedValue({
+        id: 'emp-1',
+        first_name: 'Jasur',
+        last_name: 'Yoldoshev',
+        department_name: 'Sales',
+        color: '#00AAFF',
+      });
+
+      mockKnex.mockImplementation((table: string) => {
+        const qb = { ...mockQueryBuilder };
+        if (table === 'employee_plans') {
+          qb.then = jest.fn((resolve: any) =>
+            resolve([
+              {
+                id: 'plan-1',
+                employee_id: 'emp-1',
+                first_name: 'Jasur',
+                last_name: 'Yoldoshev',
+                department_name: 'Sales',
+                ltl_target_volume: 100,
+                ftl_target_amount: 10000,
+                currency: 'USD',
+                period: '2026-08-01',
+              },
+            ]),
+          );
+        } else if (table === 'cargo_registrations') {
+          qb.then = jest.fn((resolve: any) =>
+            resolve([
+              {
+                cargo_type: 'LTL',
+                volume: 110,
+                sell_price: 1200,
+                sell_currency: 'USD',
+              },
+              {
+                cargo_type: 'FTL',
+                volume: null,
+                sell_price: 15000,
+                sell_currency: 'USD',
+              },
+            ]),
+          );
+        } else {
+          qb.then = jest.fn((resolve: any) => resolve([]));
+        }
+        return qb;
+      });
+
+      const personal = await service.getEmployeePlanPersonalStats('emp-1');
+      expect(personal.employee.id).toBe('emp-1');
+      expect(personal.employee.full_name).toBe('Jasur Yoldoshev');
+      expect(personal.totals.total_plans_set).toBe(1);
+      expect(personal.totals.plans_completed).toBe(1);
+      expect(personal.current_plan.is_completed).toBe(true);
+      expect(personal.totals.total_ltl_volume_achieved).toBe(110);
+      expect(personal.totals.total_ftl_sales_achieved).toBe(15000);
     });
   });
 });

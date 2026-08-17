@@ -301,9 +301,16 @@ Calculates 10% pure net profit KPI for SEO managers.
 
 ## 7. Employee Plans & Progress
 
+Plan fulfillment entirely depends on the **`cargo_registrations`** table in PostgreSQL, evaluated in two distinct directions:
+
+- **Direction 1 (LTL Cargos)**: Volume Plan target ($m^3$) vs. registered LTL volume ($m^3$).
+- **Direction 2 (FTL Cargos)**: Financial Value Plan target vs. registered FTL sales value, defaulting to **USD** currency.
+
+_(For exhaustive details, see [Docs/EMPLOYEE_PLAN_SETTING_DOC.md](file:///D:/Shakhzod/Javascript/Yaqeen_Backend/Docs/EMPLOYEE_PLAN_SETTING_DOC.md))._
+
 ### `GET /api/cargo-kpi/plans`
 
-Returns employee target plans, currency, actual sales accumulated from cargo transactions/incomes (converted to plan currency if different), remaining target amount, completion percentage, and employee leaderboard ratings.
+Returns employee target plans, LTL volume progress, FTL financial progress (converted to plan currency if different), overall completion percentage, and employee leaderboard ratings.
 
 #### Response (200 OK):
 
@@ -315,15 +322,41 @@ Returns employee target plans, currency, actual sales accumulated from cargo tra
       "id": "plan-uuid-string",
       "employee_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
       "employee_name": "Jasur Yoldoshev",
-      "department_name": "Logistics",
+      "department_name": "Sales",
       "color": "#336699",
-      "period": "2026-07-01",
-      "target_amount": 10000,
+      "period": "2026-08-01",
       "currency": "USD",
-      "actual_sales": 7500,
-      "remaining_amount": 2500,
-      "completion_percentage": 75,
-      "is_completed": false
+      "ltl_plan": {
+        "target_volume": 100,
+        "actual_volume": 85.5,
+        "remaining_volume": 14.5,
+        "completion_percentage": 85.5,
+        "is_completed": false,
+        "cargo_count": 6
+      },
+      "ftl_plan": {
+        "target_amount": 50000,
+        "currency": "USD",
+        "actual_amount": 55000,
+        "remaining_amount": 0,
+        "completion_percentage": 110.0,
+        "is_completed": true,
+        "cargo_count": 4
+      },
+      "total_cargos_count": 10,
+      "overall_completion_percentage": 97.75,
+      "is_completed": false,
+      "ltl_target_volume": 100,
+      "ltl_actual_volume": 85.5,
+      "ftl_target_amount": 50000,
+      "ftl_actual_amount": 55000,
+      "target_amount": 50000,
+      "actual_sales": 55000,
+      "remaining_amount": 0,
+      "target_volume": 100,
+      "actual_volume": 85.5,
+      "remaining_volume": 14.5,
+      "completion_percentage": 97.75
     }
   ]
 }
@@ -331,22 +364,35 @@ Returns employee target plans, currency, actual sales accumulated from cargo tra
 
 ### `POST /api/cargo-kpi/plans`
 
-Creates a new employee plan with target amount, optional currency (`UZS`, `USD`, `RUB`, default `UZS`), and target period (`YYYY-MM` or `YYYY-MM-DD`).
+Creates a new employee plan with LTL target volume, FTL target amount, currency (`USD`, `UZS`, `RUB`, `RMB`, `CNY`, default `USD`), and target period (`YYYY-MM` or `YYYY-MM-DD`).
 
 #### Request Body:
 
 ```json
 {
   "employee_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
-  "target_amount": 10000,
+  "ltl_target_volume": 100,
+  "ftl_target_amount": 50000,
   "currency": "USD",
-  "period": "2026-07"
+  "period": "2026-08"
 }
 ```
 
 ### `PUT /api/cargo-kpi/plans/:id`
 
-Updates an existing employee plan's `target_amount`, `currency`, or `period`.
+Updates an existing employee plan's `ltl_target_volume`, `ftl_target_amount`, `currency`, or `period`.
+
+### `DELETE /api/cargo-kpi/plans/:id`
+
+Deletes an employee plan.
+
+### `GET /api/cargo-kpi/plans/stats`
+
+Returns aggregated organizational plan statistics and department breakdown.
+
+### `GET /api/cargo-kpi/plans/employee/:id/stats`
+
+Returns personal employee plan performance, lifetime totals, and month-by-month history.
 
 ---
 

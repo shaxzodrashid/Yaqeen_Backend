@@ -354,8 +354,8 @@ describe('CargoRegistrationsService', () => {
       expect(result).toHaveProperty('meta');
       expect(result).toHaveProperty('data');
       expect(result.meta.total).toBe(2);
-      expect(result.meta.gross_sales_revenue.USD).toBe(2700);
-      expect(result.meta.calculated_net_yield.USD).toBe(631.16);
+      expect((result.meta.gross_sales_revenue as any).USD).toBe(2700);
+      expect((result.meta.calculated_net_yield as any).USD).toBe(631.16);
       expect(result.data.length).toBe(2);
       expect(result.data[0].cargo_type).toBe('LTL');
       expect(result.data[0].volume).toBe(12.5);
@@ -616,6 +616,120 @@ describe('CargoRegistrationsService', () => {
       expect(result.sell_amount_usd).toBe(800);
       expect(result.net_yield).toBe(421.43);
       expect(result.net_yield_details.amount_usd).toBe(421.43);
+    });
+
+    it('should aggregate cargo registration statistics for LTL and FTL with financials', async () => {
+      jest.spyOn(service, 'findAllCargoRegistrations').mockResolvedValue({
+        meta: {
+          total: 2,
+          limit: 100000,
+          offset: 0,
+          calculated_net_yield: {
+            USD: 800,
+            UZS: 10280000,
+            total_usd: 800,
+            total_uzs: 10280000,
+          },
+          gross_sales_revenue: {
+            UZS: 0,
+            USD: 3000,
+            RUB: 0,
+            RMB: 0,
+            total_usd_equivalent: 3000,
+            total_uzs_equivalent: 38550000,
+          },
+        },
+        data: [
+          {
+            id: 'c-1',
+            cargo_type: 'LTL',
+            volume: 25,
+            weight: 3000,
+            container_type: null,
+            container_truck_id: 'TRUCK-1',
+            agent_name: 'Agent A',
+            client_full_name: 'Client A',
+            cargo: 'Apparel',
+            usd_rmb_rate: null,
+            employee_full_name: 'John Doe',
+            purchase_price: {
+              amount: 800,
+              currency: 'USD',
+              amount_usd: 800,
+              amount_uzs: 10280000,
+              date: '2026-08-01',
+            },
+            sell_price: {
+              amount: 1200,
+              currency: 'USD',
+              amount_usd: 1200,
+              amount_uzs: 15420000,
+              date: '2026-08-01',
+            },
+            net_yield: {
+              amount: 400,
+              currency: 'USD',
+              amount_usd: 400,
+              amount_uzs: 5140000,
+              purchase_currency: 'USD',
+              sell_currency: 'USD',
+            },
+            status: 'Delivered',
+          },
+          {
+            id: 'c-2',
+            cargo_type: 'FTL',
+            volume: null,
+            weight: 15000,
+            container_type: '40HQ',
+            container_truck_id: 'TRUCK-2',
+            agent_name: 'Agent B',
+            client_full_name: 'Client B',
+            cargo: 'Electronics',
+            usd_rmb_rate: null,
+            employee_full_name: 'John Doe',
+            purchase_price: {
+              amount: 1400,
+              currency: 'USD',
+              amount_usd: 1400,
+              amount_uzs: 17990000,
+              date: '2026-08-01',
+            },
+            sell_price: {
+              amount: 1800,
+              currency: 'USD',
+              amount_usd: 1800,
+              amount_uzs: 23130000,
+              date: '2026-08-01',
+            },
+            net_yield: {
+              amount: 400,
+              currency: 'USD',
+              amount_usd: 400,
+              amount_uzs: 5140000,
+              purchase_currency: 'USD',
+              sell_currency: 'USD',
+            },
+            status: 'In Transit',
+          },
+        ],
+      } as any);
+
+      const stats = await service.getCargoRegistrationStats({});
+      expect(stats).toHaveProperty('summary');
+      expect(stats).toHaveProperty('ltl_statistics');
+      expect(stats).toHaveProperty('ftl_statistics');
+      expect(stats).toHaveProperty('status_distribution');
+      expect(stats).toHaveProperty('by_manager');
+
+      expect(stats.ltl_statistics.total_count).toBe(1);
+      expect(stats.ltl_statistics.total_volume_m3).toBe(25);
+      expect(stats.ftl_statistics.total_count).toBe(1);
+      expect(stats.ftl_statistics.container_type_distribution['40HQ']).toBe(1);
+      expect(stats.status_distribution['Delivered']).toBe(1);
+      expect(stats.status_distribution['In Transit']).toBe(1);
+      expect(stats.by_manager[0].employee_name).toBe('John Doe');
+      expect(stats.by_manager[0].gross_sales_usd).toBe(3000);
     });
   });
 });

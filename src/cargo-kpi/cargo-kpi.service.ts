@@ -24,6 +24,7 @@ import {
 import {
   CreateEmployeePlanDto,
   UpdateEmployeePlanDto,
+  QueryEmployeePlanDto,
   CreateCargoTransactionDto,
   UpdateCargoTransactionDto,
   QueryCargoTransactionDto,
@@ -853,11 +854,28 @@ export class CargoKpiService {
       });
     }
 
-    const planCurrency = dto.currency || Currency.UZS;
-    const [plan] = await this.knex('employee_plans')
+    const planCurrency = dto.currency || dto.ftl_currency || Currency.USD;
+    const ltlTargetVolume = Number(
+      dto.ltl_target_volume !== undefined
+        ? dto.ltl_target_volume
+        : dto.target_volume !== undefined
+          ? dto.target_volume
+          : 0,
+    );
+    const ftlTargetAmount = Number(
+      dto.ftl_target_amount !== undefined
+        ? dto.ftl_target_amount
+        : dto.target_amount !== undefined
+          ? dto.target_amount
+          : 0,
+    );
+
+    await this.knex('employee_plans')
       .insert({
         employee_id: dto.employee_id,
-        target_amount: dto.target_amount,
+        ltl_target_volume: ltlTargetVolume,
+        ftl_target_amount: ftlTargetAmount,
+        target_amount: ftlTargetAmount,
         currency: planCurrency,
         period: this.formatPeriodForDb(dto.period),
       })
@@ -878,11 +896,30 @@ export class CargoKpiService {
     const updatePayload: Record<string, any> = {
       updated_at: this.knex.fn.now(),
     };
-    if (dto.target_amount !== undefined)
-      updatePayload.target_amount = dto.target_amount;
-    if (dto.currency !== undefined) updatePayload.currency = dto.currency;
-    if (dto.period !== undefined)
+
+    if (dto.ltl_target_volume !== undefined) {
+      updatePayload.ltl_target_volume = Number(dto.ltl_target_volume);
+    } else if (dto.target_volume !== undefined) {
+      updatePayload.ltl_target_volume = Number(dto.target_volume);
+    }
+
+    if (dto.ftl_target_amount !== undefined) {
+      updatePayload.ftl_target_amount = Number(dto.ftl_target_amount);
+      updatePayload.target_amount = Number(dto.ftl_target_amount);
+    } else if (dto.target_amount !== undefined) {
+      updatePayload.ftl_target_amount = Number(dto.target_amount);
+      updatePayload.target_amount = Number(dto.target_amount);
+    }
+
+    if (dto.currency !== undefined) {
+      updatePayload.currency = dto.currency;
+    } else if (dto.ftl_currency !== undefined) {
+      updatePayload.currency = dto.ftl_currency;
+    }
+
+    if (dto.period !== undefined) {
       updatePayload.period = this.formatPeriodForDb(dto.period);
+    }
 
     await this.knex('employee_plans').where({ id }).update(updatePayload);
     return this.getEmployeePlansProgress();
@@ -921,8 +958,8 @@ export class CargoKpiService {
     return null;
   }
 
-  async getEmployeePlansProgress() {
-    const plans = await this.knex('employee_plans')
+  async getEmployeePlansProgress(query?: QueryEmployeePlanDto) {
+    let plansQuery = this.knex('employee_plans')
       .join('employees', 'employee_plans.employee_id', 'employees.id')
       .leftJoin('departments', 'employees.department_id', 'departments.id')
       .select(
@@ -932,8 +969,35 @@ export class CargoKpiService {
         'employees.phone',
         'employees.color',
         'departments.name as department_name',
-      )
-      .orderBy('employee_plans.created_at', 'desc');
+      );
+
+    if (query?.employee_id) {
+      plansQuery = plansQuery.where(
+        'employee_plans.employee_id',
+        query.employee_id,
+      );
+    }
+
+    if (query?.period) {
+      const formatted = this.formatPeriodForDb(query.period);
+      const dateRange = this.getMonthDateRange(formatted);
+      if (dateRange) {
+        plansQuery = plansQuery
+          .where('employee_plans.period', '>=', dateRange.startDate)
+          .where('employee_plans.period', '<=', dateRange.endDate);
+      }
+    }
+
+    if (query?.search && query.search.trim()) {
+      const s = `%${query.search.trim()}%`;
+      plansQuery = plansQuery.where((b) => {
+        b.where('employees.first_name', 'ILIKE', s)
+          .orWhere('employees.last_name', 'ILIKE', s)
+          .orWhere('departments.name', 'ILIKE', s);
+      });
+    }
+
+    const plans = await plansQuery.orderBy('employee_plans.created_at', 'desc');
 
     const rates = this.currencyService
       ? await this.currencyService.getLatestRates()
@@ -941,137 +1005,461 @@ export class CargoKpiService {
 
     const progressData = [];
     for (const p of plans) {
-      const target = Number(p.target_amount);
-      const planCurrency = (p.currency as Currency) || Currency.UZS;
+      const ltlTargetVolume = Number(p.ltl_target_volume || 0);
+      const ftlTargetAmount = Number(
+        p.ftl_target_amount !== undefined
+          ? p.ftl_target_amount
+          : p.target_amount || 0,
+      );
+      const planCurrency = (p.currency as Currency) || Currency.USD;
 
-      let actualSalesTotal = 0;
+      let actualLtlVolume = 0;
+      let ltlCargoCount = 0;
 
-      // 1. Cargo transactions for this employee in period month
-      let txQuery = this.knex('cargo_transactions').where(
+      let actualFtlAmount = 0;
+      let ftlCargoCount = 0;
+
+      // Query cargo registrations for this employee in period month
+      let regQuery = this.knex('cargo_registrations').where(
         'employee_id',
         p.employee_id,
       );
       const dateRange = this.getMonthDateRange(p.period);
       if (dateRange) {
-        txQuery = txQuery
-          .where('transaction_date', '>=', dateRange.startDate)
-          .where('transaction_date', '<=', dateRange.endDate);
+        regQuery = regQuery.where((builder) => {
+          builder
+            .whereBetween('confirmed_date', [
+              dateRange.startDate,
+              dateRange.endDate,
+            ])
+            .orWhere((b2) => {
+              b2.whereNull('confirmed_date').whereBetween('created_at', [
+                `${dateRange.startDate}T00:00:00.000Z`,
+                `${dateRange.endDate}T23:59:59.999Z`,
+              ]);
+            })
+            .orWhereBetween('sell_date', [
+              dateRange.startDate,
+              dateRange.endDate,
+            ]);
+        });
       }
 
-      const txRows = await txQuery.select('sell_price', 'currency');
-      for (const tx of txRows) {
-        const rawAmt = Number(tx.sell_price || 0);
-        const txCurr = (tx.currency as Currency) || Currency.UZS;
-        let amtInPlanCurr = rawAmt;
-        if (txCurr !== planCurrency && this.currencyService) {
-          const amtInUzs = await this.currencyService.convertToUzs(
-            rawAmt,
-            txCurr,
-            rates,
-          );
-          if (planCurrency === Currency.UZS) {
-            amtInPlanCurr = amtInUzs;
-          } else {
-            const conv = await this.currencyService.convert(
-              amtInUzs,
-              Currency.UZS,
-              planCurrency,
-            );
-            amtInPlanCurr = conv.converted_amount;
+      const regRows = await regQuery.select(
+        'cargo_type',
+        'volume',
+        'sell_price',
+        'sell_currency',
+        'sell_usd_rate',
+        'sell_custom_rate',
+        'usd_rmb_rate',
+      );
+
+      for (const reg of regRows) {
+        const cargoType = String(reg.cargo_type || '').toUpperCase();
+        if (cargoType === 'LTL') {
+          const vol = Number(reg.volume || 0);
+          actualLtlVolume += vol;
+          ltlCargoCount += 1;
+        } else if (cargoType === 'FTL') {
+          const rawAmt = Number(reg.sell_price || 0);
+          const txCurr = (reg.sell_currency as Currency) || Currency.USD;
+          let amtInPlanCurr = rawAmt;
+
+          if (txCurr !== planCurrency && this.currencyService) {
+            if (txCurr === Currency.USD && planCurrency === Currency.UZS) {
+              amtInPlanCurr = await this.currencyService.convertToUzs(
+                rawAmt,
+                Currency.USD,
+                rates,
+              );
+            } else if (
+              planCurrency === Currency.USD &&
+              txCurr === Currency.UZS
+            ) {
+              const defaultUsd = rates?.['USD']
+                ? rates['USD'].rate / (rates['USD'].nominal || 1)
+                : 12850;
+              const rateUsed =
+                reg.sell_custom_rate || reg.sell_usd_rate || defaultUsd;
+              amtInPlanCurr = rateUsed > 0 ? rawAmt / rateUsed : 0;
+            } else {
+              const amtInUzs = await this.currencyService.convertToUzs(
+                rawAmt,
+                txCurr,
+                rates,
+              );
+              if (planCurrency === Currency.UZS) {
+                amtInPlanCurr = amtInUzs;
+              } else {
+                const conv = await this.currencyService.convert(
+                  amtInUzs,
+                  Currency.UZS,
+                  planCurrency,
+                );
+                amtInPlanCurr = conv.converted_amount;
+              }
+            }
           }
+          actualFtlAmount += amtInPlanCurr;
+          ftlCargoCount += 1;
         }
-        actualSalesTotal += amtInPlanCurr;
       }
 
-      // 2. ROP worker sales & FTL fura items for this employee in period month
+      // Calculations for Direction 1: LTL Volume Plan
+      const roundedLtlActual = Math.round(actualLtlVolume * 100) / 100;
+      const ltlRemainingVolume = Math.max(
+        0,
+        Math.round((ltlTargetVolume - roundedLtlActual) * 100) / 100,
+      );
+      const ltlCompletionPercentage =
+        ltlTargetVolume > 0
+          ? Math.round((roundedLtlActual / ltlTargetVolume) * 10000) / 100
+          : roundedLtlActual > 0
+            ? 100
+            : 0;
+      const ltlIsCompleted =
+        ltlTargetVolume > 0 ? roundedLtlActual >= ltlTargetVolume : false;
+
+      // Calculations for Direction 2: FTL Financial Value Plan
+      const roundedFtlActual = Math.round(actualFtlAmount * 100) / 100;
+      const ftlRemainingAmount = Math.max(
+        0,
+        Math.round((ftlTargetAmount - roundedFtlActual) * 100) / 100,
+      );
+      const ftlCompletionPercentage =
+        ftlTargetAmount > 0
+          ? Math.round((roundedFtlActual / ftlTargetAmount) * 10000) / 100
+          : roundedFtlActual > 0
+            ? 100
+            : 0;
+      const ftlIsCompleted =
+        ftlTargetAmount > 0 ? roundedFtlActual >= ftlTargetAmount : false;
+
+      // Overall calculations
+      let overallCompletionPercentage = 0;
+      let overallIsCompleted = false;
+
+      if (ltlTargetVolume > 0 && ftlTargetAmount > 0) {
+        overallCompletionPercentage =
+          Math.round(
+            ((ltlCompletionPercentage + ftlCompletionPercentage) / 2) * 100,
+          ) / 100;
+        overallIsCompleted = ltlIsCompleted && ftlIsCompleted;
+      } else if (ltlTargetVolume > 0) {
+        overallCompletionPercentage = ltlCompletionPercentage;
+        overallIsCompleted = ltlIsCompleted;
+      } else if (ftlTargetAmount > 0) {
+        overallCompletionPercentage = ftlCompletionPercentage;
+        overallIsCompleted = ftlIsCompleted;
+      }
+
       const periodStr = this.formatPeriodFromDb(p.period);
-      const monthStr = periodStr ? periodStr.slice(0, 7) : null;
-      if (monthStr) {
-        const ropRows = await this.knex('rop_worker_sales')
-          .where('employee_id', p.employee_id)
-          .where('month', monthStr)
-          .select('sales_amount');
-
-        for (const rop of ropRows) {
-          const rawAmt = Number(rop.sales_amount || 0);
-          let amtInPlanCurr = rawAmt;
-          if (planCurrency !== Currency.USD && this.currencyService) {
-            const amtInUzs = await this.currencyService.convertToUzs(
-              rawAmt,
-              Currency.USD,
-              rates,
-            );
-            if (planCurrency === Currency.UZS) {
-              amtInPlanCurr = amtInUzs;
-            } else {
-              const conv = await this.currencyService.convert(
-                amtInUzs,
-                Currency.UZS,
-                planCurrency,
-              );
-              amtInPlanCurr = conv.converted_amount;
-            }
-          }
-          actualSalesTotal += amtInPlanCurr;
-        }
-
-        const ftlRows = await this.knex('ftl_fura_items')
-          .where('manager_id', p.employee_id)
-          .where('month', monthStr)
-          .select('sell_price');
-
-        for (const ftl of ftlRows) {
-          const rawAmt = Number(ftl.sell_price || 0);
-          let amtInPlanCurr = rawAmt;
-          if (planCurrency !== Currency.USD && this.currencyService) {
-            const amtInUzs = await this.currencyService.convertToUzs(
-              rawAmt,
-              Currency.USD,
-              rates,
-            );
-            if (planCurrency === Currency.UZS) {
-              amtInPlanCurr = amtInUzs;
-            } else {
-              const conv = await this.currencyService.convert(
-                amtInUzs,
-                Currency.UZS,
-                planCurrency,
-              );
-              amtInPlanCurr = conv.converted_amount;
-            }
-          }
-          actualSalesTotal += amtInPlanCurr;
-        }
-      }
-
-      const actual = Math.round(actualSalesTotal * 100) / 100;
-      const completionPercentage = target > 0 ? (actual / target) * 100 : 0;
-      const remainingAmount = Math.max(0, target - actual);
 
       progressData.push({
         id: p.id,
         employee_id: p.employee_id,
-        employee_name: `${p.first_name} ${p.last_name}`,
+        employee_name: `${p.first_name || ''} ${p.last_name || ''}`.trim(),
         department_name: p.department_name || 'N/A',
         color: p.color || '#CCCCCC',
         period: periodStr,
-        target_amount: target,
         currency: planCurrency,
-        actual_sales: actual,
-        remaining_amount: Math.round(remainingAmount * 100) / 100,
-        completion_percentage: Math.round(completionPercentage * 100) / 100,
-        is_completed: actual >= target,
+
+        // Direction 1: LTL Volume Plan (m3)
+        ltl_plan: {
+          target_volume: ltlTargetVolume,
+          actual_volume: roundedLtlActual,
+          remaining_volume: ltlRemainingVolume,
+          completion_percentage: ltlCompletionPercentage,
+          is_completed: ltlIsCompleted,
+          cargo_count: ltlCargoCount,
+        },
+
+        // Direction 2: FTL Financial Value Plan
+        ftl_plan: {
+          target_amount: ftlTargetAmount,
+          currency: planCurrency,
+          actual_amount: roundedFtlActual,
+          remaining_amount: ftlRemainingAmount,
+          completion_percentage: ftlCompletionPercentage,
+          is_completed: ftlIsCompleted,
+          cargo_count: ftlCargoCount,
+        },
+
+        // Summary metrics
+        total_cargos_count: ltlCargoCount + ftlCargoCount,
+        overall_completion_percentage: overallCompletionPercentage,
+
+        // Backward-compatible fields
+        ltl_target_volume: ltlTargetVolume,
+        ltl_actual_volume: roundedLtlActual,
+        ftl_target_amount: ftlTargetAmount,
+        ftl_actual_amount: roundedFtlActual,
+        target_amount: ftlTargetAmount,
+        actual_sales: roundedFtlActual,
+        remaining_amount: ftlRemainingAmount,
+        target_volume: ltlTargetVolume,
+        actual_volume: roundedLtlActual,
+        remaining_volume: ltlRemainingVolume,
+        completion_percentage: overallCompletionPercentage,
+        is_completed: overallIsCompleted,
       });
     }
 
-    // Sort by completion_percentage descending for leaderboard rating
+    // Sort by overall_completion_percentage descending for leaderboard rating
     progressData.sort(
-      (a, b) => b.completion_percentage - a.completion_percentage,
+      (a, b) =>
+        b.overall_completion_percentage - a.overall_completion_percentage,
     );
 
     return {
       total_plans: progressData.length,
       leaderboard: progressData,
+    };
+  }
+
+  async getEmployeePlansStatistics(query?: QueryEmployeePlanDto) {
+    const plansProgress = await this.getEmployeePlansProgress(query);
+    const leaderboard = plansProgress.leaderboard;
+
+    let totalTargetVolume = 0;
+    let totalActualVolume = 0;
+    let totalLtlCargos = 0;
+
+    let totalTargetAmount = 0;
+    let totalActualAmount = 0;
+    let totalFtlCargos = 0;
+
+    let completedPlansCount = 0;
+    let inProgressPlansCount = 0;
+
+    const deptMap = new Map<
+      string,
+      {
+        department_name: string;
+        employees_count: number;
+        ltl_target_volume: number;
+        ltl_actual_volume: number;
+        ftl_target_amount: number;
+        ftl_actual_amount: number;
+        total_cargos: number;
+      }
+    >();
+
+    const targetCurrency = Currency.USD;
+
+    for (const p of leaderboard) {
+      if (p.is_completed) {
+        completedPlansCount++;
+      } else {
+        inProgressPlansCount++;
+      }
+
+      totalTargetVolume += p.ltl_plan.target_volume;
+      totalActualVolume += p.ltl_plan.actual_volume;
+      totalLtlCargos += p.ltl_plan.cargo_count;
+
+      totalTargetAmount += p.ftl_plan.target_amount;
+      totalActualAmount += p.ftl_plan.actual_amount;
+      totalFtlCargos += p.ftl_plan.cargo_count;
+
+      const deptName = p.department_name || 'Other';
+      if (!deptMap.has(deptName)) {
+        deptMap.set(deptName, {
+          department_name: deptName,
+          employees_count: 0,
+          ltl_target_volume: 0,
+          ltl_actual_volume: 0,
+          ftl_target_amount: 0,
+          ftl_actual_amount: 0,
+          total_cargos: 0,
+        });
+      }
+      const dept = deptMap.get(deptName)!;
+      dept.employees_count += 1;
+      dept.ltl_target_volume += p.ltl_plan.target_volume;
+      dept.ltl_actual_volume += p.ltl_plan.actual_volume;
+      dept.ftl_target_amount += p.ftl_plan.target_amount;
+      dept.ftl_actual_amount += p.ftl_plan.actual_amount;
+      dept.total_cargos += p.total_cargos_count;
+    }
+
+    const roundedActualVolume = Math.round(totalActualVolume * 100) / 100;
+    const roundedTargetVolume = Math.round(totalTargetVolume * 100) / 100;
+    const remainingVolume = Math.max(
+      0,
+      Math.round((roundedTargetVolume - roundedActualVolume) * 100) / 100,
+    );
+    const ltlCompletionRate =
+      roundedTargetVolume > 0
+        ? Math.round((roundedActualVolume / roundedTargetVolume) * 10000) / 100
+        : roundedActualVolume > 0
+          ? 100
+          : 0;
+
+    const roundedActualAmount = Math.round(totalActualAmount * 100) / 100;
+    const roundedTargetAmount = Math.round(totalTargetAmount * 100) / 100;
+    const remainingAmount = Math.max(
+      0,
+      Math.round((roundedTargetAmount - roundedActualAmount) * 100) / 100,
+    );
+    const ftlCompletionRate =
+      roundedTargetAmount > 0
+        ? Math.round((roundedActualAmount / roundedTargetAmount) * 10000) / 100
+        : roundedActualAmount > 0
+          ? 100
+          : 0;
+
+    const overallCompletionRate =
+      leaderboard.length > 0
+        ? Math.round(
+            (leaderboard.reduce(
+              (acc, curr) => acc + curr.overall_completion_percentage,
+              0,
+            ) /
+              leaderboard.length) *
+              100,
+          ) / 100
+        : 0;
+
+    const departmentBreakdown = Array.from(deptMap.values()).map((d) => {
+      const ltlComp =
+        d.ltl_target_volume > 0
+          ? Math.round((d.ltl_actual_volume / d.ltl_target_volume) * 10000) /
+            100
+          : d.ltl_actual_volume > 0
+            ? 100
+            : 0;
+      const ftlComp =
+        d.ftl_target_amount > 0
+          ? Math.round((d.ftl_actual_amount / d.ftl_target_amount) * 10000) /
+            100
+          : d.ftl_actual_amount > 0
+            ? 100
+            : 0;
+      return {
+        ...d,
+        ltl_target_volume: Math.round(d.ltl_target_volume * 100) / 100,
+        ltl_actual_volume: Math.round(d.ltl_actual_volume * 100) / 100,
+        ftl_target_amount: Math.round(d.ftl_target_amount * 100) / 100,
+        ftl_actual_amount: Math.round(d.ftl_actual_amount * 100) / 100,
+        ltl_completion_percentage: ltlComp,
+        ftl_completion_percentage: ftlComp,
+        currency: targetCurrency,
+      };
+    });
+
+    return {
+      period: query?.period || new Date().toISOString().slice(0, 7),
+      currency: targetCurrency,
+      summary: {
+        total_plans: leaderboard.length,
+        completed_plans_count: completedPlansCount,
+        in_progress_plans_count: inProgressPlansCount,
+        overall_completion_percentage: overallCompletionRate,
+        total_cargos_registered: totalLtlCargos + totalFtlCargos,
+      },
+      ltl_statistics: {
+        total_target_volume: roundedTargetVolume,
+        total_actual_volume: roundedActualVolume,
+        total_remaining_volume: remainingVolume,
+        completion_percentage: ltlCompletionRate,
+        total_cargo_count: totalLtlCargos,
+        avg_volume_per_cargo:
+          totalLtlCargos > 0
+            ? Math.round((roundedActualVolume / totalLtlCargos) * 100) / 100
+            : 0,
+      },
+      ftl_statistics: {
+        total_target_amount: roundedTargetAmount,
+        total_actual_amount: roundedActualAmount,
+        total_remaining_amount: remainingAmount,
+        completion_percentage: ftlCompletionRate,
+        currency: targetCurrency,
+        total_cargo_count: totalFtlCargos,
+        avg_amount_per_cargo:
+          totalFtlCargos > 0
+            ? Math.round((roundedActualAmount / totalFtlCargos) * 100) / 100
+            : 0,
+      },
+      leaderboard: leaderboard.map((item, index) => ({
+        rank: index + 1,
+        ...item,
+      })),
+      department_breakdown: departmentBreakdown,
+    };
+  }
+
+  async getEmployeePlanPersonalStats(
+    employeeId: string,
+    query?: QueryEmployeePlanDto,
+  ) {
+    const employee = await this.knex('employees as e')
+      .leftJoin('departments as d', 'e.department_id', 'd.id')
+      .where('e.id', employeeId)
+      .select(
+        'e.id',
+        'e.first_name',
+        'e.last_name',
+        'e.phone',
+        'e.color',
+        'd.name as department_name',
+      )
+      .first();
+
+    if (!employee) {
+      throw new NotFoundException({
+        message: 'Employee not found',
+        location: 'employee_not_found',
+      });
+    }
+
+    const plansProgress = await this.getEmployeePlansProgress({
+      employee_id: employeeId,
+      period: query?.period,
+    });
+
+    const currentPlan = plansProgress.leaderboard[0] || null;
+
+    // Fetch all historical plans for this employee
+    const allEmployeePlans = await this.getEmployeePlansProgress({
+      employee_id: employeeId,
+    });
+
+    const history = allEmployeePlans.leaderboard;
+
+    let lifetimeLtlVolume = 0;
+    let lifetimeFtlAmount = 0;
+    let lifetimeCargos = 0;
+    let lifetimePlansCompleted = 0;
+
+    for (const h of history) {
+      lifetimeLtlVolume += h.ltl_plan.actual_volume;
+      lifetimeFtlAmount += h.ftl_plan.actual_amount;
+      lifetimeCargos += h.total_cargos_count;
+      if (h.is_completed) lifetimePlansCompleted++;
+    }
+
+    return {
+      employee: {
+        id: employee.id,
+        first_name: employee.first_name,
+        last_name: employee.last_name,
+        full_name:
+          `${employee.first_name || ''} ${employee.last_name || ''}`.trim(),
+        department_name: employee.department_name || 'N/A',
+        color: employee.color || '#CCCCCC',
+      },
+      current_plan: currentPlan,
+      totals: {
+        total_plans_set: history.length,
+        plans_completed: lifetimePlansCompleted,
+        total_ltl_volume_achieved: Math.round(lifetimeLtlVolume * 100) / 100,
+        total_ftl_sales_achieved: Math.round(lifetimeFtlAmount * 100) / 100,
+        currency: currentPlan?.currency || Currency.USD,
+        total_cargos_registered: lifetimeCargos,
+      },
+      history: history,
     };
   }
 

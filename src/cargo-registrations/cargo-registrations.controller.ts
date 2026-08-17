@@ -56,6 +56,18 @@ export class CargoRegistrationsController {
     return this.cargoRegistrationsService.findAllCargoRegistrations(query);
   }
 
+  @Get('stats')
+  @RequirePermission('cargo_registrations', 'read')
+  getStats(@Query() query: QueryCargoRegistrationDto) {
+    return this.cargoRegistrationsService.getCargoRegistrationStats(query);
+  }
+
+  @Get('stats/summary')
+  @RequirePermission('cargo_registrations', 'read')
+  getStatsSummary(@Query() query: QueryCargoRegistrationDto) {
+    return this.cargoRegistrationsService.getCargoRegistrationStats(query);
+  }
+
   @Get(':id')
   @RequirePermission('cargo_registrations', 'read')
   findOne(@Param('id') id: string) {

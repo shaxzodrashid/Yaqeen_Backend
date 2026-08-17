@@ -926,6 +926,128 @@ export class CargoRegistrationsService {
   }
 
   /**
+   * Aggregate statistics for cargo registrations (LTL vs FTL, financials, status distribution, manager stats).
+   */
+  async getCargoRegistrationStats(query: QueryCargoRegistrationDto) {
+    const listResult = await this.findAllCargoRegistrations({
+      ...query,
+      limit: '100000',
+      page: '1',
+    });
+
+    const meta = listResult.meta;
+    const data = listResult.data;
+
+    let totalLtlCount = 0;
+    let totalLtlVolume = 0;
+    let totalLtlWeight = 0;
+
+    let totalFtlCount = 0;
+    const ftlContainerDistribution: Record<string, number> = {};
+    const statusDistribution: Record<string, number> = {
+      Waiting: 0,
+      'In Transit': 0,
+      Border: 0,
+      'At Station': 0,
+      Delivered: 0,
+    };
+
+    const managerStatsMap = new Map<
+      string,
+      {
+        employee_name: string;
+        total_cargos: number;
+        ltl_cargos: number;
+        ltl_volume: number;
+        ftl_cargos: number;
+        gross_sales_usd: number;
+        net_yield_usd: number;
+      }
+    >();
+
+    for (const item of data) {
+      // Status distribution
+      const status = item.status || 'Waiting';
+      statusDistribution[status] = (statusDistribution[status] || 0) + 1;
+
+      // LTL vs FTL
+      if (item.cargo_type === 'LTL') {
+        totalLtlCount++;
+        totalLtlVolume += Number(item.volume || 0);
+        totalLtlWeight += Number(item.weight || 0);
+      } else if (item.cargo_type === 'FTL') {
+        totalFtlCount++;
+        const cType = item.container_type || 'Unknown';
+        ftlContainerDistribution[cType] =
+          (ftlContainerDistribution[cType] || 0) + 1;
+      }
+
+      // Manager statistics
+      const empName = item.employee_full_name;
+      if (empName && empName !== 'N/A') {
+        if (!managerStatsMap.has(empName)) {
+          managerStatsMap.set(empName, {
+            employee_name: empName,
+            total_cargos: 0,
+            ltl_cargos: 0,
+            ltl_volume: 0,
+            ftl_cargos: 0,
+            gross_sales_usd: 0,
+            net_yield_usd: 0,
+          });
+        }
+        const m = managerStatsMap.get(empName)!;
+        m.total_cargos += 1;
+        if (item.cargo_type === 'LTL') {
+          m.ltl_cargos += 1;
+          m.ltl_volume += Number(item.volume || 0);
+        } else if (item.cargo_type === 'FTL') {
+          m.ftl_cargos += 1;
+        }
+        m.gross_sales_usd += Number(item.sell_price?.amount_usd || 0);
+        m.net_yield_usd += Number(item.net_yield?.amount_usd || 0);
+      }
+    }
+
+    const roundedLtlVolume = Math.round(totalLtlVolume * 100) / 100;
+    const roundedLtlWeight = Math.round(totalLtlWeight * 100) / 100;
+
+    const managerStats = Array.from(managerStatsMap.values()).map((m) => ({
+      ...m,
+      ltl_volume: Math.round(m.ltl_volume * 100) / 100,
+      gross_sales_usd: Math.round(m.gross_sales_usd * 100) / 100,
+      net_yield_usd: Math.round(m.net_yield_usd * 100) / 100,
+    }));
+
+    return {
+      summary: {
+        total_cargos: meta.total,
+        gross_sales_revenue: meta.gross_sales_revenue,
+        calculated_net_yield: meta.calculated_net_yield,
+      },
+      ltl_statistics: {
+        total_count: totalLtlCount,
+        total_volume_m3: roundedLtlVolume,
+        total_weight_kg: roundedLtlWeight,
+        avg_volume_m3:
+          totalLtlCount > 0
+            ? Math.round((roundedLtlVolume / totalLtlCount) * 100) / 100
+            : 0,
+        avg_weight_kg:
+          totalLtlCount > 0
+            ? Math.round((roundedLtlWeight / totalLtlCount) * 100) / 100
+            : 0,
+      },
+      ftl_statistics: {
+        total_count: totalFtlCount,
+        container_type_distribution: ftlContainerDistribution,
+      },
+      status_distribution: statusDistribution,
+      by_manager: managerStats,
+    };
+  }
+
+  /**
    * Get full details of a specific cargo registration.
    */
   async findCargoRegistrationDetails(id: string) {

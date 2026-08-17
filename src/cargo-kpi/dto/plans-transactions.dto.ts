@@ -6,7 +6,6 @@ import {
   IsUUID,
   IsString,
   IsNotEmpty,
-  IsPositive,
   Matches,
   IsEnum,
   IsIn,
@@ -18,16 +17,59 @@ export class CreateEmployeePlanDto {
   @IsUUID('4', { message: 'employee_id must be a valid UUID' })
   employee_id: string;
 
+  /**
+   * Target volume for LTL cargos in m3 (Direction 1: Volume Plan)
+   */
+  @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @IsPositive({ message: 'Target amount must be a positive number' })
-  target_amount: number;
+  @IsNumber({}, { message: 'ltl_target_volume must be a number' })
+  @Min(0, { message: 'ltl_target_volume cannot be negative' })
+  ltl_target_volume?: number;
 
+  /**
+   * Alias for ltl_target_volume
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'target_volume must be a number' })
+  @Min(0, { message: 'target_volume cannot be negative' })
+  target_volume?: number;
+
+  /**
+   * Target financial value for FTL cargos (Direction 2: Financial Value Plan)
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'ftl_target_amount must be a number' })
+  @Min(0, { message: 'ftl_target_amount cannot be negative' })
+  ftl_target_amount?: number;
+
+  /**
+   * Backward-compatible alias for ftl_target_amount
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'target_amount must be a number' })
+  @Min(0, { message: 'target_amount cannot be negative' })
+  target_amount?: number;
+
+  /**
+   * Currency for FTL financial value plan. Defaults to USD.
+   */
   @IsOptional()
   @IsEnum(Currency, {
     message: 'currency must be one of: UZS, USD, RUB, RMB, CNY',
   })
   currency?: Currency;
+
+  /**
+   * Alias for currency
+   */
+  @IsOptional()
+  @IsEnum(Currency, {
+    message: 'ftl_currency must be one of: UZS, USD, RUB, RMB, CNY',
+  })
+  ftl_currency?: Currency;
 
   @IsString()
   @IsNotEmpty({ message: 'Period is required' })
@@ -39,11 +81,42 @@ export class CreateEmployeePlanDto {
 
 export class UpdateEmployeePlanDto {
   @IsOptional()
+  @IsUUID('4', { message: 'employee_id must be a valid UUID' })
+  employee_id?: string;
+
+  /**
+   * Target volume for LTL cargos in m3
+   */
+  @IsOptional()
   @Type(() => Number)
-  @IsNumber()
-  @IsPositive()
+  @IsNumber({}, { message: 'ltl_target_volume must be a number' })
+  @Min(0, { message: 'ltl_target_volume cannot be negative' })
+  ltl_target_volume?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'target_volume must be a number' })
+  @Min(0, { message: 'target_volume cannot be negative' })
+  target_volume?: number;
+
+  /**
+   * Target financial value for FTL cargos
+   */
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'ftl_target_amount must be a number' })
+  @Min(0, { message: 'ftl_target_amount cannot be negative' })
+  ftl_target_amount?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'target_amount must be a number' })
+  @Min(0, { message: 'target_amount cannot be negative' })
   target_amount?: number;
 
+  /**
+   * Currency for FTL financial value plan
+   */
   @IsOptional()
   @IsEnum(Currency, {
     message: 'currency must be one of: UZS, USD, RUB, RMB, CNY',
@@ -51,11 +124,34 @@ export class UpdateEmployeePlanDto {
   currency?: Currency;
 
   @IsOptional()
+  @IsEnum(Currency, {
+    message: 'ftl_currency must be one of: UZS, USD, RUB, RMB, CNY',
+  })
+  ftl_currency?: Currency;
+
+  @IsOptional()
   @IsString()
   @Matches(/^\d{4}-\d{2}(-\d{2})?$/, {
     message: 'period must be in YYYY-MM or YYYY-MM-DD format',
   })
   period?: string;
+}
+
+export class QueryEmployeePlanDto {
+  @IsOptional()
+  @IsUUID('4', { message: 'employee_id must be a valid UUID' })
+  employee_id?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}(-\d{2})?$/, {
+    message: 'period must be in YYYY-MM or YYYY-MM-DD format',
+  })
+  period?: string;
+
+  @IsOptional()
+  @IsString()
+  search?: string;
 }
 
 export class CreateCargoTransactionDto {

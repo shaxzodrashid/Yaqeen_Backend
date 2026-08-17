@@ -31,6 +31,7 @@ import {
 import {
   CreateEmployeePlanDto,
   UpdateEmployeePlanDto,
+  QueryEmployeePlanDto,
   CreateCargoTransactionDto,
   UpdateCargoTransactionDto,
   QueryCargoTransactionDto,
@@ -193,8 +194,29 @@ export class CargoKpiController {
 
   @Get('plans')
   @RequirePermission('cargo_kpi', 'read')
-  getEmployeePlansProgress() {
-    return this.cargoKpiService.getEmployeePlansProgress();
+  getEmployeePlansProgress(@Query() query?: QueryEmployeePlanDto) {
+    return this.cargoKpiService.getEmployeePlansProgress(query);
+  }
+
+  @Get('plans/stats')
+  @RequirePermission('cargo_kpi', 'read')
+  getEmployeePlansStatistics(@Query() query?: QueryEmployeePlanDto) {
+    return this.cargoKpiService.getEmployeePlansStatistics(query);
+  }
+
+  @Get('plans/statistics')
+  @RequirePermission('cargo_kpi', 'read')
+  getEmployeePlansStatisticsAlias(@Query() query?: QueryEmployeePlanDto) {
+    return this.cargoKpiService.getEmployeePlansStatistics(query);
+  }
+
+  @Get('plans/employee/:id/stats')
+  @RequirePermission('cargo_kpi', 'read')
+  getEmployeePlanPersonalStats(
+    @Param('id') employeeId: string,
+    @Query() query?: QueryEmployeePlanDto,
+  ) {
+    return this.cargoKpiService.getEmployeePlanPersonalStats(employeeId, query);
   }
 
   @Post('plans')
