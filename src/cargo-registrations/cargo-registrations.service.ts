@@ -638,6 +638,33 @@ export class CargoRegistrationsService {
       baseQuery.where('cr.arrived_date', '<=', query.arrived_end_date);
     }
 
+    // Purchase date filters
+    const purchaseStart =
+      query.purchase_start_date || query.purchase_date_start;
+    const purchaseEnd = query.purchase_end_date || query.purchase_date_end;
+    if (purchaseStart) {
+      baseQuery.where('cr.purchase_date', '>=', purchaseStart);
+    }
+    if (purchaseEnd) {
+      baseQuery.where('cr.purchase_date', '<=', purchaseEnd);
+    }
+    if (query.purchase_date && !purchaseStart && !purchaseEnd) {
+      baseQuery.where('cr.purchase_date', query.purchase_date);
+    }
+
+    // Sell date filters
+    const sellStart = query.sell_start_date || query.sell_date_start;
+    const sellEnd = query.sell_end_date || query.sell_date_end;
+    if (sellStart) {
+      baseQuery.where('cr.sell_date', '>=', sellStart);
+    }
+    if (sellEnd) {
+      baseQuery.where('cr.sell_date', '<=', sellEnd);
+    }
+    if (query.sell_date && !sellStart && !sellEnd) {
+      baseQuery.where('cr.sell_date', query.sell_date);
+    }
+
     // Registration creation date filters
     const createdStart = query.created_start_date || query.created_at_start;
     const createdEnd = query.created_end_date || query.created_at_end;
@@ -690,39 +717,46 @@ export class CargoRegistrationsService {
       );
 
     // Fetch paginated rows for data list
-    const rows = await baseQuery
-      .select(
-        'cr.id',
-        'cr.cargo_type',
-        'cr.volume',
-        'cr.weight',
-        'cr.container_type',
-        'cr.container_truck_id',
-        'cr.agent_name',
-        'cr.cargo',
-        'cr.usd_rmb_rate',
-        'cr.purchase_price',
-        'cr.purchase_currency',
-        'cr.purchase_date',
-        'cr.purchase_usd_rate',
-        'cr.purchase_custom_rate',
-        'cr.sell_price',
-        'cr.sell_currency',
-        'cr.sell_date',
-        'cr.sell_usd_rate',
-        'cr.sell_custom_rate',
-        'cr.confirmed_date',
-        'cr.created_at',
-        'cr.status',
-        'c.first_name as client_first_name',
-        'c.last_name as client_last_name',
-        'c.company_name as client_company',
-        'e.first_name as emp_first_name',
-        'e.last_name as emp_last_name',
-      )
-      .orderBy('cr.created_at', 'desc')
-      .limit(limit)
-      .offset(offset);
+    const paginatedQuery = baseQuery.select(
+      'cr.id',
+      'cr.cargo_type',
+      'cr.volume',
+      'cr.weight',
+      'cr.container_type',
+      'cr.container_truck_id',
+      'cr.agent_name',
+      'cr.cargo',
+      'cr.confirmed_date',
+      'cr.loaded_date',
+      'cr.arrived_date',
+      'cr.purchase_date',
+      'cr.purchase_price',
+      'cr.purchase_currency',
+      'cr.purchase_usd_rate',
+      'cr.purchase_custom_rate',
+      'cr.sell_date',
+      'cr.sell_price',
+      'cr.sell_currency',
+      'cr.sell_usd_rate',
+      'cr.sell_custom_rate',
+      'cr.usd_rmb_rate',
+      'cr.status',
+      'cr.created_at',
+      'cr.updated_at',
+      'c.first_name as client_first_name',
+      'c.last_name as client_last_name',
+      'c.company_name as client_company',
+      'e.first_name as emp_first_name',
+      'e.last_name as emp_last_name',
+    );
+
+    this.applySorting(
+      paginatedQuery,
+      query.sort_by,
+      query.sort_order || query.order,
+    );
+
+    const rows = await paginatedQuery.limit(limit).offset(offset);
 
     // Batch resolve currency rates for all unique dates in matching and paginated rows
     const uniqueDates = new Set<string>();
@@ -874,6 +908,17 @@ export class CargoRegistrationsService {
         agent_name: r.agent_name,
         client_full_name: clientName,
         cargo: r.cargo,
+        confirmed_date: r.confirmed_date
+          ? this.formatDateStr(r.confirmed_date)
+          : null,
+        loaded_date: r.loaded_date ? this.formatDateStr(r.loaded_date) : null,
+        arrived_date: r.arrived_date
+          ? this.formatDateStr(r.arrived_date)
+          : null,
+        purchase_date: r.purchase_date
+          ? this.formatDateStr(r.purchase_date)
+          : null,
+        sell_date: r.sell_date ? this.formatDateStr(r.sell_date) : null,
         usd_rmb_rate: r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
         employee_full_name: employeeName,
         purchase_price: {
@@ -899,6 +944,8 @@ export class CargoRegistrationsService {
           sell_currency: r.sell_currency,
         },
         status: r.status,
+        created_at: r.created_at || null,
+        updated_at: r.updated_at || null,
       };
     });
 
@@ -1123,9 +1170,13 @@ export class CargoRegistrationsService {
       container_truck_id: row.container_truck_id,
       agent_name: row.agent_name,
       cargo: row.cargo,
-      confirmed_date: row.confirmed_date,
-      loaded_date: row.loaded_date,
-      arrived_date: row.arrived_date,
+      confirmed_date: row.confirmed_date
+        ? this.formatDateStr(row.confirmed_date)
+        : null,
+      loaded_date: row.loaded_date ? this.formatDateStr(row.loaded_date) : null,
+      arrived_date: row.arrived_date
+        ? this.formatDateStr(row.arrived_date)
+        : null,
       purchase_price: purchaseAmount,
       purchase_currency: row.purchase_currency,
       purchase_date: purchaseDate,
@@ -1202,5 +1253,100 @@ export class CargoRegistrationsService {
       message: 'Cargo registration successfully deleted',
       id,
     };
+  }
+
+  /**
+   * Apply dynamic multi-field sorting to cargo registrations query.
+   */
+  private applySorting(
+    queryBuilder: any,
+    sortByParam?: string,
+    sortOrderParam?: string,
+  ) {
+    const rawOrder = (sortOrderParam || 'desc').toString().toLowerCase();
+    const sortOrder: 'asc' | 'desc' = rawOrder === 'asc' ? 'asc' : 'desc';
+    const sortBy = (sortByParam || 'created_at')
+      .toString()
+      .toLowerCase()
+      .trim();
+
+    switch (sortBy) {
+      case 'purchase_date':
+      case 'purchase':
+        return queryBuilder.orderBy('cr.purchase_date', sortOrder);
+      case 'sell_date':
+      case 'sell':
+        return queryBuilder.orderBy('cr.sell_date', sortOrder);
+      case 'confirmed_date':
+      case 'confirmed':
+        return queryBuilder.orderBy('cr.confirmed_date', sortOrder);
+      case 'loaded_date':
+      case 'loaded':
+        return queryBuilder.orderBy('cr.loaded_date', sortOrder);
+      case 'arrived_date':
+      case 'arrived':
+        return queryBuilder.orderBy('cr.arrived_date', sortOrder);
+      case 'updated_at':
+      case 'updated':
+        return queryBuilder.orderBy('cr.updated_at', sortOrder);
+      case 'client_name':
+      case 'client':
+      case 'client_full_name':
+        return queryBuilder
+          .orderBy('c.first_name', sortOrder)
+          .orderBy('c.last_name', sortOrder);
+      case 'client_first_name':
+        return queryBuilder.orderBy('c.first_name', sortOrder);
+      case 'client_last_name':
+        return queryBuilder.orderBy('c.last_name', sortOrder);
+      case 'client_company':
+      case 'company_name':
+      case 'company':
+        return queryBuilder.orderBy('c.company_name', sortOrder);
+      case 'employee_name':
+      case 'employee':
+      case 'employee_full_name':
+      case 'emp_name':
+        return queryBuilder
+          .orderBy('e.first_name', sortOrder)
+          .orderBy('e.last_name', sortOrder);
+      case 'emp_first_name':
+      case 'employee_first_name':
+        return queryBuilder.orderBy('e.first_name', sortOrder);
+      case 'emp_last_name':
+      case 'employee_last_name':
+        return queryBuilder.orderBy('e.last_name', sortOrder);
+      case 'container_truck_id':
+      case 'truck_id':
+        return queryBuilder.orderBy('cr.container_truck_id', sortOrder);
+      case 'cargo':
+        return queryBuilder.orderBy('cr.cargo', sortOrder);
+      case 'agent_name':
+      case 'agent':
+        return queryBuilder.orderBy('cr.agent_name', sortOrder);
+      case 'cargo_type':
+        return queryBuilder.orderBy('cr.cargo_type', sortOrder);
+      case 'container_type':
+        return queryBuilder.orderBy('cr.container_type', sortOrder);
+      case 'volume':
+        return queryBuilder.orderBy('cr.volume', sortOrder);
+      case 'weight':
+        return queryBuilder.orderBy('cr.weight', sortOrder);
+      case 'status':
+        return queryBuilder.orderBy('cr.status', sortOrder);
+      case 'purchase_price':
+        return queryBuilder.orderBy('cr.purchase_price', sortOrder);
+      case 'sell_price':
+        return queryBuilder.orderBy('cr.sell_price', sortOrder);
+      case 'usd_rmb_rate':
+        return queryBuilder.orderBy('cr.usd_rmb_rate', sortOrder);
+      case 'id':
+        return queryBuilder.orderBy('cr.id', sortOrder);
+      case 'created_at':
+      case 'created_date':
+      case 'created':
+      default:
+        return queryBuilder.orderBy('cr.created_at', sortOrder);
+    }
   }
 }

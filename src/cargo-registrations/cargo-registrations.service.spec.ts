@@ -310,6 +310,13 @@ describe('CargoRegistrationsService', () => {
           sell_price: '1500.00',
           sell_currency: 'USD',
           status: 'Waiting',
+          confirmed_date: '2026-08-01',
+          loaded_date: '2026-08-02',
+          arrived_date: '2026-08-05',
+          purchase_date: '2026-07-28',
+          sell_date: '2026-08-03',
+          created_at: '2026-08-01T10:00:00.000Z',
+          updated_at: '2026-08-01T12:00:00.000Z',
           client_first_name: 'John',
           client_last_name: 'Doe',
           emp_first_name: 'Alice',
@@ -330,6 +337,13 @@ describe('CargoRegistrationsService', () => {
           sell_price: '1200.00',
           sell_currency: 'USD',
           status: 'In Transit',
+          confirmed_date: '2026-08-02',
+          loaded_date: '2026-08-04',
+          arrived_date: null,
+          purchase_date: '2026-07-30',
+          sell_date: '2026-08-04',
+          created_at: '2026-08-02T10:00:00.000Z',
+          updated_at: '2026-08-02T12:00:00.000Z',
           client_first_name: 'Bob',
           client_last_name: 'Jones',
           emp_first_name: 'Alice',
@@ -360,10 +374,18 @@ describe('CargoRegistrationsService', () => {
       expect(result.data[0].cargo_type).toBe('LTL');
       expect(result.data[0].volume).toBe(12.5);
       expect(result.data[0].agent_name).toBe('FastCargo');
+      expect(result.data[0].confirmed_date).toBe('2026-08-01');
+      expect(result.data[0].loaded_date).toBe('2026-08-02');
+      expect(result.data[0].arrived_date).toBe('2026-08-05');
+      expect(result.data[0].purchase_date).toBe('2026-07-28');
+      expect(result.data[0].sell_date).toBe('2026-08-03');
+      expect(result.data[0].created_at).toBe('2026-08-01T10:00:00.000Z');
+      expect(result.data[0].updated_at).toBe('2026-08-01T12:00:00.000Z');
       expect(result.data[0].purchase_price.amount).toBe(1000);
       expect(result.data[0].purchase_price.currency).toBe('USD');
       expect(result.data[1].cargo_type).toBe('FTL');
       expect(result.data[1].container_type).toBe('40HQ');
+      expect(result.data[1].arrived_date).toBeNull();
     });
 
     it('should apply timestamp filters (confirmed, loaded, arrived) and creation date filters', async () => {
@@ -482,6 +504,129 @@ describe('CargoRegistrationsService', () => {
       });
 
       expect(queryChain.where).toHaveBeenCalledWith('cr.cargo_type', 'LTL');
+    });
+
+    it('should apply purchase_date and sell_date filters (range and exact)', async () => {
+      const createMockQuery = () => {
+        const queryChain: any = {};
+        queryChain.leftJoin = jest.fn().mockReturnValue(queryChain);
+        queryChain.where = jest.fn().mockReturnValue(queryChain);
+        queryChain.clone = jest.fn().mockImplementation(() => ({
+          count: jest.fn().mockReturnThis(),
+          first: jest.fn().mockResolvedValue({ total: '0' }),
+          select: jest.fn().mockResolvedValue([]),
+        }));
+        const selectChain: any = {
+          orderBy: jest.fn().mockReturnThis(),
+          limit: jest.fn().mockReturnThis(),
+          offset: jest.fn().mockResolvedValue([]),
+        };
+        queryChain.select = jest.fn().mockReturnValue(selectChain);
+        return { queryChain, selectChain };
+      };
+
+      // 1. Range test
+      const { queryChain: q1 } = createMockQuery();
+      knexMock.mockReturnValue(q1);
+
+      await service.findAllCargoRegistrations({
+        purchase_start_date: '2026-08-01',
+        purchase_end_date: '2026-08-15',
+        sell_start_date: '2026-08-05',
+        sell_end_date: '2026-08-20',
+      });
+
+      expect(q1.where).toHaveBeenCalledWith(
+        'cr.purchase_date',
+        '>=',
+        '2026-08-01',
+      );
+      expect(q1.where).toHaveBeenCalledWith(
+        'cr.purchase_date',
+        '<=',
+        '2026-08-15',
+      );
+      expect(q1.where).toHaveBeenCalledWith('cr.sell_date', '>=', '2026-08-05');
+      expect(q1.where).toHaveBeenCalledWith('cr.sell_date', '<=', '2026-08-20');
+
+      // 2. Exact date test
+      const { queryChain: q2 } = createMockQuery();
+      knexMock.mockReturnValue(q2);
+
+      await service.findAllCargoRegistrations({
+        purchase_date: '2026-08-10',
+        sell_date: '2026-08-12',
+      });
+
+      expect(q2.where).toHaveBeenCalledWith('cr.purchase_date', '2026-08-10');
+      expect(q2.where).toHaveBeenCalledWith('cr.sell_date', '2026-08-12');
+    });
+
+    it('should apply dynamic sorting by purchase_date, sell_date, client name, employee name, and order ASC/DESC', async () => {
+      const createMockQuery = () => {
+        const queryChain: any = {};
+        queryChain.leftJoin = jest.fn().mockReturnValue(queryChain);
+        queryChain.where = jest.fn().mockReturnValue(queryChain);
+        queryChain.clone = jest.fn().mockImplementation(() => ({
+          count: jest.fn().mockReturnThis(),
+          first: jest.fn().mockResolvedValue({ total: '0' }),
+          select: jest.fn().mockResolvedValue([]),
+        }));
+        const selectChain: any = {
+          orderBy: jest.fn().mockReturnThis(),
+          limit: jest.fn().mockReturnThis(),
+          offset: jest.fn().mockResolvedValue([]),
+        };
+        queryChain.select = jest.fn().mockReturnValue(selectChain);
+        return { queryChain, selectChain };
+      };
+
+      // Test 1: sort by purchase_date ASC
+      const { queryChain: q1, selectChain: s1 } = createMockQuery();
+      knexMock.mockReturnValue(q1);
+      await service.findAllCargoRegistrations({
+        sort_by: 'purchase_date',
+        sort_order: 'ASC',
+      });
+      expect(s1.orderBy).toHaveBeenCalledWith('cr.purchase_date', 'asc');
+
+      // Test 2: sort by sell_date DESC
+      const { queryChain: q2, selectChain: s2 } = createMockQuery();
+      knexMock.mockReturnValue(q2);
+      await service.findAllCargoRegistrations({
+        sort_by: 'sell_date',
+        sort_order: 'DESC',
+      });
+      expect(s2.orderBy).toHaveBeenCalledWith('cr.sell_date', 'desc');
+
+      // Test 3: sort by client_name ASC
+      const { queryChain: q3, selectChain: s3 } = createMockQuery();
+      knexMock.mockReturnValue(q3);
+      await service.findAllCargoRegistrations({
+        sort_by: 'client_name',
+        sort_order: 'ASC',
+      });
+      expect(s3.orderBy).toHaveBeenCalledWith('c.first_name', 'asc');
+      expect(s3.orderBy).toHaveBeenCalledWith('c.last_name', 'asc');
+
+      // Test 4: sort by employee_name DESC
+      const { queryChain: q4, selectChain: s4 } = createMockQuery();
+      knexMock.mockReturnValue(q4);
+      await service.findAllCargoRegistrations({
+        sort_by: 'employee_name',
+        order: 'DESC',
+      });
+      expect(s4.orderBy).toHaveBeenCalledWith('e.first_name', 'desc');
+      expect(s4.orderBy).toHaveBeenCalledWith('e.last_name', 'desc');
+
+      // Test 5: sort by status ASC
+      const { queryChain: q5, selectChain: s5 } = createMockQuery();
+      knexMock.mockReturnValue(q5);
+      await service.findAllCargoRegistrations({
+        sort_by: 'status',
+        sort_order: 'asc',
+      });
+      expect(s5.orderBy).toHaveBeenCalledWith('cr.status', 'asc');
     });
   });
 

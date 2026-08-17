@@ -377,5 +377,63 @@ export class QueryCargoRegistrationDto {
 
   @IsOptional()
   @IsString()
+  purchase_start_date?: string;
+
+  @IsOptional()
+  @IsString()
+  purchase_end_date?: string;
+
+  @IsOptional()
+  @IsString()
+  purchase_date_start?: string;
+
+  @IsOptional()
+  @IsString()
+  purchase_date_end?: string;
+
+  @IsOptional()
+  @IsString()
+  purchase_date?: string;
+
+  @IsOptional()
+  @IsString()
+  sell_start_date?: string;
+
+  @IsOptional()
+  @IsString()
+  sell_end_date?: string;
+
+  @IsOptional()
+  @IsString()
+  sell_date_start?: string;
+
+  @IsOptional()
+  @IsString()
+  sell_date_end?: string;
+
+  @IsOptional()
+  @IsString()
+  sell_date?: string;
+
+  @IsOptional()
+  @IsString()
+  sort_by?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['ASC', 'DESC', 'asc', 'desc'], {
+    message: 'sort_order must be ASC or DESC',
+  })
+  sort_order?: 'ASC' | 'DESC' | 'asc' | 'desc';
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['ASC', 'DESC', 'asc', 'desc'], {
+    message: 'order must be ASC or DESC',
+  })
+  order?: 'ASC' | 'DESC' | 'asc' | 'desc';
+
+  @IsOptional()
+  @IsString()
   search?: string;
 }

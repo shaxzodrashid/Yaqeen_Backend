@@ -181,8 +181,16 @@ Retrieves a paginated list of cargo registrations with search, multi-timestamp f
 - `client_id` (optional, UUID): Filter by client UUID.
 - `employee_id` (optional, UUID): Filter by assigned employee UUID.
 - `search` (optional): Case-insensitive search on `container_truck_id` or `cargo`.
+- `sort_by` (optional, default: `created_at`): Column / property to sort by:
+  - Dates: `purchase_date`, `sell_date`, `confirmed_date`, `loaded_date`, `arrived_date`, `created_at`, `updated_at`
+  - Client: `client_name`, `client_first_name`, `client_last_name`, `client_company`
+  - Employee: `employee_name`, `emp_first_name`, `emp_last_name`
+  - Cargo & Logistics: `cargo`, `container_truck_id`, `agent_name`, `cargo_type`, `container_type`, `volume`, `weight`, `status`, `purchase_price`, `sell_price`, `usd_rmb_rate`
+- `sort_order` / `order` (optional, default: `DESC`): Sort direction (`ASC` | `DESC` | `asc` | `desc`).
 
 **Timestamp & Creation Date Filters**:
+- `purchase_start_date` / `purchase_end_date` (optional, `YYYY-MM-DD`): Date range filter on `purchase_date` (also supports `purchase_date` for exact date).
+- `sell_start_date` / `sell_end_date` (optional, `YYYY-MM-DD`): Date range filter on `sell_date` (also supports `sell_date` for exact date).
 - `confirmed_start_date` / `confirmed_end_date` (optional, `YYYY-MM-DD`): Date range filter on `confirmed_date`.
 - `loaded_start_date` / `loaded_end_date` (optional, `YYYY-MM-DD`): Date range filter on `loaded_date`.
 - `arrived_start_date` / `arrived_end_date` (optional, `YYYY-MM-DD`): Date range filter on `arrived_date`.
@@ -191,7 +199,7 @@ Retrieves a paginated list of cargo registrations with search, multi-timestamp f
 
 **Example Request**:
 ```http
-GET /api/v1/cargo-registrations?status=In%20Transit&confirmed_start_date=2026-08-01&confirmed_end_date=2026-08-31&created_start_date=2026-08-01&limit=20 HTTP/1.1
+GET /api/v1/cargo-registrations?status=In%20Transit&purchase_start_date=2026-08-01&purchase_end_date=2026-08-31&sort_by=purchase_date&sort_order=DESC&limit=20 HTTP/1.1
 Authorization: Bearer <JWT_TOKEN>
 ```
 
@@ -228,6 +236,11 @@ Authorization: Bearer <JWT_TOKEN>
       "agent_name": "SilkRoad Express",
       "client_full_name": "Jasur Aliyev",
       "cargo": "General Goods",
+      "confirmed_date": "2026-07-20",
+      "loaded_date": "2026-07-22",
+      "arrived_date": null,
+      "purchase_date": "2026-07-20",
+      "sell_date": "2026-08-06",
       "usd_rmb_rate": null,
       "employee_full_name": "Shaxzod Rashidov",
       "purchase_price": {
@@ -252,7 +265,9 @@ Authorization: Bearer <JWT_TOKEN>
         "purchase_currency": "UZS",
         "sell_currency": "USD"
       },
-      "status": "In Transit"
+      "status": "In Transit",
+      "created_at": "2026-07-20T10:00:00.000Z",
+      "updated_at": "2026-07-20T10:00:00.000Z"
     }
   ]
 }
