@@ -7,7 +7,14 @@ import {
   ForbiddenException,
   NotFoundException,
 } from '@nestjs/common';
-import { ALLOWED_CONTAINER_TYPES } from './dto/cargo-registrations.dto';
+import { validate } from 'class-validator';
+import { plainToInstance } from 'class-transformer';
+import {
+  ALLOWED_CONTAINER_TYPES,
+  CARGO_STATUSES,
+  CreateCargoRegistrationDto,
+  UpdateCargoRegistrationDto,
+} from './dto/cargo-registrations.dto';
 
 describe('CargoRegistrationsService', () => {
   let service: CargoRegistrationsService;
@@ -259,6 +266,294 @@ describe('CargoRegistrationsService', () => {
     });
   });
 
+  describe('Cargo Statuses & Validation', () => {
+    it('should define the exact 6 allowed statuses', () => {
+      expect(CARGO_STATUSES).toEqual([
+        'Waiting',
+        'Station',
+        'On the way',
+        'On the border',
+        'Reload',
+        'Arrived',
+      ]);
+    });
+
+    it('should validate all 6 valid statuses for CreateCargoRegistrationDto', async () => {
+      for (const validStatus of CARGO_STATUSES) {
+        const dto = plainToInstance(CreateCargoRegistrationDto, {
+          cargo_type: 'LTL',
+          volume: 10,
+          container_truck_id: 'TRK-123',
+          agent_name: 'Agent A',
+          cargo: 'Electronics',
+          purchase_price: 1000,
+          purchase_currency: 'USD',
+          sell_price: 1500,
+          sell_currency: 'USD',
+          client_id: '11111111-1111-4111-8111-111111111111',
+          status: validStatus,
+        });
+        const errors = await validate(dto);
+        const statusError = errors.find((e) => e.property === 'status');
+        expect(statusError).toBeUndefined();
+      }
+    });
+
+    it('should reject invalid or outdated statuses in CreateCargoRegistrationDto', async () => {
+      const invalidStatuses = [
+        'In Transit',
+        'Border',
+        'At Station',
+        'Delivered',
+        'Pending',
+        'Completed',
+        'Unknown',
+      ];
+
+      for (const invalidStatus of invalidStatuses) {
+        const dto = plainToInstance(CreateCargoRegistrationDto, {
+          cargo_type: 'LTL',
+          volume: 10,
+          container_truck_id: 'TRK-123',
+          agent_name: 'Agent A',
+          cargo: 'Electronics',
+          purchase_price: 1000,
+          purchase_currency: 'USD',
+          sell_price: 1500,
+          sell_currency: 'USD',
+          client_id: '11111111-1111-4111-8111-111111111111',
+          status: invalidStatus,
+        });
+        const errors = await validate(dto);
+        const statusError = errors.find((e) => e.property === 'status');
+        expect(statusError).toBeDefined();
+        expect(statusError?.constraints?.isIn).toContain(
+          'status must be one of',
+        );
+      }
+    });
+
+    it('should validate all 6 valid statuses for UpdateCargoRegistrationDto', async () => {
+      for (const validStatus of CARGO_STATUSES) {
+        const dto = plainToInstance(UpdateCargoRegistrationDto, {
+          status: validStatus,
+        });
+        const errors = await validate(dto);
+        const statusError = errors.find((e) => e.property === 'status');
+        expect(statusError).toBeUndefined();
+      }
+    });
+
+    it('should reject invalid status in UpdateCargoRegistrationDto', async () => {
+      const dto = plainToInstance(UpdateCargoRegistrationDto, {
+        status: 'In Transit',
+      });
+      const errors = await validate(dto);
+      const statusError = errors.find((e) => e.property === 'status');
+      expect(statusError).toBeDefined();
+    });
+
+    it('should correctly distribute all 6 statuses in getCargoRegistrationStats', async () => {
+      const allStatusesData = [
+        {
+          id: 'c-1',
+          cargo_type: 'LTL',
+          volume: 5,
+          weight: 500,
+          status: 'Waiting',
+          purchase_price: {
+            amount: 100,
+            currency: 'USD',
+            amount_usd: 100,
+            amount_uzs: 1200000,
+            date: '2026-08-01',
+          },
+          sell_price: {
+            amount: 200,
+            currency: 'USD',
+            amount_usd: 200,
+            amount_uzs: 2400000,
+            date: '2026-08-01',
+          },
+          net_yield: {
+            amount: 100,
+            currency: 'USD',
+            amount_usd: 100,
+            amount_uzs: 1200000,
+            purchase_currency: 'USD',
+            sell_currency: 'USD',
+          },
+          employee_full_name: 'Emp 1',
+        },
+        {
+          id: 'c-2',
+          cargo_type: 'LTL',
+          volume: 5,
+          weight: 500,
+          status: 'Station',
+          purchase_price: {
+            amount: 100,
+            currency: 'USD',
+            amount_usd: 100,
+            amount_uzs: 1200000,
+            date: '2026-08-01',
+          },
+          sell_price: {
+            amount: 200,
+            currency: 'USD',
+            amount_usd: 200,
+            amount_uzs: 2400000,
+            date: '2026-08-01',
+          },
+          net_yield: {
+            amount: 100,
+            currency: 'USD',
+            amount_usd: 100,
+            amount_uzs: 1200000,
+            purchase_currency: 'USD',
+            sell_currency: 'USD',
+          },
+          employee_full_name: 'Emp 1',
+        },
+        {
+          id: 'c-3',
+          cargo_type: 'LTL',
+          volume: 5,
+          weight: 500,
+          status: 'On the way',
+          purchase_price: {
+            amount: 100,
+            currency: 'USD',
+            amount_usd: 100,
+            amount_uzs: 1200000,
+            date: '2026-08-01',
+          },
+          sell_price: {
+            amount: 200,
+            currency: 'USD',
+            amount_usd: 200,
+            amount_uzs: 2400000,
+            date: '2026-08-01',
+          },
+          net_yield: {
+            amount: 100,
+            currency: 'USD',
+            amount_usd: 100,
+            amount_uzs: 1200000,
+            purchase_currency: 'USD',
+            sell_currency: 'USD',
+          },
+          employee_full_name: 'Emp 1',
+        },
+        {
+          id: 'c-4',
+          cargo_type: 'LTL',
+          volume: 5,
+          weight: 500,
+          status: 'On the border',
+          purchase_price: {
+            amount: 100,
+            currency: 'USD',
+            amount_usd: 100,
+            amount_uzs: 1200000,
+            date: '2026-08-01',
+          },
+          sell_price: {
+            amount: 200,
+            currency: 'USD',
+            amount_usd: 200,
+            amount_uzs: 2400000,
+            date: '2026-08-01',
+          },
+          net_yield: {
+            amount: 100,
+            currency: 'USD',
+            amount_usd: 100,
+            amount_uzs: 1200000,
+            purchase_currency: 'USD',
+            sell_currency: 'USD',
+          },
+          employee_full_name: 'Emp 1',
+        },
+        {
+          id: 'c-5',
+          cargo_type: 'LTL',
+          volume: 5,
+          weight: 500,
+          status: 'Reload',
+          purchase_price: {
+            amount: 100,
+            currency: 'USD',
+            amount_usd: 100,
+            amount_uzs: 1200000,
+            date: '2026-08-01',
+          },
+          sell_price: {
+            amount: 200,
+            currency: 'USD',
+            amount_usd: 200,
+            amount_uzs: 2400000,
+            date: '2026-08-01',
+          },
+          net_yield: {
+            amount: 100,
+            currency: 'USD',
+            amount_usd: 100,
+            amount_uzs: 1200000,
+            purchase_currency: 'USD',
+            sell_currency: 'USD',
+          },
+          employee_full_name: 'Emp 1',
+        },
+        {
+          id: 'c-6',
+          cargo_type: 'LTL',
+          volume: 5,
+          weight: 500,
+          status: 'Arrived',
+          purchase_price: {
+            amount: 100,
+            currency: 'USD',
+            amount_usd: 100,
+            amount_uzs: 1200000,
+            date: '2026-08-01',
+          },
+          sell_price: {
+            amount: 200,
+            currency: 'USD',
+            amount_usd: 200,
+            amount_uzs: 2400000,
+            date: '2026-08-01',
+          },
+          net_yield: {
+            amount: 100,
+            currency: 'USD',
+            amount_usd: 100,
+            amount_uzs: 1200000,
+            purchase_currency: 'USD',
+            sell_currency: 'USD',
+          },
+          employee_full_name: 'Emp 1',
+        },
+      ];
+
+      jest.spyOn(service, 'findAllCargoRegistrations').mockResolvedValueOnce({
+        meta: { total: 6 },
+        data: allStatusesData,
+      } as any);
+
+      const stats = await service.getCargoRegistrationStats({});
+      expect(stats.status_distribution).toEqual({
+        Waiting: 1,
+        Station: 1,
+        'On the way': 1,
+        'On the border': 1,
+        Reload: 1,
+        Arrived: 1,
+      });
+    });
+  });
+
   describe('GET list response & metadata aggregations', () => {
     it('should return aggregated meta and structured data list', async () => {
       const paginatedData = [
@@ -303,7 +598,7 @@ describe('CargoRegistrationsService', () => {
           purchase_currency: 'RMB',
           sell_price: '1200.00',
           sell_currency: 'USD',
-          status: 'In Transit',
+          status: 'On the way',
           confirmed_date: '2026-08-02',
           loaded_date: '2026-08-04',
           arrived_date: null,
@@ -727,7 +1022,7 @@ describe('CargoRegistrationsService', () => {
         sell_currency: 'USD',
         sell_date: '2026-08-06',
         sell_usd_rate: 11886.72,
-        status: 'In Transit',
+        status: 'On the way',
         client_id: 'client-uuid-1',
         employee_id: 'emp-uuid-1',
         created_at: new Date('2026-07-20'),
@@ -816,7 +1111,7 @@ describe('CargoRegistrationsService', () => {
               purchase_currency: 'USD',
               sell_currency: 'USD',
             },
-            status: 'Delivered',
+            status: 'Arrived',
           },
           {
             id: 'c-2',
@@ -852,7 +1147,7 @@ describe('CargoRegistrationsService', () => {
               purchase_currency: 'USD',
               sell_currency: 'USD',
             },
-            status: 'In Transit',
+            status: 'On the way',
           },
         ],
       } as any);
@@ -868,8 +1163,12 @@ describe('CargoRegistrationsService', () => {
       expect(stats.ltl_statistics.total_volume_m3).toBe(25);
       expect(stats.ftl_statistics.total_count).toBe(1);
       expect(stats.ftl_statistics.container_type_distribution['40HQ']).toBe(1);
-      expect(stats.status_distribution['Delivered']).toBe(1);
-      expect(stats.status_distribution['In Transit']).toBe(1);
+      expect(stats.status_distribution['Arrived']).toBe(1);
+      expect(stats.status_distribution['On the way']).toBe(1);
+      expect(stats.status_distribution['Waiting']).toBe(0);
+      expect(stats.status_distribution['Station']).toBe(0);
+      expect(stats.status_distribution['On the border']).toBe(0);
+      expect(stats.status_distribution['Reload']).toBe(0);
       expect(stats.by_manager[0].employee_name).toBe('John Doe');
       expect(stats.by_manager[0].gross_sales_usd).toBe(3000);
     });

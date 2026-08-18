@@ -99,7 +99,7 @@ Registers a new cargo transaction.
   "sell_currency": "USD",
   "sell_date": "2026-08-06",
   "client_id": "8e3b4a21-9951-40ef-a442-123456789abc",
-  "status": "In Transit"
+  "status": "On the way"
 }
 ```
 
@@ -142,7 +142,7 @@ Registers a new cargo transaction.
     "amount_uzs": 5009376
   },
   "usd_rmb_rate": null,
-  "status": "In Transit",
+  "status": "On the way",
   "description": null,
   "client_id": "8e3b4a21-9951-40ef-a442-123456789abc",
   "client": {
@@ -175,7 +175,7 @@ Retrieves a paginated list of cargo registrations with search, multi-timestamp f
 - `page` (optional, default: 1): Page number.
 - `limit` (optional, default: 10): Items per page.
 - `offset` (optional): Direct offset override.
-- `status` (optional): Filter by cargo status (`Waiting`, `In Transit`, `Border`, `At Station`, `Delivered`).
+- `status` (optional): Filter by cargo status (`Waiting`, `Station`, `On the way`, `On the border`, `Reload`, `Arrived`).
 - `cargo_type` (optional): Filter by cargo type (`LTL` | `FTL`).
 - `container_type` (optional): Filter by container type.
 - `client_id` (optional, UUID): Filter by client UUID.
@@ -199,7 +199,7 @@ Retrieves a paginated list of cargo registrations with search, multi-timestamp f
 
 **Example Request**:
 ```http
-GET /api/v1/cargo-registrations?status=In%20Transit&purchase_start_date=2026-08-01&purchase_end_date=2026-08-31&sort_by=purchase_date&sort_order=DESC&limit=20 HTTP/1.1
+GET /api/v1/cargo-registrations?status=On%20the%20way&purchase_start_date=2026-08-01&purchase_end_date=2026-08-31&sort_by=purchase_date&sort_order=DESC&limit=20 HTTP/1.1
 Authorization: Bearer <JWT_TOKEN>
 ```
 
@@ -265,7 +265,7 @@ Authorization: Bearer <JWT_TOKEN>
         "purchase_currency": "UZS",
         "sell_currency": "USD"
       },
-      "status": "In Transit",
+      "status": "On the way",
       "created_at": "2026-07-20T10:00:00.000Z",
       "updated_at": "2026-07-20T10:00:00.000Z"
     }

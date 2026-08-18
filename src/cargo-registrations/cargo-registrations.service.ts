@@ -16,6 +16,7 @@ import {
   UpdateCargoRegistrationDto,
   QueryCargoRegistrationDto,
   ALLOWED_CONTAINER_TYPES,
+  CARGO_STATUSES,
 } from './dto/cargo-registrations.dto';
 
 @Injectable()
@@ -1058,13 +1059,13 @@ export class CargoRegistrationsService {
 
     let totalFtlCount = 0;
     const ftlContainerDistribution: Record<string, number> = {};
-    const statusDistribution: Record<string, number> = {
-      Waiting: 0,
-      'In Transit': 0,
-      Border: 0,
-      'At Station': 0,
-      Delivered: 0,
-    };
+    const statusDistribution: Record<string, number> = CARGO_STATUSES.reduce(
+      (acc, s) => {
+        acc[s] = 0;
+        return acc;
+      },
+      {} as Record<string, number>,
+    );
 
     const managerStatsMap = new Map<
       string,

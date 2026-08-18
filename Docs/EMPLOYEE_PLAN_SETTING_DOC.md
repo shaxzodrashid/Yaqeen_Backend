@@ -352,7 +352,7 @@ Returns the updated plans progress and leaderboard response.
 
 #### Query Parameters (All optional):
 
-- `status` (string): Filter by order status (`Waiting`, `In Transit`, `Border`, `At Station`, `Delivered`).
+- `status` (string): Filter by order status (`Waiting`, `Station`, `On the way`, `On the border`, `Reload`, `Arrived`).
 - `employee_id` (UUID): Filter by assigned sales manager.
 - `client_id` (UUID): Filter by customer client.
 - `cargo_type` (string): `LTL` or `FTL`.
@@ -396,10 +396,11 @@ Returns the updated plans progress and leaderboard response.
   },
   "status_distribution": {
     "Waiting": 15,
-    "In Transit": 45,
-    "Border": 12,
-    "At Station": 20,
-    "Delivered": 50
+    "Station": 20,
+    "On the way": 45,
+    "On the border": 12,
+    "Reload": 5,
+    "Arrived": 45
   },
   "by_manager": [
     {

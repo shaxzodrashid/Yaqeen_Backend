@@ -42,11 +42,14 @@ export type CargoCurrency = (typeof ALLOWED_CURRENCIES)[number];
 
 export const CARGO_STATUSES = [
   'Waiting',
-  'In Transit',
-  'Border',
-  'At Station',
-  'Delivered',
+  'Station',
+  'On the way',
+  'On the border',
+  'Reload',
+  'Arrived',
 ] as const;
+
+export type CargoStatus = (typeof CARGO_STATUSES)[number];
 
 export class CreateCargoRegistrationDto {
   @IsString()

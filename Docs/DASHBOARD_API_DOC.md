@@ -38,19 +38,19 @@ Authorization: Bearer <your_access_token>
 
 All analytics metrics are derived from the `cargo_registrations` table:
 
-| Column Name      | Data Type       | Usage in Dashboard Analytics                                                  |
-| :--------------- | :-------------- | :---------------------------------------------------------------------------- |
-| `id`             | `UUID`          | Count of registered cargo orders (`orderCount`).                              |
-| `created_at`     | `TIMESTAMP`     | Primary timestamp used for date range filtering and time-bucket slotting.     |
-| `confirmed_date` | `DATE`          | Fallback registration date if `created_at` is null.                           |
-| `sell_price`     | `DECIMAL(14,2)` | Gross revenue / sales amount (`totalSales`).                                  |
-| `purchase_price` | `DECIMAL(14,2)` | Cost of goods sold / carrier price (`totalPurchaseCost`).                     |
-| `status`         | `VARCHAR(50)`   | Status filtering & distribution (`Completed`, `Waiting`, `In Transit`, etc.). |
-| `cargo_type`     | `VARCHAR(10)`   | Cargo classification (`LTL` vs `FTL`).                                        |
-| `volume`         | `DECIMAL(12,4)` | Total volume metric ($m^3$).                                                  |
-| `weight`         | `DECIMAL(12,4)` | Total weight metric ($kg$).                                                   |
-| `employee_id`    | `UUID`          | Sales manager reference for filtering and leaderboards.                       |
-| `client_id`      | `UUID`          | Customer client reference for filtering and leaderboards.                     |
+| Column Name      | Data Type       | Usage in Dashboard Analytics                                                                                |
+| :--------------- | :-------------- | :---------------------------------------------------------------------------------------------------------- |
+| `id`             | `UUID`          | Count of registered cargo orders (`orderCount`).                                                            |
+| `created_at`     | `TIMESTAMP`     | Primary timestamp used for date range filtering and time-bucket slotting.                                   |
+| `confirmed_date` | `DATE`          | Fallback registration date if `created_at` is null.                                                         |
+| `sell_price`     | `DECIMAL(14,2)` | Gross revenue / sales amount (`totalSales`).                                                                |
+| `purchase_price` | `DECIMAL(14,2)` | Cost of goods sold / carrier price (`totalPurchaseCost`).                                                   |
+| `status`         | `VARCHAR(50)`   | Status filtering & distribution (`Waiting`, `Station`, `On the way`, `On the border`, `Reload`, `Arrived`). |
+| `cargo_type`     | `VARCHAR(10)`   | Cargo classification (`LTL` vs `FTL`).                                                                      |
+| `volume`         | `DECIMAL(12,4)` | Total volume metric ($m^3$).                                                                                |
+| `weight`         | `DECIMAL(12,4)` | Total weight metric ($kg$).                                                                                 |
+| `employee_id`    | `UUID`          | Sales manager reference for filtering and leaderboards.                                                     |
+| `client_id`      | `UUID`          | Customer client reference for filtering and leaderboards.                                                   |
 
 ---
 
@@ -119,16 +119,16 @@ $$\text{growthRateSales} = \begin{cases} \left(\frac{\text{totalSales}_{\text{cu
 
 #### Query Parameters:
 
-| Parameter     | Type     | Required            | Enum / Format                                               | Default | Description                          |
-| :------------ | :------- | :------------------ | :---------------------------------------------------------- | :------ | :----------------------------------- |
-| `period`      | `string` | No                  | `1D`, `5D`, `1M`, `6M`, `YTD`, `1Y`, `5Y`, `MAX`, `CUSTOM`  | `1M`    | Timeframe period preset.             |
-| `granularity` | `string` | No                  | `hour`, `day`, `week`, `month`, `year`                      | Auto    | Overrides default time bucket size.  |
-| `start_date`  | `string` | **Yes (if CUSTOM)** | ISO 8601 string (`YYYY-MM-DD`)                              | None    | Custom start date boundary.          |
-| `end_date`    | `string` | **Yes (if CUSTOM)** | ISO 8601 string (`YYYY-MM-DD`)                              | None    | Custom end date boundary.            |
-| `employee_id` | `UUID`   | No                  | UUID v4                                                     | None    | Filter by sales manager employee ID. |
-| `client_id`   | `UUID`   | No                  | UUID v4                                                     | None    | Filter by client ID.                 |
-| `status`      | `string` | No                  | `Waiting`, `In Transit`, `Border`, `Delivered`, `Completed` | None    | Filter by cargo status.              |
-| `cargo_type`  | `string` | No                  | `LTL`, `FTL`                                                | None    | Filter by cargo type.                |
+| Parameter     | Type     | Required            | Enum / Format                                                            | Default | Description                          |
+| :------------ | :------- | :------------------ | :----------------------------------------------------------------------- | :------ | :----------------------------------- |
+| `period`      | `string` | No                  | `1D`, `5D`, `1M`, `6M`, `YTD`, `1Y`, `5Y`, `MAX`, `CUSTOM`               | `1M`    | Timeframe period preset.             |
+| `granularity` | `string` | No                  | `hour`, `day`, `week`, `month`, `year`                                   | Auto    | Overrides default time bucket size.  |
+| `start_date`  | `string` | **Yes (if CUSTOM)** | ISO 8601 string (`YYYY-MM-DD`)                                           | None    | Custom start date boundary.          |
+| `end_date`    | `string` | **Yes (if CUSTOM)** | ISO 8601 string (`YYYY-MM-DD`)                                           | None    | Custom end date boundary.            |
+| `employee_id` | `UUID`   | No                  | UUID v4                                                                  | None    | Filter by sales manager employee ID. |
+| `client_id`   | `UUID`   | No                  | UUID v4                                                                  | None    | Filter by client ID.                 |
+| `status`      | `string` | No                  | `Waiting`, `Station`, `On the way`, `On the border`, `Reload`, `Arrived` | None    | Filter by cargo status.              |
+| `cargo_type`  | `string` | No                  | `LTL`, `FTL`                                                             | None    | Filter by cargo type.                |
 
 #### Universal Response (200 OK):
 
