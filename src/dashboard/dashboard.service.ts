@@ -43,6 +43,62 @@ export class DashboardService {
     @Optional() private readonly currencyService?: CurrencyService,
   ) {}
 
+  private getCurrencyMultipliers(
+    rates?: Record<Currency, any>,
+  ): Record<string, number> {
+    const multipliers: Record<string, number> = {
+      [Currency.UZS]: 1,
+      [Currency.USD]: 12850,
+      [Currency.RUB]: 145,
+      [Currency.RMB]: 1815,
+      [Currency.CNY]: 1815,
+    };
+    if (rates) {
+      for (const key of Object.keys(rates)) {
+        const item = rates[key as Currency];
+        if (item && item.nominal && item.rate) {
+          multipliers[key] = Number(item.rate) / Number(item.nominal);
+        }
+      }
+    }
+    return multipliers;
+  }
+
+  private convertFromUzsFast(
+    amountUzs: number,
+    targetCurrency: Currency,
+    multipliers: Record<string, number>,
+  ): number {
+    if (targetCurrency === Currency.UZS) {
+      return Math.round(amountUzs * 100) / 100;
+    }
+    const targetUnitRate = multipliers[targetCurrency] || 1;
+    return Math.round((amountUzs / targetUnitRate) * 100) / 100;
+  }
+
+  private findBucketIndex(
+    recTime: number,
+    buckets: Array<{ bucketStart: Date; bucketEnd: Date }>,
+  ): number {
+    let low = 0;
+    let high = buckets.length - 1;
+    while (low <= high) {
+      const mid = (low + high) >> 1;
+      const b = buckets[mid];
+      const start = b.bucketStart.getTime();
+      const end = b.bucketEnd.getTime();
+      if (recTime >= start && recTime <= end) {
+        return mid;
+      }
+      if (recTime < start) {
+        high = mid - 1;
+      } else {
+        low = mid + 1;
+      }
+    }
+    return -1;
+  }
+
   private async convertRecordPricesToUzs(
     r: any,
     rates?: Record<Currency, any>,
@@ -109,6 +165,7 @@ export class DashboardService {
     const rates = this.currencyService
       ? await this.currencyService.getLatestRates()
       : undefined;
+    const multipliers = this.getCurrencyMultipliers(rates);
 
     // 3. Generate continuous gap-filled time buckets
     const buckets = this.generateTimeBuckets(
@@ -117,71 +174,104 @@ export class DashboardService {
       range.granularity,
     );
 
-    // 4. Populate time buckets with sales data converted to UZS
-    await this.populateBucketsWithData(buckets, currentRecords, rates);
+    // 4. Single-pass high-performance aggregation:
+    // Sums net profit (sell_price - purchase_price) for all cargos and slots into buckets
+    let totalSalesUzs = 0;
+    let totalPurchaseCostUzs = 0;
+    let totalMarginUzs = 0;
+    let completedOrders = 0;
+
+    for (let i = 0; i < currentRecords.length; i++) {
+      const r = currentRecords[i];
+      const sellPrice = Number(r.sell_price) || 0;
+      const purchasePrice = Number(r.purchase_price) || 0;
+      const sellCurr = (r.sell_currency as Currency) || Currency.UZS;
+      const purchaseCurr = (r.purchase_currency as Currency) || Currency.UZS;
+
+      const sellMultiplier = multipliers[sellCurr] ?? 1;
+      const purchaseMultiplier = multipliers[purchaseCurr] ?? 1;
+
+      const sellPriceUzs = Math.round(sellPrice * sellMultiplier * 100) / 100;
+      const purchasePriceUzs =
+        Math.round(purchasePrice * purchaseMultiplier * 100) / 100;
+      const netProfitUzs = sellPriceUzs - purchasePriceUzs;
+
+      totalSalesUzs += sellPriceUzs;
+      totalPurchaseCostUzs += purchasePriceUzs;
+      totalMarginUzs += netProfitUzs;
+
+      if ((r.status || '').toLowerCase() === 'completed') {
+        completedOrders++;
+      }
+
+      // Fast binary search bucket slotting
+      const recDate = new Date(r.created_at || r.confirmed_date);
+      const recTime = recDate.getTime();
+      if (!isNaN(recTime)) {
+        const bIdx = this.findBucketIndex(recTime, buckets);
+        if (bIdx !== -1) {
+          const b = buckets[bIdx];
+          b.sales += sellPriceUzs;
+          b.purchaseCost += purchasePriceUzs;
+          b.margin += netProfitUzs;
+          b.orderCount += 1;
+        }
+      }
+    }
+
+    const totalOrders = currentRecords.length;
+    const averageOrderValueUzs =
+      totalOrders > 0 ? totalMarginUzs / totalOrders : 0;
+    const pendingOrders = totalOrders - completedOrders;
+    const marginPercentage =
+      totalSalesUzs > 0 ? (totalMarginUzs / totalSalesUzs) * 100 : 0;
 
     // 5. Calculate cumulative trajectory and format data points converted to target currency
     let runningSalesUzs = 0;
     let runningMarginUzs = 0;
 
-    const dataPoints: TimeBucketDataPoint[] = [];
+    const dataPoints: TimeBucketDataPoint[] = new Array(buckets.length);
     for (let idx = 0; idx < buckets.length; idx++) {
       const bucket = buckets[idx];
       runningSalesUzs += bucket.sales;
       runningMarginUzs += bucket.margin;
 
-      const sales = await this.convertFromUzs(bucket.sales, targetCurrency);
-      const purchaseCost = await this.convertFromUzs(
-        bucket.purchaseCost,
-        targetCurrency,
-      );
-      const margin = await this.convertFromUzs(bucket.margin, targetCurrency);
-      const cumulativeSales = await this.convertFromUzs(
-        runningSalesUzs,
-        targetCurrency,
-      );
-      const cumulativeMargin = await this.convertFromUzs(
-        runningMarginUzs,
-        targetCurrency,
-      );
-
-      dataPoints.push({
+      dataPoints[idx] = {
         index: idx,
         bucketStart: bucket.bucketStart.toISOString(),
         bucketEnd: bucket.bucketEnd.toISOString(),
         dateKey: bucket.dateKey,
         label: bucket.label,
-        sales,
-        purchaseCost,
-        margin,
+        sales: this.convertFromUzsFast(
+          bucket.sales,
+          targetCurrency,
+          multipliers,
+        ),
+        purchaseCost: this.convertFromUzsFast(
+          bucket.purchaseCost,
+          targetCurrency,
+          multipliers,
+        ),
+        margin: this.convertFromUzsFast(
+          bucket.margin,
+          targetCurrency,
+          multipliers,
+        ),
         orderCount: bucket.orderCount,
-        cumulativeSales,
-        cumulativeMargin,
-      });
+        cumulativeSales: this.convertFromUzsFast(
+          runningSalesUzs,
+          targetCurrency,
+          multipliers,
+        ),
+        cumulativeMargin: this.convertFromUzsFast(
+          runningMarginUzs,
+          targetCurrency,
+          multipliers,
+        ),
+      };
     }
 
-    // 6. Compute summary aggregates for current period in UZS first
-    let totalSalesUzs = 0;
-    let totalPurchaseCostUzs = 0;
-    for (const r of currentRecords) {
-      const { sellPriceUzs, purchasePriceUzs } =
-        await this.convertRecordPricesToUzs(r, rates);
-      totalSalesUzs += sellPriceUzs;
-      totalPurchaseCostUzs += purchasePriceUzs;
-    }
-
-    const totalMarginUzs = totalSalesUzs - totalPurchaseCostUzs;
-    const marginPercentage =
-      totalSalesUzs > 0 ? (totalMarginUzs / totalSalesUzs) * 100 : 0;
-    const totalOrders = currentRecords.length;
-    const averageOrderValueUzs =
-      totalOrders > 0 ? totalMarginUzs / totalOrders : 0;
-    const completedOrders = currentRecords.filter(
-      (r) => (r.status || '').toLowerCase() === 'completed',
-    ).length;
-    const pendingOrders = totalOrders - completedOrders;
-
-    // 7. Calculate growth rate against preceding period if available
+    // 6. Calculate growth rate against preceding period if available
     let growthRateSales: number | null = null;
     let growthRateMargin: number | null = null;
 
@@ -193,11 +283,19 @@ export class DashboardService {
       );
       let prevSalesUzs = 0;
       let prevCostUzs = 0;
-      for (const r of prevRecords) {
-        const { sellPriceUzs, purchasePriceUzs } =
-          await this.convertRecordPricesToUzs(r, rates);
-        prevSalesUzs += sellPriceUzs;
-        prevCostUzs += purchasePriceUzs;
+      for (let i = 0; i < prevRecords.length; i++) {
+        const r = prevRecords[i];
+        const sellPrice = Number(r.sell_price) || 0;
+        const purchasePrice = Number(r.purchase_price) || 0;
+        const sellCurr = (r.sell_currency as Currency) || Currency.UZS;
+        const purchaseCurr = (r.purchase_currency as Currency) || Currency.UZS;
+
+        const sellMultiplier = multipliers[sellCurr] ?? 1;
+        const purchaseMultiplier = multipliers[purchaseCurr] ?? 1;
+
+        prevSalesUzs += Math.round(sellPrice * sellMultiplier * 100) / 100;
+        prevCostUzs +=
+          Math.round(purchasePrice * purchaseMultiplier * 100) / 100;
       }
       const prevMarginUzs = prevSalesUzs - prevCostUzs;
 
@@ -228,18 +326,25 @@ export class DashboardService {
       currency: targetCurrency,
     };
 
-    const totalSales = await this.convertFromUzs(totalSalesUzs, targetCurrency);
-    const totalPurchaseCost = await this.convertFromUzs(
+    const totalSales = this.convertFromUzsFast(
+      totalSalesUzs,
+      targetCurrency,
+      multipliers,
+    );
+    const totalPurchaseCost = this.convertFromUzsFast(
       totalPurchaseCostUzs,
       targetCurrency,
+      multipliers,
     );
-    const totalMargin = await this.convertFromUzs(
+    const totalMargin = this.convertFromUzsFast(
       totalMarginUzs,
       targetCurrency,
+      multipliers,
     );
-    const averageOrderValue = await this.convertFromUzs(
+    const averageOrderValue = this.convertFromUzsFast(
       averageOrderValueUzs,
       targetCurrency,
+      multipliers,
     );
 
     const summary: TimeframeSummary = {
