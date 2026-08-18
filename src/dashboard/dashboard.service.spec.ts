@@ -238,6 +238,7 @@ describe('DashboardService', () => {
       expect(summary.totalSales).toBe(12000);
       expect(summary.totalMargin).toBe(3800);
       expect(summary.totalOrders).toBe(2);
+      expect(summary.averageOrderValue).toBe(1900);
       expect(summary.ftlOrderCount).toBe(1);
       expect(summary.ltlOrderCount).toBe(1);
 
@@ -320,6 +321,7 @@ describe('DashboardService', () => {
       expect(summaryUsd.totalSales).toBe(100);
       expect(summaryUsd.totalPurchaseCost).toBe(60);
       expect(summaryUsd.totalMargin).toBe(40);
+      expect(summaryUsd.averageOrderValue).toBe(40);
     });
   });
 });

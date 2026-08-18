@@ -32,6 +32,12 @@ describe('CargoRegistrationsService', () => {
         RUB: { currency: 'RUB', rate: 145, nominal: 1 },
         RMB: { currency: 'RMB', rate: 1815, nominal: 1 },
       }),
+      getLatestRates: jest.fn().mockResolvedValue({
+        USD: { currency: 'USD', rate: 11886.72, nominal: 1 },
+        UZS: { currency: 'UZS', rate: 1, nominal: 1 },
+        RUB: { currency: 'RUB', rate: 145, nominal: 1 },
+        RMB: { currency: 'RMB', rate: 1815, nominal: 1 },
+      }),
       getUsdRateForDate: jest.fn().mockResolvedValue(11886.72),
     };
 

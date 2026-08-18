@@ -408,7 +408,7 @@ export class DashboardService {
     ).length;
     const waitingOrders = totalOrders - completedOrders;
     const averageOrderValueUzs =
-      totalOrders > 0 ? totalSalesUzs / totalOrders : 0;
+      totalOrders > 0 ? totalMarginUzs / totalOrders : 0;
 
     const totalVolume = records.reduce(
       (sum, r) => sum + Number(r.volume || 0),

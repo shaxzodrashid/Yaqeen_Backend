@@ -890,24 +890,45 @@ export class CargoRegistrationsService {
       const rows = await paginatedQuery.limit(limit).offset(offset);
 
       if (Array.isArray(rows) && rows.length > 0) {
-        // Collect unique dates only for the current paginated slice (max 10-20 dates instead of 100k)
+        // Collect unique dates only for rows that actually require dynamic exchange rates
         const uniqueDates = new Set<string>();
         for (const row of rows) {
-          const purchaseDate = this.formatDateStr(
-            row.purchase_date || row.confirmed_date || row.created_at,
-          );
-          const sellDate = this.formatDateStr(row.sell_date || row.created_at);
-          uniqueDates.add(purchaseDate);
-          uniqueDates.add(sellDate);
+          const needsPurchaseRate =
+            row.purchase_currency &&
+            row.purchase_currency !== 'USD' &&
+            !row.purchase_custom_rate &&
+            !row.purchase_usd_rate;
+          const needsSellRate =
+            row.sell_currency &&
+            row.sell_currency !== 'USD' &&
+            !row.sell_custom_rate &&
+            !row.sell_usd_rate;
+
+          if (needsPurchaseRate) {
+            const purchaseDate = this.formatDateStr(
+              row.purchase_date || row.confirmed_date || row.created_at,
+            );
+            uniqueDates.add(purchaseDate);
+          }
+          if (needsSellRate) {
+            const sellDate = this.formatDateStr(
+              row.sell_date || row.created_at,
+            );
+            uniqueDates.add(sellDate);
+          }
         }
 
         const ratesMap = new Map<string, Record<string, any>>();
-        await Promise.all(
-          Array.from(uniqueDates).map(async (d) => {
-            const rates = await this.currencyService.getRatesForDate(d);
-            ratesMap.set(d, rates);
-          }),
-        );
+        if (uniqueDates.size > 0) {
+          await Promise.all(
+            Array.from(uniqueDates).map(async (d) => {
+              const rates = await this.currencyService.getRatesForDate(d);
+              ratesMap.set(d, rates);
+            }),
+          );
+        }
+
+        const defaultRates = await this.currencyService.getLatestRates();
 
         formattedData = rows.map((r) => {
           const clientName = r.client_first_name
@@ -925,8 +946,8 @@ export class CargoRegistrationsService {
           );
           const sellDate = this.formatDateStr(r.sell_date || r.created_at);
 
-          const purchaseRates = ratesMap.get(purchaseDate) || {};
-          const sellRates = ratesMap.get(sellDate) || {};
+          const purchaseRates = ratesMap.get(purchaseDate) || defaultRates;
+          const sellRates = ratesMap.get(sellDate) || defaultRates;
 
           const purchaseRes = this.convertPriceToUsdAndUzs(
             purchaseAmount,
@@ -1229,9 +1250,23 @@ export class CargoRegistrationsService {
     );
     const sellDate = this.formatDateStr(row.sell_date || row.created_at);
 
-    const purchaseRates =
-      await this.currencyService.getRatesForDate(purchaseDate);
-    const sellRates = await this.currencyService.getRatesForDate(sellDate);
+    const needsPurchaseRate =
+      row.purchase_currency &&
+      row.purchase_currency !== 'USD' &&
+      !row.purchase_custom_rate &&
+      !row.purchase_usd_rate;
+    const needsSellRate =
+      row.sell_currency &&
+      row.sell_currency !== 'USD' &&
+      !row.sell_custom_rate &&
+      !row.sell_usd_rate;
+
+    const purchaseRates = needsPurchaseRate
+      ? await this.currencyService.getRatesForDate(purchaseDate)
+      : await this.currencyService.getLatestRates();
+    const sellRates = needsSellRate
+      ? await this.currencyService.getRatesForDate(sellDate)
+      : await this.currencyService.getLatestRates();
 
     const purchaseRes = this.convertPriceToUsdAndUzs(
       purchaseAmount,

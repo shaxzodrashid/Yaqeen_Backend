@@ -268,19 +268,53 @@ export class CurrencyService {
       ? `https://cbu.uz/uz/arkhiv-kursov-valyut/json/all/${dateStr}/`
       : this.CBU_API_URL;
 
-    const res = await fetch(apiUrl, {
-      headers: { Accept: 'application/json' },
-    });
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 2500);
+
+    let res: Response;
+    try {
+      res = await fetch(apiUrl, {
+        headers: { Accept: 'application/json' },
+        signal: controller.signal,
+      });
+    } catch (err: any) {
+      this.logger.warn(`CBU API fetch failed or timed out: ${err.message}`);
+      return null;
+    } finally {
+      clearTimeout(timeout);
+    }
 
     if (!res.ok) {
       this.logger.warn(`CBU API returned HTTP status ${res.status}`);
       return null;
     }
 
-    const data: CbuRateItem[] = await res.json();
+    let data: CbuRateItem[];
+    try {
+      data = await res.json();
+    } catch {
+      return null;
+    }
+
     if (!Array.isArray(data)) {
       return null;
     }
+
+    const parseCbuDate = (rawDate?: string): string => {
+      if (!rawDate) return dateStr || new Date().toISOString().slice(0, 10);
+      if (rawDate.includes('.')) {
+        const [d, m, y] = rawDate.split('.');
+        if (y && m && d)
+          return `${y}-${m.padStart(2, '0')}-${d.padStart(2, '0')}`;
+      }
+      return rawDate;
+    };
+
+    const resolvedDate =
+      dateStr ||
+      (data[0]
+        ? parseCbuDate(data[0].Date)
+        : new Date().toISOString().slice(0, 10));
 
     const ratesResult: Record<Currency, CurrencyRateDto> = {
       [Currency.UZS]: {
@@ -289,16 +323,29 @@ export class CurrencyService {
         nominal: 1,
         rate: 1.0,
         diff: 0,
-        date: dateStr || new Date().toISOString().slice(0, 10),
+        date: resolvedDate,
       },
-      [Currency.USD]: this.FALLBACK_RATES[Currency.USD],
-      [Currency.RUB]: this.FALLBACK_RATES[Currency.RUB],
-      [Currency.RMB]: this.FALLBACK_RATES[Currency.RMB],
-      [Currency.CNY]: this.FALLBACK_RATES[Currency.CNY],
+      [Currency.USD]: {
+        ...this.FALLBACK_RATES[Currency.USD],
+        date: resolvedDate,
+      },
+      [Currency.RUB]: {
+        ...this.FALLBACK_RATES[Currency.RUB],
+        date: resolvedDate,
+      },
+      [Currency.RMB]: {
+        ...this.FALLBACK_RATES[Currency.RMB],
+        date: resolvedDate,
+      },
+      [Currency.CNY]: {
+        ...this.FALLBACK_RATES[Currency.CNY],
+        date: resolvedDate,
+      },
     };
 
     for (const item of data) {
       const ccy = item.Ccy?.toUpperCase() as Currency;
+      const itemDate = parseCbuDate(item.Date) || resolvedDate;
       if (ccy === Currency.USD || ccy === Currency.RUB) {
         ratesResult[ccy] = {
           currency: ccy,
@@ -306,7 +353,7 @@ export class CurrencyService {
           nominal: parseInt(item.Nominal, 10) || 1,
           rate: parseFloat(item.Rate) || ratesResult[ccy].rate,
           diff: parseFloat(item.Diff) || 0,
-          date: item.Date,
+          date: itemDate,
         };
       } else if (ccy === Currency.CNY || ccy === Currency.RMB) {
         const rateData = {
@@ -314,7 +361,7 @@ export class CurrencyService {
           nominal: parseInt(item.Nominal, 10) || 1,
           rate: parseFloat(item.Rate) || 1815.0,
           diff: parseFloat(item.Diff) || 0,
-          date: item.Date,
+          date: itemDate,
         };
         ratesResult[Currency.CNY] = {
           currency: Currency.CNY,
@@ -393,7 +440,15 @@ export class CurrencyService {
     try {
       let query = this.knex('currency_rates').select('*');
       if (dateStr) {
-        query = query.where('rate_date', dateStr);
+        const parts = dateStr.split('-');
+        if (parts.length === 3) {
+          const ddmmyyyy = `${parts[2]}.${parts[1]}.${parts[0]}`;
+          query = query.where((b) => {
+            b.where('rate_date', dateStr).orWhere('rate_date', ddmmyyyy);
+          });
+        } else {
+          query = query.where('rate_date', dateStr);
+        }
       }
       const rows = await query.orderBy('created_at', 'desc').limit(10);
 
