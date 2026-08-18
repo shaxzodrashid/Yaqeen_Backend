@@ -175,7 +175,7 @@ export class DashboardService {
       totalSalesUzs > 0 ? (totalMarginUzs / totalSalesUzs) * 100 : 0;
     const totalOrders = currentRecords.length;
     const averageOrderValueUzs =
-      totalOrders > 0 ? totalSalesUzs / totalOrders : 0;
+      totalOrders > 0 ? totalMarginUzs / totalOrders : 0;
     const completedOrders = currentRecords.filter(
       (r) => (r.status || '').toLowerCase() === 'completed',
     ).length;
@@ -867,7 +867,7 @@ export class DashboardService {
       }
 
       default:
-        throw new BadRequestException(`Unsupported period: ${period}`);
+        throw new BadRequestException(`Unsupported period: ${String(period)}`);
     }
 
     return {

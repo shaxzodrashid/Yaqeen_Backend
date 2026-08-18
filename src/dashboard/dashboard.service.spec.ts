@@ -187,6 +187,7 @@ describe('DashboardService', () => {
       expect(res.summary.totalMargin).toBe(2500);
       expect(res.summary.marginPercentage).toBe(31.25);
       expect(res.summary.totalOrders).toBe(2);
+      expect(res.summary.averageOrderValue).toBe(1250);
       expect(res.summary.completedOrders).toBe(1);
       expect(res.summary.pendingOrders).toBe(1);
 
@@ -256,16 +257,22 @@ describe('DashboardService', () => {
           USD: { rate: 12850, nominal: 1 },
           UZS: { rate: 1, nominal: 1 },
         }),
-        convertToUzs: jest.fn().mockImplementation(async (amt, curr) => {
-          if (curr === 'USD') return amt * 12850;
-          return amt;
-        }),
-        convert: jest.fn().mockImplementation(async (amt, from, to) => {
-          if (from === 'UZS' && to === 'USD') {
-            return { converted_amount: Math.round((amt / 12850) * 100) / 100 };
-          }
-          return { converted_amount: amt };
-        }),
+        convertToUzs: jest
+          .fn()
+          .mockImplementation((amt: number, curr: string) => {
+            if (curr === 'USD') return Promise.resolve(amt * 12850);
+            return Promise.resolve(amt);
+          }),
+        convert: jest
+          .fn()
+          .mockImplementation((amt: number, from: string, to: string) => {
+            if (from === 'UZS' && to === 'USD') {
+              return Promise.resolve({
+                converted_amount: Math.round((amt / 12850) * 100) / 100,
+              });
+            }
+            return Promise.resolve({ converted_amount: amt });
+          }),
       };
 
       const module: TestingModule = await Test.createTestingModule({

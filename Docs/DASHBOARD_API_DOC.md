@@ -109,6 +109,10 @@ $$\text{cumulativeMargin}_i = \sum_{k=0}^{i} \text{margin}_k$$
 
 $$\text{growthRateSales} = \begin{cases} \left(\frac{\text{totalSales}_{\text{current}} - \text{totalSales}_{\text{prev}}}{\text{totalSales}_{\text{prev}}}\right) \times 100 & \text{if } \text{totalSales}_{\text{prev}} > 0 \\ 100 & \text{if } \text{totalSales}_{\text{prev}} = 0 \text{ and } \text{totalSales}_{\text{current}} > 0 \\ \text{null} & \text{otherwise} \end{cases}$$
 
+### 5. Average Pure Income per Order:
+
+$$\text{averageOrderValue} = \begin{cases} \frac{\text{totalMargin}}{\text{totalOrders}} & \text{if } \text{totalOrders} > 0 \\ 0 & \text{otherwise} \end{cases}$$
+
 ---
 
 ## 6. API Reference & Universal Schemas
@@ -148,7 +152,7 @@ $$\text{growthRateSales} = \begin{cases} \left(\frac{\text{totalSales}_{\text{cu
     "totalMargin": 16400.0,
     "marginPercentage": 33.81,
     "totalOrders": 14,
-    "averageOrderValue": 3464.29,
+    "averageOrderValue": 1171.43,
     "completedOrders": 10,
     "pendingOrders": 4,
     "growthRateSales": 14.52,
