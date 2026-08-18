@@ -155,14 +155,14 @@ describe('DashboardService', () => {
           id: 'reg-1',
           sell_price: '5000.00',
           purchase_price: '3500.00',
-          created_at: '2026-08-05T10:00:00.000Z',
+          confirmed_date: '2026-08-05',
           status: 'Completed',
         },
         {
           id: 'reg-2',
           sell_price: '3000.00',
           purchase_price: '2000.00',
-          created_at: '2026-08-06T15:30:00.000Z',
+          confirmed_date: '2026-08-06',
           status: 'Waiting',
         },
       ];
@@ -181,6 +181,10 @@ describe('DashboardService', () => {
         mockRefDate,
       );
 
+      expect(chainable.whereBetween).toHaveBeenCalledWith(
+        'confirmed_date',
+        expect.any(Array),
+      );
       expect(res.meta.period).toBe(TimeframePeriod.FIVE_DAYS);
       expect(res.summary.totalSales).toBe(8000);
       expect(res.summary.totalPurchaseCost).toBe(5500);
@@ -208,7 +212,7 @@ describe('DashboardService', () => {
           weight: '1200',
           cargo_type: 'FTL',
           status: 'Completed',
-          created_at: '2026-08-01T10:00:00.000Z',
+          confirmed_date: '2026-08-01',
         },
         {
           sell_price: '2000.00',
@@ -217,7 +221,7 @@ describe('DashboardService', () => {
           weight: '300',
           cargo_type: 'LTL',
           status: 'Waiting',
-          created_at: '2026-08-03T10:00:00.000Z',
+          confirmed_date: '2026-08-03',
         },
       ];
 
@@ -234,6 +238,10 @@ describe('DashboardService', () => {
         mockRefDate,
       );
 
+      expect(chainable.whereBetween).toHaveBeenCalledWith(
+        'confirmed_date',
+        expect.any(Array),
+      );
       expect(summary.currency).toBe(Currency.UZS);
       expect(summary.totalSales).toBe(12000);
       expect(summary.totalMargin).toBe(3800);
@@ -300,7 +308,7 @@ describe('DashboardService', () => {
           purchase_currency: 'USD',
           cargo_type: 'FTL',
           status: 'Completed',
-          created_at: '2026-08-01T10:00:00.000Z',
+          confirmed_date: '2026-08-01',
         },
       ];
 
@@ -322,6 +330,51 @@ describe('DashboardService', () => {
       expect(summaryUsd.totalPurchaseCost).toBe(60);
       expect(summaryUsd.totalMargin).toBe(40);
       expect(summaryUsd.averageOrderValue).toBe(40);
+    });
+  });
+
+  describe('getTopPerformers', () => {
+    it('should calculate top performers applying date filter on confirmed_date', async () => {
+      const mockRecords = [
+        {
+          employee_id: 'emp-1',
+          client_id: 'cl-1',
+          sell_price: '50000',
+          purchase_price: '30000',
+          confirmed_date: '2026-08-01',
+        },
+      ];
+
+      const chainable = {
+        select: jest.fn().mockReturnThis(),
+        whereBetween: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        leftJoin: jest.fn().mockReturnThis(),
+        whereIn: jest.fn().mockReturnValue([
+          {
+            id: 'emp-1',
+            first_name: 'John',
+            last_name: 'Doe',
+            department_name: 'Logistics',
+          },
+        ]),
+        then: jest.fn().mockImplementation((cb) => cb(mockRecords)),
+      };
+      knexMock.mockReturnValue(chainable);
+
+      const result = await service.getTopPerformers(
+        { period: TimeframePeriod.ONE_MONTH },
+        mockRefDate,
+      );
+
+      expect(chainable.whereBetween).toHaveBeenCalledWith(
+        'confirmed_date',
+        expect.any(Array),
+      );
+      expect(result.topManagers.length).toBe(1);
+      expect(result.topManagers[0].employeeId).toBe('emp-1');
+      expect(result.topManagers[0].totalSales).toBe(50000);
+      expect(result.topManagers[0].totalMargin).toBe(20000);
     });
   });
 });

@@ -41,8 +41,8 @@ All analytics metrics are derived from the `cargo_registrations` table:
 | Column Name      | Data Type       | Usage in Dashboard Analytics                                                                                |
 | :--------------- | :-------------- | :---------------------------------------------------------------------------------------------------------- |
 | `id`             | `UUID`          | Count of registered cargo orders (`orderCount`).                                                            |
-| `created_at`     | `TIMESTAMP`     | Primary timestamp used for date range filtering and time-bucket slotting.                                   |
-| `confirmed_date` | `DATE`          | Fallback registration date if `created_at` is null.                                                         |
+| `confirmed_date` | `DATE`          | Primary registration date used for date range filtering and time-bucket slotting.                           |
+| `created_at`     | `TIMESTAMP`     | Record creation timestamp.                                                                                  |
 | `sell_price`     | `DECIMAL(14,2)` | Gross revenue / sales amount (`totalSales`).                                                                |
 | `purchase_price` | `DECIMAL(14,2)` | Cost of goods sold / carrier price (`totalPurchaseCost`).                                                   |
 | `status`         | `VARCHAR(50)`   | Status filtering & distribution (`Waiting`, `Station`, `On the way`, `On the border`, `Reload`, `Arrived`). |
@@ -67,7 +67,7 @@ The `GET /dashboard/sales-progress` endpoint accepts a `period` parameter. All t
 | **`YTD`**    | Year To Date     | `Jan 1st` of Current Year to Today                      | **`month`** (Jan – Current) | Jan 1st of previous year to same date |
 | **`1Y`**     | Last 1 Year      | `Current Date - 1 Year` to Today                        | **`month`** (12-13 buckets) | 1 year prior to start date            |
 | **`5Y`**     | Last 5 Years     | `Current Date - 5 Years` to Today                       | **`year`** (5-6 buckets)    | 5 years prior to start date           |
-| **`MAX`**    | System Inception | Earliest DB `created_at` date to Today                  | **Auto-detected**           | `null`                                |
+| **`MAX`**    | System Inception | Earliest DB `confirmed_date` to Today                   | **Auto-detected**           | `null`                                |
 | **`CUSTOM`** | Custom Range     | User-specified `start_date` to `end_date`               | **Auto-detected**           | Equal preceding span                  |
 
 ### Custom Granularity Auto-Detection Rules:

@@ -205,7 +205,7 @@ export class DashboardService {
       }
 
       // Fast binary search bucket slotting
-      const recDate = new Date(r.created_at || r.confirmed_date);
+      const recDate = new Date(r.confirmed_date || r.created_at);
       const recTime = recDate.getTime();
       if (!isNaN(recTime)) {
         const bIdx = this.findBucketIndex(recTime, buckets);
@@ -861,7 +861,7 @@ export class DashboardService {
       case TimeframePeriod.MAX: {
         // Query earliest recorded date from DB
         const minRow = await this.knex('cargo_registrations')
-          .min('created_at as min_date')
+          .min('confirmed_date as min_date')
           .first();
 
         const earliest = minRow?.min_date ? new Date(minRow.min_date) : null;
@@ -999,7 +999,7 @@ export class DashboardService {
   ) {
     const dbQuery = this.knex('cargo_registrations')
       .select('*')
-      .whereBetween('created_at', [start, end]);
+      .whereBetween('confirmed_date', [start, end]);
 
     if (query.employee_id) {
       dbQuery.where('employee_id', query.employee_id);
@@ -1196,7 +1196,7 @@ export class DashboardService {
     rates?: Record<Currency, any>,
   ) {
     for (const record of records) {
-      const recDate = new Date(record.created_at || record.confirmed_date);
+      const recDate = new Date(record.confirmed_date || record.created_at);
       if (isNaN(recDate.getTime())) continue;
 
       const { sellPriceUzs, purchasePriceUzs } =
