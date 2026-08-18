@@ -756,6 +756,8 @@ export class CargoRegistrationsService {
     const aggQuery = baseWhereQuery.clone().select([
       this.knex.raw('COUNT(cr.id) as total_count'),
       this.knex.raw(`
+        COALESCE(SUM(CASE WHEN COALESCE(cr.status, 'Waiting') NOT IN ('Arrived', 'Delivered') THEN 1 ELSE 0 END), 0) as active_containers,
+        COALESCE(SUM(CASE WHEN COALESCE(cr.status, 'Waiting') IN ('On the border', 'Border', 'On the way', 'In Transit', 'Station', 'At Station', 'Reload') AND (cr.arrived_date IS NULL OR CAST(cr.arrived_date AS TEXT) = '') THEN 1 ELSE 0 END), 0) as action_required,
         COALESCE(SUM(CASE WHEN cr.sell_currency = 'UZS' THEN cr.sell_price ELSE 0 END), 0) as gross_uzs,
         COALESCE(SUM(CASE WHEN cr.sell_currency = 'USD' THEN cr.sell_price ELSE 0 END), 0) as gross_usd,
         COALESCE(SUM(CASE WHEN cr.sell_currency = 'RUB' THEN cr.sell_price ELSE 0 END), 0) as gross_rub,
@@ -802,6 +804,14 @@ export class CargoRegistrationsService {
     const aggResult = await aggQuery.first();
     const total = parseInt(
       (aggResult?.total_count as string) || (aggResult?.total as string) || '0',
+      10,
+    );
+    const activeContainers = parseInt(
+      (aggResult?.active_containers as string) || '0',
+      10,
+    );
+    const actionRequired = parseInt(
+      (aggResult?.action_required as string) || '0',
       10,
     );
 
@@ -1000,6 +1010,8 @@ export class CargoRegistrationsService {
         total,
         limit,
         offset,
+        active_containers: activeContainers,
+        action_required: actionRequired,
         calculated_net_yield: {
           USD: Math.round(totalCalculatedNetYieldUsd * 100) / 100,
           UZS: Math.round(totalCalculatedNetYieldUzs * 100) / 100,
@@ -1137,6 +1149,8 @@ export class CargoRegistrationsService {
     const result = {
       summary: {
         total_cargos: meta.total,
+        active_containers: meta.active_containers ?? 0,
+        action_required: meta.action_required ?? 0,
         gross_sales_revenue: meta.gross_sales_revenue,
         calculated_net_yield: meta.calculated_net_yield,
       },

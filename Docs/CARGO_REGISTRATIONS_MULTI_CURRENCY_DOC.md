@@ -210,6 +210,8 @@ Authorization: Bearer <JWT_TOKEN>
     "total": 1,
     "limit": 10,
     "offset": 0,
+    "active_containers": 1,
+    "action_required": 1,
     "calculated_net_yield": {
       "USD": 421.43,
       "UZS": 5009376,

@@ -617,6 +617,8 @@ describe('CargoRegistrationsService', () => {
         select: jest.fn().mockReturnThis(),
         first: jest.fn().mockResolvedValue({
           total_count: '2',
+          active_containers: '2',
+          action_required: '1',
           gross_usd: 2700,
           gross_uzs: 0,
           gross_rub: 0,
@@ -656,6 +658,8 @@ describe('CargoRegistrationsService', () => {
       expect(result).toHaveProperty('meta');
       expect(result).toHaveProperty('data');
       expect(result.meta.total).toBe(2);
+      expect(result.meta.active_containers).toBe(2);
+      expect(result.meta.action_required).toBe(1);
       expect(result.meta.gross_sales_revenue.USD).toBe(2700);
       expect(result.meta.calculated_net_yield.USD).toBe(731.81);
       expect(result.data.length).toBe(2);
@@ -1061,6 +1065,8 @@ describe('CargoRegistrationsService', () => {
           total: 2,
           limit: 100000,
           offset: 0,
+          active_containers: 1,
+          action_required: 1,
           calculated_net_yield: {
             USD: 800,
             UZS: 10280000,
@@ -1154,6 +1160,9 @@ describe('CargoRegistrationsService', () => {
 
       const stats = await service.getCargoRegistrationStats({});
       expect(stats).toHaveProperty('summary');
+      expect(stats.summary.total_cargos).toBe(2);
+      expect(stats.summary.active_containers).toBe(1);
+      expect(stats.summary.action_required).toBe(1);
       expect(stats).toHaveProperty('ltl_statistics');
       expect(stats).toHaveProperty('ftl_statistics');
       expect(stats).toHaveProperty('status_distribution');
