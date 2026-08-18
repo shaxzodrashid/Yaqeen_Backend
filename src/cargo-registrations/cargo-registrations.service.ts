@@ -169,17 +169,26 @@ export class CargoRegistrationsService {
     }
   }
 
+  private getLocalDateStr(d: Date = new Date()): string {
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  }
+
   /**
    * Safe helper to format Date objects, date strings, or fallback to YYYY-MM-DD.
    */
   private formatDateStr(d: any): string {
-    if (!d) return new Date().toISOString().slice(0, 10);
+    if (!d) return this.getLocalDateStr();
     if (typeof d === 'string') return d.slice(0, 10);
-    if (d instanceof Date) return d.toISOString().slice(0, 10);
+    if (d instanceof Date) return this.getLocalDateStr(d);
     try {
-      return new Date(d).toISOString().slice(0, 10);
+      const parsed = new Date(d);
+      if (isNaN(parsed.getTime())) return this.getLocalDateStr();
+      return this.getLocalDateStr(parsed);
     } catch {
-      return new Date().toISOString().slice(0, 10);
+      return this.getLocalDateStr();
     }
   }
 

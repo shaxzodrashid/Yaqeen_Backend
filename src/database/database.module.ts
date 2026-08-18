@@ -7,6 +7,11 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import knex, { Knex } from 'knex';
+import { types } from 'pg';
+
+// Configure pg type parser for DATE (OID 1082) so date strings (YYYY-MM-DD)
+// are returned as-is without timezone shifting into JavaScript Date objects.
+types.setTypeParser(1082, (val: string) => val);
 
 export const KNEX_CONNECTION = 'KNEX_CONNECTION';
 

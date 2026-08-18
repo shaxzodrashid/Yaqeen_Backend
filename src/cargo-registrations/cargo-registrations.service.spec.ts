@@ -680,6 +680,88 @@ describe('CargoRegistrationsService', () => {
       expect(result.data[1].arrived_date).toBeNull();
     });
 
+    it('should format Date objects without timezone rollback', async () => {
+      const dateObj = new Date(2026, 5, 1); // June 1, 2026 local time
+      const paginatedData = [
+        {
+          id: 'test-date-id',
+          cargo_type: 'FTL',
+          volume: null,
+          weight: null,
+          container_type: '40HQ',
+          container_truck_id: 'TRUCK-001',
+          agent_name: 'FastAgent',
+          cargo: 'Electronics',
+          confirmed_date: dateObj,
+          loaded_date: '2026-06-01',
+          arrived_date: null,
+          purchase_date: dateObj,
+          sell_date: dateObj,
+          purchase_price: '5000',
+          purchase_currency: 'USD',
+          sell_price: '6000',
+          sell_currency: 'USD',
+          status: 'Arrived',
+          created_at: new Date('2026-06-01T10:00:00.000Z'),
+          updated_at: new Date('2026-06-01T10:00:00.000Z'),
+          usd_rmb_rate: null,
+          purchase_usd_rate: '1',
+          purchase_custom_rate: null,
+          sell_usd_rate: '1',
+          sell_custom_rate: null,
+          client_first_name: 'John',
+          client_last_name: 'Doe',
+          emp_first_name: 'Jane',
+          emp_last_name: 'Smith',
+        },
+      ];
+
+      const aggChain: any = {
+        select: jest.fn().mockReturnThis(),
+        first: jest.fn().mockResolvedValue({
+          total_count: '1',
+          active_containers_count: '1',
+          action_required_count: '0',
+          gross_usd: '6000',
+          gross_uzs: '0',
+          gross_rub: '0',
+          gross_rmb: '0',
+          net_usd: '1000',
+          net_uzs: '0',
+        }),
+      };
+
+      const paginatedChain: any = {
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockResolvedValue(paginatedData),
+      };
+
+      const queryChain: any = {};
+      queryChain.where = jest.fn().mockReturnValue(queryChain);
+
+      let cloneCount = 0;
+      queryChain.clone = jest.fn().mockImplementation(() => {
+        cloneCount++;
+        if (cloneCount === 1) return aggChain;
+        return paginatedChain;
+      });
+
+      knexMock.mockReturnValue(queryChain);
+
+      const result = await service.findAllCargoRegistrations({
+        limit: '10',
+        page: '1',
+      });
+
+      expect(result.data[0].confirmed_date).toBe('2026-06-01');
+      expect(result.data[0].loaded_date).toBe('2026-06-01');
+      expect(result.data[0].purchase_date).toBe('2026-06-01');
+      expect(result.data[0].sell_date).toBe('2026-06-01');
+    });
+
     it('should apply timestamp filters (confirmed, loaded, arrived) and creation date filters', async () => {
       const aggChain: any = {
         select: jest.fn().mockReturnThis(),
