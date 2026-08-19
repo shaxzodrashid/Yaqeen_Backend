@@ -304,13 +304,13 @@ Calculates 10% pure net profit KPI for SEO managers.
 Plan fulfillment entirely depends on the **`cargo_registrations`** table in PostgreSQL, evaluated in two distinct directions:
 
 - **Direction 1 (LTL Cargos)**: Volume Plan target ($m^3$) vs. registered LTL volume ($m^3$).
-- **Direction 2 (FTL Cargos)**: Financial Value Plan target vs. registered FTL sales value, defaulting to **USD** currency.
+- **Direction 2 (FTL Cargos)**: Financial Value Plan target vs. registered FTL net yield / profit margin (`sell_price - purchase_price`), defaulting to **USD** currency.
 
 _(For exhaustive details, see [Docs/EMPLOYEE_PLAN_SETTING_DOC.md](file:///D:/Shakhzod/Javascript/Yaqeen_Backend/Docs/EMPLOYEE_PLAN_SETTING_DOC.md))._
 
 ### `GET /api/cargo-kpi/plans`
 
-Returns employee target plans, LTL volume progress, FTL financial progress (converted to plan currency if different), overall completion percentage, and employee leaderboard ratings.
+Returns employee target plans, LTL volume progress, FTL net yield financial progress (converted to plan currency if different), overall completion percentage, and employee leaderboard ratings.
 
 #### Response (200 OK):
 

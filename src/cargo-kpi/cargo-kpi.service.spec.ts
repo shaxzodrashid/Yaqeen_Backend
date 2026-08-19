@@ -797,6 +797,65 @@ describe('CargoKpiService', () => {
       expect(plan.overall_completion_percentage).toBe(140); // (120% + 160%) / 2 = 140%
     });
 
+    it('calculates FTL cargo progress using net yield (sell_price - purchase_price)', async () => {
+      mockKnex.mockImplementation((table: string) => {
+        const qb = { ...mockQueryBuilder };
+        if (table === 'employee_plans') {
+          qb.then = jest.fn((resolve: any) =>
+            resolve([
+              {
+                id: 'plan-1',
+                employee_id: 'emp-uuid-1',
+                first_name: 'Donyor',
+                last_name: 'Nishonboyev',
+                ltl_target_volume: 0,
+                ftl_target_amount: 1000,
+                currency: 'USD',
+                period: '2026-08-01',
+              },
+            ]),
+          );
+        } else if (table === 'cargo_registrations') {
+          qb.then = jest.fn((resolve: any) =>
+            resolve([
+              {
+                cargo_type: 'FTL',
+                volume: null,
+                purchase_price: 6000,
+                purchase_currency: 'USD',
+                sell_price: 6700,
+                sell_currency: 'USD',
+              },
+              {
+                cargo_type: 'FTL',
+                volume: null,
+                purchase_price: 8400,
+                purchase_currency: 'USD',
+                sell_price: 9300,
+                sell_currency: 'USD',
+              },
+            ]),
+          );
+        } else {
+          qb.then = jest.fn((resolve: any) => resolve([]));
+        }
+        return qb;
+      });
+
+      const res = await service.getEmployeePlansProgress({ period: '2026-08' });
+      expect(res.total_plans).toBe(1);
+      const plan = res.leaderboard[0];
+
+      // Net yields: (6700 - 6000) = 700, (9300 - 8400) = 900 => Total = 1600
+      expect(plan.ftl_plan.target_amount).toBe(1000);
+      expect(plan.ftl_plan.actual_amount).toBe(1600);
+      expect(plan.ftl_plan.remaining_amount).toBe(0);
+      expect(plan.ftl_plan.completion_percentage).toBe(160);
+      expect(plan.ftl_plan.is_completed).toBe(true);
+      expect(plan.ftl_plan.cargo_count).toBe(2);
+      expect(plan.actual_sales).toBe(1600);
+    });
+
     it('updates employee plan targets and period', async () => {
       mockQueryBuilder.first.mockResolvedValue({
         id: 'plan-1',

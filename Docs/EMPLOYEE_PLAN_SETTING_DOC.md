@@ -15,11 +15,11 @@ Employee plans are set per employee and monthly period (`YYYY-MM` or `YYYY-MM-DD
    - **Progress**: Evaluated on volume achieved vs. volume target.
 
 2. **Direction 2: FTL Financial Value Plan**
-   - **Metric**: Monetary value / Sales revenue.
+   - **Metric**: Monetary value / Net yield (Profit margin).
    - **Target**: `ftl_target_amount` (or `target_amount`).
    - **Currency**: Specified currency (`USD`, `UZS`, `RUB`, `RMB`, `CNY`), **defaults to `USD`**.
-   - **Actual**: Aggregated sum of `sell_price` from **`cargo_registrations`** where `cargo_type = 'FTL'` assigned to the employee in the plan period, converted to the plan currency using historical/current CBU and snapshot exchange rates.
-   - **Progress**: Evaluated on financial revenue achieved vs. financial target.
+   - **Actual**: Aggregated sum of **net yield** (`sell_price - purchase_price`) from **`cargo_registrations`** where `cargo_type = 'FTL'` assigned to the employee in the plan period, converted to the plan currency using historical/current CBU and snapshot exchange rates.
+   - **Progress**: Evaluated on net yield achieved vs. financial target.
 
 3. **Data Source Dependency**:
    - Plan fulfillment **entirely depends on the `cargo_registrations` table** in PostgreSQL.

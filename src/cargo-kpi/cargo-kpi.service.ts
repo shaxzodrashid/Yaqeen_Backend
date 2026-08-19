@@ -958,6 +958,150 @@ export class CargoKpiService {
     return null;
   }
 
+  /**
+   * Helper to compute net yield (profit margin) in target plan currency for an FTL cargo registration.
+   */
+  private async calculateFtlCargoNetYield(
+    reg: any,
+    planCurrency: Currency,
+    rates?: Record<string, any>,
+  ): Promise<number> {
+    const purchaseAmount = Number(reg.purchase_price || 0);
+    const purchaseCurrency =
+      (reg.purchase_currency as Currency) || Currency.USD;
+    let purchaseUsd = 0;
+
+    const defaultUsd = rates?.['USD']
+      ? rates['USD'].rate / (rates['USD'].nominal || 1)
+      : 12850;
+
+    if (purchaseAmount > 0) {
+      if (purchaseCurrency === Currency.USD) {
+        purchaseUsd = purchaseAmount;
+      } else if (purchaseCurrency === Currency.UZS) {
+        const rateUsed =
+          Number(reg.purchase_custom_rate) ||
+          Number(reg.purchase_usd_rate) ||
+          defaultUsd;
+        purchaseUsd = rateUsed > 0 ? purchaseAmount / rateUsed : 0;
+      } else if (
+        purchaseCurrency === Currency.RMB ||
+        purchaseCurrency === Currency.CNY
+      ) {
+        if (reg.usd_rmb_rate && Number(reg.usd_rmb_rate) > 0) {
+          purchaseUsd = purchaseAmount / Number(reg.usd_rmb_rate);
+        } else {
+          const rmbObj = rates?.['RMB'] ||
+            rates?.['CNY'] || { rate: 1815, nominal: 1 };
+          const rmbRate = rmbObj.rate / (rmbObj.nominal || 1);
+          const rateUsed =
+            Number(reg.purchase_custom_rate) ||
+            Number(reg.purchase_usd_rate) ||
+            defaultUsd;
+          purchaseUsd =
+            rateUsed > 0 ? (purchaseAmount * rmbRate) / rateUsed : 0;
+        }
+      } else if (purchaseCurrency === Currency.RUB) {
+        const rubObj = rates?.['RUB'] || { rate: 145, nominal: 1 };
+        const rubRate = rubObj.rate / (rubObj.nominal || 1);
+        const rateUsed =
+          Number(reg.purchase_custom_rate) ||
+          Number(reg.purchase_usd_rate) ||
+          defaultUsd;
+        purchaseUsd = rateUsed > 0 ? (purchaseAmount * rubRate) / rateUsed : 0;
+      } else if (this.currencyService) {
+        const amtUzs = await this.currencyService.convertToUzs(
+          purchaseAmount,
+          purchaseCurrency,
+          rates,
+        );
+        const conv = await this.currencyService.convert(
+          amtUzs,
+          Currency.UZS,
+          Currency.USD,
+        );
+        purchaseUsd = conv.converted_amount;
+      } else {
+        purchaseUsd = purchaseAmount;
+      }
+    }
+
+    const sellAmount = Number(reg.sell_price || 0);
+    const sellCurrency = (reg.sell_currency as Currency) || Currency.USD;
+    let sellUsd = 0;
+
+    if (sellAmount > 0) {
+      if (sellCurrency === Currency.USD) {
+        sellUsd = sellAmount;
+      } else if (sellCurrency === Currency.UZS) {
+        const rateUsed =
+          Number(reg.sell_custom_rate) ||
+          Number(reg.sell_usd_rate) ||
+          defaultUsd;
+        sellUsd = rateUsed > 0 ? sellAmount / rateUsed : 0;
+      } else if (
+        sellCurrency === Currency.RMB ||
+        sellCurrency === Currency.CNY
+      ) {
+        if (reg.usd_rmb_rate && Number(reg.usd_rmb_rate) > 0) {
+          sellUsd = sellAmount / Number(reg.usd_rmb_rate);
+        } else {
+          const rmbObj = rates?.['RMB'] ||
+            rates?.['CNY'] || { rate: 1815, nominal: 1 };
+          const rmbRate = rmbObj.rate / (rmbObj.nominal || 1);
+          const rateUsed =
+            Number(reg.sell_custom_rate) ||
+            Number(reg.sell_usd_rate) ||
+            defaultUsd;
+          sellUsd = rateUsed > 0 ? (sellAmount * rmbRate) / rateUsed : 0;
+        }
+      } else if (sellCurrency === Currency.RUB) {
+        const rubObj = rates?.['RUB'] || { rate: 145, nominal: 1 };
+        const rubRate = rubObj.rate / (rubObj.nominal || 1);
+        const rateUsed =
+          Number(reg.sell_custom_rate) ||
+          Number(reg.sell_usd_rate) ||
+          defaultUsd;
+        sellUsd = rateUsed > 0 ? (sellAmount * rubRate) / rateUsed : 0;
+      } else if (this.currencyService) {
+        const amtUzs = await this.currencyService.convertToUzs(
+          sellAmount,
+          sellCurrency,
+          rates,
+        );
+        const conv = await this.currencyService.convert(
+          amtUzs,
+          Currency.UZS,
+          Currency.USD,
+        );
+        sellUsd = conv.converted_amount;
+      } else {
+        sellUsd = sellAmount;
+      }
+    }
+
+    const netYieldUsd = sellUsd - purchaseUsd;
+
+    if (planCurrency === Currency.USD || !this.currencyService) {
+      return netYieldUsd;
+    }
+
+    if (planCurrency === Currency.UZS) {
+      return await this.currencyService.convertToUzs(
+        netYieldUsd,
+        Currency.USD,
+        rates,
+      );
+    }
+
+    const conv = await this.currencyService.convert(
+      netYieldUsd,
+      Currency.USD,
+      planCurrency,
+    );
+    return conv.converted_amount;
+  }
+
   async getEmployeePlansProgress(query?: QueryEmployeePlanDto) {
     let plansQuery = this.knex('employee_plans')
       .join('employees', 'employee_plans.employee_id', 'employees.id')
@@ -1048,6 +1192,10 @@ export class CargoKpiService {
       const regRows = await regQuery.select(
         'cargo_type',
         'volume',
+        'purchase_price',
+        'purchase_currency',
+        'purchase_usd_rate',
+        'purchase_custom_rate',
         'sell_price',
         'sell_currency',
         'sell_usd_rate',
@@ -1062,46 +1210,12 @@ export class CargoKpiService {
           actualLtlVolume += vol;
           ltlCargoCount += 1;
         } else if (cargoType === 'FTL') {
-          const rawAmt = Number(reg.sell_price || 0);
-          const txCurr = (reg.sell_currency as Currency) || Currency.USD;
-          let amtInPlanCurr = rawAmt;
-
-          if (txCurr !== planCurrency && this.currencyService) {
-            if (txCurr === Currency.USD && planCurrency === Currency.UZS) {
-              amtInPlanCurr = await this.currencyService.convertToUzs(
-                rawAmt,
-                Currency.USD,
-                rates,
-              );
-            } else if (
-              planCurrency === Currency.USD &&
-              txCurr === Currency.UZS
-            ) {
-              const defaultUsd = rates?.['USD']
-                ? rates['USD'].rate / (rates['USD'].nominal || 1)
-                : 12850;
-              const rateUsed =
-                reg.sell_custom_rate || reg.sell_usd_rate || defaultUsd;
-              amtInPlanCurr = rateUsed > 0 ? rawAmt / rateUsed : 0;
-            } else {
-              const amtInUzs = await this.currencyService.convertToUzs(
-                rawAmt,
-                txCurr,
-                rates,
-              );
-              if (planCurrency === Currency.UZS) {
-                amtInPlanCurr = amtInUzs;
-              } else {
-                const conv = await this.currencyService.convert(
-                  amtInUzs,
-                  Currency.UZS,
-                  planCurrency,
-                );
-                amtInPlanCurr = conv.converted_amount;
-              }
-            }
-          }
-          actualFtlAmount += amtInPlanCurr;
+          const netYield = await this.calculateFtlCargoNetYield(
+            reg,
+            planCurrency,
+            rates,
+          );
+          actualFtlAmount += netYield;
           ftlCargoCount += 1;
         }
       }
