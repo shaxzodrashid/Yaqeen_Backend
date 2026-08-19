@@ -205,7 +205,30 @@ export class DashboardService {
       }
 
       // Fast binary search bucket slotting
-      const recDate = new Date(r.confirmed_date || r.created_at);
+      const rawDate = r.confirmed_date || r.created_at;
+      let recDate: Date;
+      if (typeof rawDate === 'string') {
+        if (!rawDate.includes('T') && rawDate.length === 10) {
+          const [y, m, d] = rawDate.split('-').map(Number);
+          recDate = new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0));
+        } else {
+          recDate = new Date(rawDate);
+        }
+      } else if (rawDate instanceof Date) {
+        recDate = new Date(
+          Date.UTC(
+            rawDate.getUTCFullYear(),
+            rawDate.getUTCMonth(),
+            rawDate.getUTCDate(),
+            rawDate.getUTCHours(),
+            rawDate.getUTCMinutes(),
+            rawDate.getUTCSeconds(),
+          ),
+        );
+      } else {
+        recDate = new Date(rawDate);
+      }
+
       const recTime = recDate.getTime();
       if (!isNaN(recTime)) {
         const bIdx = this.findBucketIndex(recTime, buckets);
@@ -997,9 +1020,12 @@ export class DashboardService {
       cargo_type?: string;
     },
   ) {
+    const startDateStr = start.toISOString().slice(0, 10);
+    const endDateStr = end.toISOString().slice(0, 10);
+
     const dbQuery = this.knex('cargo_registrations')
       .select('*')
-      .whereBetween('confirmed_date', [start, end]);
+      .whereBetween('confirmed_date', [startDateStr, endDateStr]);
 
     if (query.employee_id) {
       dbQuery.where('employee_id', query.employee_id);

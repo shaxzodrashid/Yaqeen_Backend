@@ -181,10 +181,10 @@ describe('DashboardService', () => {
         mockRefDate,
       );
 
-      expect(chainable.whereBetween).toHaveBeenCalledWith(
-        'confirmed_date',
-        expect.any(Array),
-      );
+      expect(chainable.whereBetween).toHaveBeenCalledWith('confirmed_date', [
+        '2026-08-02',
+        '2026-08-06',
+      ]);
       expect(res.meta.period).toBe(TimeframePeriod.FIVE_DAYS);
       expect(res.summary.totalSales).toBe(8000);
       expect(res.summary.totalPurchaseCost).toBe(5500);
@@ -199,6 +199,39 @@ describe('DashboardService', () => {
       // Last bucket (Aug 6th) should contain cumulative total
       const lastBucket = res.dataPoints[res.dataPoints.length - 1];
       expect(lastBucket.cumulativeSales).toBe(8000);
+    });
+
+    it('should query exact YYYY-MM-DD boundaries for CUSTOM period without timezone leakage', async () => {
+      const mockRecords = [
+        {
+          id: 'reg-june',
+          sell_price: '1000.00',
+          purchase_price: '800.00',
+          confirmed_date: '2026-06-30',
+          status: 'Waiting',
+        },
+      ];
+
+      const chainable = {
+        select: jest.fn().mockReturnThis(),
+        whereBetween: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        then: jest.fn().mockImplementation((cb) => cb(mockRecords)),
+      };
+      knexMock.mockReturnValue(chainable);
+
+      const res = await service.getSalesProgress({
+        period: TimeframePeriod.CUSTOM,
+        start_date: '2026-06-01',
+        end_date: '2026-06-30',
+      });
+
+      expect(chainable.whereBetween).toHaveBeenCalledWith('confirmed_date', [
+        '2026-06-01',
+        '2026-06-30',
+      ]);
+      expect(res.summary.totalOrders).toBe(1);
+      expect(res.dataPoints.length).toBe(30);
     });
   });
 
