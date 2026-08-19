@@ -19,10 +19,7 @@ import { FinanceService } from './finance.service';
 import { CreateExpenseDto } from './dto/create-expense.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
 import { QueryExpenseDto } from './dto/query-expense.dto';
-import {
-  UpdateEmployeeSalaryDto,
-  BatchUpdateSalariesDto,
-} from './dto/update-salary.dto';
+import { BatchUpdateSalariesDto } from './dto/update-salary.dto';
 import { QueryFinanceSummaryDto } from './dto/query-finance-summary.dto';
 
 @Controller('finance')

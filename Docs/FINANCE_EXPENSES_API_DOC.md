@@ -73,50 +73,168 @@ The system categorizes operational costs into 6 predefined business expense cate
 
 #### `GET /api/v1/finance/summary`
 
-Calculates financial breakdown, net profit, SEO cut, expense breakdown by category, and period-over-period comparison.
+Calculates complete financial breakdown, gross/net profit, SEO cut, financial engine flow diagram, 6-category operational expense distribution, KPI bonuses burden, and month-over-month (MoM) comparative growth.
+
+> [!IMPORTANT]
+> **Decoupled Purchase & Sell Date Financial Accounting**:
+> Cargo registration purchase prices are accounted for on their `purchase_date` (or `confirmed_date`), and sell prices on their `sell_date`. When `purchase_date` (e.g. July) and `sell_date` (e.g. August) fall into different months, the purchase cost is recorded in the purchase month's COGS and the sell revenue in the sell month's Gross Revenue.
 
 **Query Parameters**:
 
-- `period` (optional): `YYYY-MM` string (e.g. `2026-07`). Defaults to current calendar month if omitted.
+- `period` (optional): `YYYY-MM` string (e.g. `2026-08`). Defaults to current calendar month if omitted.
 - `start_date` (optional): `YYYY-MM-DD` string.
 - `end_date` (optional): `YYYY-MM-DD` string.
+- `currency` (optional, default: `USD`): Target normalized currency (`USD`, `UZS`, `RUB`, `RMB`, `CNY`).
 
 **Example Response (200 OK)**:
 
 ```json
 {
+  "currency": "USD",
+  "normalized_currency_label": "USD (US DOLLAR)",
   "period": {
-    "start_date": "2026-07-01",
-    "end_date": "2026-07-31"
+    "start_date": "2026-08-01",
+    "end_date": "2026-08-31"
+  },
+  "cbu_rates": {
+    "USD": {
+      "currency": "USD",
+      "code": "840",
+      "nominal": 1,
+      "rate": 11820.4,
+      "diff": -36.95,
+      "date": "2026-08-19"
+    },
+    "RUB": {
+      "currency": "RUB",
+      "code": "643",
+      "nominal": 1,
+      "rate": 139.05,
+      "diff": -0.27,
+      "date": "2026-08-19"
+    },
+    "RMB": {
+      "currency": "RMB",
+      "code": "156",
+      "nominal": 1,
+      "rate": 1753.12,
+      "diff": -6.29,
+      "date": "2026-08-19"
+    }
   },
   "summary": {
-    "gross_revenue": 8000.0,
-    "cost_of_goods_sold": 5000.0,
-    "gross_profit": 3000.0,
-    "operational_expenses": 700.0,
-    "fixed_salaries_expense": 1500.0,
-    "kpi_bonuses_expense": 300.0,
-    "total_payroll_expense": 1800.0,
-    "total_expenses": 2500.0,
-    "net_profit": 500.0,
-    "seo_cut_10pc": 50.0
+    "gross_revenue": 12500.0,
+    "cost_of_goods_sold": 7500.0,
+    "gross_profit": 5000.0,
+    "gross_margin": 5000.0,
+    "operational_expenses": 1200.0,
+    "fixed_salaries_expense": 8600.0,
+    "kpi_bonuses_expense": 800.0,
+    "total_payroll_expense": 9400.0,
+    "total_expenses": 10600.0,
+    "total_all_in_expenses": 10600.0,
+    "net_profit": -5600.0,
+    "seo_cut_10pc": 0.0,
+    "seo_pure_profit_share": 0.0
   },
+  "flow_diagram": {
+    "formula": "P_net = G - F_total (USD)",
+    "gross_margin": 5000.0,
+    "total_all_in_expenses": 10600.0,
+    "net_profit": -5600.0,
+    "all_in_expense_breakdown": {
+      "total": 10600.0,
+      "operational_expenses": {
+        "amount": 1200.0,
+        "percentage": 11.32
+      },
+      "salaries": {
+        "amount": 8600.0,
+        "percentage": 81.13
+      },
+      "kpi_bonuses": {
+        "amount": 800.0,
+        "percentage": 7.55
+      }
+    }
+  },
+  "expense_distribution": [
+    {
+      "category": "tax",
+      "label": "Taxes (Nalog)",
+      "description": "Government taxes, tax transfers, official fees",
+      "amount": 200.0,
+      "percentage": 16.67,
+      "count": 1
+    },
+    {
+      "category": "utility",
+      "label": "Utilities (Svet/Kommunal)",
+      "description": "Electricity, internet, water, office utilities",
+      "amount": 300.0,
+      "percentage": 25.0,
+      "count": 2
+    },
+    {
+      "category": "rent",
+      "label": "Rent (Arenda)",
+      "description": "Office space rent, warehouse space rent",
+      "amount": 500.0,
+      "percentage": 41.67,
+      "count": 1
+    },
+    {
+      "category": "salary_payout",
+      "label": "Salary Payouts (Maosh)",
+      "description": "Manual cash or card salary payouts",
+      "amount": 0.0,
+      "percentage": 0.0,
+      "count": 0
+    },
+    {
+      "category": "cleaner",
+      "label": "Cleaning (Uborshchitsa)",
+      "description": "Office cleaning services, sanitation supplies",
+      "amount": 100.0,
+      "percentage": 8.33,
+      "count": 1
+    },
+    {
+      "category": "other",
+      "label": "Other Expenses (Prochiy)",
+      "description": "Miscellaneous unclassified operational costs",
+      "amount": 100.0,
+      "percentage": 8.33,
+      "count": 1
+    }
+  ],
   "expense_breakdown": {
-    "utility": 200.0,
-    "rent": 500.0
+    "tax": 200.0,
+    "utility": 300.0,
+    "rent": 500.0,
+    "salary_payout": 0.0,
+    "cleaner": 100.0,
+    "other": 100.0
   },
   "comparison": {
     "previous_period": {
-      "start_date": "2026-06-01",
-      "end_date": "2026-06-30",
-      "gross_profit": 2000.0,
-      "total_expenses": 1800.0,
-      "net_profit": 200.0
+      "start_date": "2026-07-01",
+      "end_date": "2026-07-31",
+      "gross_revenue": 10000.0,
+      "cost_of_goods_sold": 6000.0,
+      "gross_profit": 4000.0,
+      "operational_expenses": 1500.0,
+      "fixed_salaries_expense": 8600.0,
+      "kpi_bonuses_expense": 0.0,
+      "total_expenses": 10100.0,
+      "net_profit": -6100.0
     },
-    "net_profit_change_amount": 300.0,
-    "net_profit_growth_percentage": 150.0,
-    "expenses_change_amount": 700.0,
-    "expenses_change_percentage": 38.89
+    "net_profit_change_amount": 500.0,
+    "net_profit_growth_percentage": 8.2,
+    "expenses_change_amount": 500.0,
+    "expenses_change_percentage": 4.95,
+    "gross_profit_change_amount": 1000.0,
+    "gross_profit_growth_percentage": 25.0
   }
 }
 ```
