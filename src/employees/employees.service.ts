@@ -1085,6 +1085,7 @@ export class EmployeesService implements OnModuleInit {
       'employees',
       'departments',
       'cargo_kpi',
+      'cargo_registrations',
       'finance',
       'commercial_offers',
       'tasks',
@@ -1094,6 +1095,16 @@ export class EmployeesService implements OnModuleInit {
     ];
 
     let rawPermissions: unknown = user.role_permissions;
+
+    if (!rawPermissions && user.role) {
+      const fallbackRole = (await this.knex('roles')
+        .whereRaw('LOWER(name) = ?', [user.role.toLowerCase()])
+        .first()) as unknown as RoleRow | undefined;
+      if (fallbackRole) {
+        rawPermissions = fallbackRole.permissions ?? null;
+      }
+    }
+
     if (typeof rawPermissions === 'string') {
       try {
         rawPermissions = JSON.parse(rawPermissions);
@@ -1260,8 +1271,9 @@ export class EmployeesService implements OnModuleInit {
       updatePayload.department_id = dto.department_id;
     }
 
+    let phoneDigits: string | undefined = undefined;
     if (dto.phone !== undefined) {
-      const phoneDigits = this.normalizePhone(dto.phone);
+      phoneDigits = this.normalizePhone(dto.phone);
       const existingPhone = (await this.knex('employees')
         .whereRaw("regexp_replace(phone, '[^0-9]', '', 'g') = ?", [phoneDigits])
         .whereNot('id', id)
@@ -1289,9 +1301,9 @@ export class EmployeesService implements OnModuleInit {
         })
         .returning('*')) as unknown as EmployeeRow[];
 
-      // Update role if role_id or role is passed
+      // Resolve role if role_id or role is passed
+      let roleRecord: RoleRow | undefined = undefined;
       if (dto.role_id || dto.role) {
-        let roleRecord: RoleRow | undefined = undefined;
         if (dto.role_id) {
           roleRecord = await trx<RoleRow>('roles')
             .where('id', dto.role_id)
@@ -1307,14 +1319,60 @@ export class EmployeesService implements OnModuleInit {
             .whereRaw('LOWER(name) = ?', [dto.role.toLowerCase()])
             .first();
         }
+      }
 
-        if (roleRecord) {
-          await trx('users').where('employee_id', id).update({
-            role_id: roleRecord.id,
-            role: roleRecord.name,
+      // Check linked user for this employee
+      const linkedUser = (await trx('users')
+        .where('employee_id', id)
+        .first()) as unknown as UserRow | undefined;
+
+      // Synchronize phone and username with user account
+      if (phoneDigits !== undefined) {
+        const existingUserWithPhone = (await trx('users')
+          .where('phone_number', phoneDigits)
+          .first()) as unknown as UserRow | undefined;
+
+        if (
+          existingUserWithPhone &&
+          (!linkedUser || existingUserWithPhone.id !== linkedUser.id)
+        ) {
+          if (!existingUserWithPhone.employee_id) {
+            // Remove orphaned unlinked user (e.g. from Telegram OTP bot)
+            await trx('users').where('id', existingUserWithPhone.id).del();
+          } else {
+            throw new BadRequestException({
+              message: `User account with phone number "${dto.phone}" is already associated with another employee.`,
+              location: 'user_phone_exists',
+            });
+          }
+        }
+
+        if (linkedUser) {
+          await trx('users').where('id', linkedUser.id).update({
+            phone_number: phoneDigits,
+            username: phoneDigits,
             updated_at: trx.fn.now(),
           });
+        } else {
+          await trx('users').insert({
+            employee_id: id,
+            phone_number: phoneDigits,
+            username: phoneDigits,
+            password_hash: '',
+            role_id: roleRecord ? roleRecord.id : null,
+            role: roleRecord ? roleRecord.name : 'EMPLOYEE',
+            status: 'Pending',
+          });
         }
+      }
+
+      // Update role if role_id or role is passed
+      if (roleRecord) {
+        await trx('users').where('employee_id', id).update({
+          role_id: roleRecord.id,
+          role: roleRecord.name,
+          updated_at: trx.fn.now(),
+        });
       }
 
       // If is_active is modified, sync with the linked user account

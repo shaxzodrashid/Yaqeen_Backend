@@ -254,6 +254,30 @@ export class AuthService {
       });
     }
 
+    if (!user.role_permissions && user.role) {
+      const fallbackRole = (await this.knex('roles')
+        .whereRaw('LOWER(name) = ?', [user.role.toLowerCase()])
+        .first()) as
+        | {
+            id: string;
+            name: string;
+            display_name: string | null;
+            description: string | null;
+            permissions:
+              Record<string, Record<string, boolean>> | string | null;
+            is_system: boolean | null;
+          }
+        | undefined;
+      if (fallbackRole) {
+        user.role_name = fallbackRole.name;
+        user.role_display_name = fallbackRole.display_name;
+        user.role_description = fallbackRole.description;
+        user.role_permissions = fallbackRole.permissions;
+        user.role_is_system = fallbackRole.is_system;
+        user.role_id = fallbackRole.id;
+      }
+    }
+
     const permissions = this.getUserPermissions(user);
     const roleName = user.role_name || user.role;
 
@@ -347,6 +371,30 @@ export class AuthService {
         message: 'Invalid credentials',
         location: 'invalid_login',
       });
+    }
+
+    if (!user.role_permissions && user.role) {
+      const fallbackRole = (await this.knex('roles')
+        .whereRaw('LOWER(name) = ?', [user.role.toLowerCase()])
+        .first()) as
+        | {
+            id: string;
+            name: string;
+            display_name: string | null;
+            description: string | null;
+            permissions:
+              Record<string, Record<string, boolean>> | string | null;
+            is_system: boolean | null;
+          }
+        | undefined;
+      if (fallbackRole) {
+        user.role_name = fallbackRole.name;
+        user.role_display_name = fallbackRole.display_name;
+        user.role_description = fallbackRole.description;
+        user.role_permissions = fallbackRole.permissions;
+        user.role_is_system = fallbackRole.is_system;
+        user.role_id = fallbackRole.id;
+      }
     }
 
     const activeRoleName = user.role_name || user.role;

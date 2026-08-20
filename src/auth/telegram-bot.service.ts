@@ -188,7 +188,19 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
             ])
             .first();
 
-          if (!user) {
+          // Check if a user record is already linked to this employee
+          const linkedUser = employee
+            ? await trx('users').where('employee_id', employee.id).first()
+            : null;
+
+          if (linkedUser) {
+            // Update linked user's phone to match the verified telegram phone number
+            await trx('users').where('id', linkedUser.id).update({
+              phone_number: phoneNumber,
+              username: phoneNumber,
+              updated_at: trx.fn.now(),
+            });
+          } else if (!user) {
             // Create a pending user account (linked to employee if found)
             await trx('users').insert({
               employee_id: employee ? employee.id : null,
