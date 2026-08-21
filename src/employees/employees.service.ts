@@ -1039,24 +1039,56 @@ export class EmployeesService implements OnModuleInit {
 
     const netYieldUsd = sellUsd - purchaseUsd;
 
-    if (planCurrency === Currency.USD || !this.currencyService) {
+    if (planCurrency === Currency.USD) {
       return netYieldUsd;
     }
 
     if (planCurrency === Currency.UZS) {
-      return await this.currencyService.convertToUzs(
-        netYieldUsd,
-        Currency.USD,
-        rates,
-      );
+      if (this.currencyService) {
+        return await this.currencyService.convertToUzs(
+          netYieldUsd,
+          Currency.USD,
+          rates,
+        );
+      }
+      const rateUsed =
+        Number(reg.sell_custom_rate) ||
+        Number(reg.sell_usd_rate) ||
+        Number(reg.purchase_custom_rate) ||
+        Number(reg.purchase_usd_rate) ||
+        defaultUsd;
+      return netYieldUsd * rateUsed;
     }
 
-    const conv = await this.currencyService.convert(
-      netYieldUsd,
-      Currency.USD,
-      planCurrency,
-    );
-    return conv.converted_amount;
+    if (planCurrency === Currency.RUB) {
+      if (this.currencyService) {
+        const conv = await this.currencyService.convert(
+          netYieldUsd,
+          Currency.USD,
+          Currency.RUB,
+        );
+        return conv.converted_amount;
+      }
+      const rubObj = rates?.['RUB'] || { rate: 145, nominal: 1 };
+      const rubRate = rubObj.rate / (rubObj.nominal || 1);
+      const rateUsed =
+        Number(reg.sell_custom_rate) ||
+        Number(reg.sell_usd_rate) ||
+        Number(reg.purchase_custom_rate) ||
+        Number(reg.purchase_usd_rate) ||
+        defaultUsd;
+      return rubRate > 0 ? (netYieldUsd * rateUsed) / rubRate : 0;
+    }
+
+    if (this.currencyService) {
+      const conv = await this.currencyService.convert(
+        netYieldUsd,
+        Currency.USD,
+        planCurrency,
+      );
+      return conv.converted_amount;
+    }
+    return netYieldUsd;
   }
 
   async findAllEmployees(filters: {
@@ -1214,7 +1246,13 @@ export class EmployeesService implements OnModuleInit {
                     ]);
                 });
               })
-              .select('employee_id', 'sell_price', 'currency')
+              .select(
+                'employee_id',
+                'sell_price',
+                'buy_price',
+                'margin',
+                'currency',
+              )
           : Promise.resolve([]),
 
         this.knex('clients')
@@ -1277,7 +1315,6 @@ export class EmployeesService implements OnModuleInit {
 
       const empId = String(cr.employee_id);
       const curr = String(cr.sell_currency || 'UZS').toUpperCase();
-      const price = parseFloat(String(cr.sell_price || '0')) || 0;
       const vol = parseFloat(String(cr.volume || '0')) || 0;
       const type = String(cr.cargo_type || '').toUpperCase();
 
@@ -1289,10 +1326,29 @@ export class EmployeesService implements OnModuleInit {
         rub: 0,
       };
 
-      // Multi-currency revenue calculation
-      if (curr === 'USD') current.usd += price;
-      else if (curr === 'RUB') current.rub += price;
-      else if (curr === 'UZS') current.uzs += price;
+      // Multi-currency revenue calculation representing net yields only
+      if (curr === 'USD') {
+        const netYield = await this.calculateFtlCargoNetYield(
+          cr,
+          Currency.USD,
+          rates,
+        );
+        current.usd += netYield;
+      } else if (curr === 'RUB') {
+        const netYield = await this.calculateFtlCargoNetYield(
+          cr,
+          Currency.RUB,
+          rates,
+        );
+        current.rub += netYield;
+      } else if (curr === 'UZS') {
+        const netYield = await this.calculateFtlCargoNetYield(
+          cr,
+          Currency.UZS,
+          rates,
+        );
+        current.uzs += netYield;
+      }
 
       // Plan progress calculation strictly by confirmed_date (matching GET /api/v1/cargo-kpi/plans)
       if (type === 'LTL') {
@@ -1313,7 +1369,11 @@ export class EmployeesService implements OnModuleInit {
     for (const tx of allCargoTxs as any[]) {
       const empId = String(tx.employee_id);
       const curr = String(tx.currency || 'UZS').toUpperCase();
-      const price = parseFloat(String(tx.sell_price || '0')) || 0;
+      const margin =
+        tx.margin !== undefined && tx.margin !== null
+          ? parseFloat(String(tx.margin))
+          : parseFloat(String(tx.sell_price || '0')) -
+            parseFloat(String(tx.buy_price || '0'));
 
       const current = empRegMap.get(empId) || {
         ltlVolume: 0,
@@ -1323,9 +1383,9 @@ export class EmployeesService implements OnModuleInit {
         rub: 0,
       };
 
-      if (curr === 'USD') current.usd += price;
-      else if (curr === 'RUB') current.rub += price;
-      else if (curr === 'UZS') current.uzs += price;
+      if (curr === 'USD') current.usd += margin;
+      else if (curr === 'RUB') current.rub += margin;
+      else if (curr === 'UZS') current.uzs += margin;
 
       empRegMap.set(empId, current);
     }

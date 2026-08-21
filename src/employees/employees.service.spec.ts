@@ -396,16 +396,182 @@ describe('EmployeesService', () => {
       // Employee 1
       expect(res.data[0].plan_completion.ltl_completion).toBe(75);
       expect(res.data[0].plan_completion.ftl_completion).toBe(80);
+      expect(res.data[0].total_revenue.USD).toBe(8000);
+      expect(res.data[0].total_revenue.UZS).toBe(0);
+      expect(res.data[0].total_revenue.RUB).toBe(0);
 
       // Employee 2
       expect(res.data[1].plan_completion.ltl_completion).toBe(50);
       expect(res.data[1].plan_completion.ftl_completion).toBe(75);
+      expect(res.data[1].total_revenue.USD).toBe(15000);
+      expect(res.data[1].total_revenue.UZS).toBe(0);
+      expect(res.data[1].total_revenue.RUB).toBe(0);
 
       // Meta:
       // Total LTL: (150 + 50) / (200 + 100) = 200 / 300 = 66.67%
       expect(res.meta.plan_completed.ltl_completion).toBe(66.67);
       // Total FTL: (8000 + 15000) / (10000 + 20000) = 23000 / 30000 = 76.67%
       expect(res.meta.plan_completed.ftl_completion).toBe(76.67);
+      expect(res.meta.total_revenue.USD).toBe(23000);
+      expect(res.meta.total_revenue.UZS).toBe(0);
+      expect(res.meta.total_revenue.RUB).toBe(0);
+    });
+
+    it('should calculate multi-currency total_revenue representing net yields only for cargo registrations and cargo transactions', async () => {
+      const mockRawEmployee = {
+        id: 'emp-uuid-1',
+        first_name: 'Jasur',
+        last_name: 'Yoldoshev',
+        department_name: 'sales',
+        role_name: 'Sales Manager',
+        user_status: 'Open',
+        is_active: true,
+        color: '#336699',
+        created_at: new Date(),
+      };
+
+      const mockKnexQueryBuilder: any = {
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        whereIn: jest.fn().mockReturnThis(),
+        whereBetween: jest.fn().mockReturnThis(),
+        orWhere: jest.fn().mockReturnThis(),
+        orWhereBetween: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        count: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnThis(),
+        clone: jest.fn().mockReturnThis(),
+        first: jest.fn().mockResolvedValue({ total: 1, open_employees: 1 }),
+      };
+
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
+      const testConfirmedDate = `${currentYear}-${currentMonth}-15`;
+
+      const mockKnexFn: any = jest.fn((table: string) => {
+        if (table === 'employee_plans') {
+          return {
+            ...mockKnexQueryBuilder,
+            select: jest.fn().mockResolvedValue([]),
+          };
+        }
+        if (table === 'cargo_registrations') {
+          return {
+            ...mockKnexQueryBuilder,
+            select: jest.fn().mockResolvedValue([
+              // 1. USD: sell 10,000 USD, purchase 6,000 USD => net yield = 4,000 USD
+              {
+                employee_id: 'emp-uuid-1',
+                cargo_type: 'FTL',
+                sell_price: '10000',
+                sell_currency: 'USD',
+                purchase_price: '6000',
+                purchase_currency: 'USD',
+                confirmed_date: testConfirmedDate,
+              },
+              // 2. UZS: sell 25,700,000 UZS, purchase 1,000 USD (rate 12,850 => 12,850,000 UZS) => net yield = 12,850,000 UZS
+              {
+                employee_id: 'emp-uuid-1',
+                cargo_type: 'FTL',
+                sell_price: '25700000',
+                sell_currency: 'UZS',
+                sell_usd_rate: 12850,
+                purchase_price: '1000',
+                purchase_currency: 'USD',
+                purchase_usd_rate: 12850,
+                confirmed_date: testConfirmedDate,
+              },
+              // 3. RUB: sell 500,000 RUB, purchase 300,000 RUB => net yield = 200,000 RUB
+              {
+                employee_id: 'emp-uuid-1',
+                cargo_type: 'FTL',
+                sell_price: '500000',
+                sell_currency: 'RUB',
+                purchase_price: '300000',
+                purchase_currency: 'RUB',
+                confirmed_date: testConfirmedDate,
+              },
+            ]),
+          };
+        }
+        if (table === 'cargo_transactions') {
+          return {
+            ...mockKnexQueryBuilder,
+            select: jest.fn().mockResolvedValue([
+              // Cargo transaction: sell 5,000 USD, buy 3,500 USD, margin 1,500 USD
+              {
+                employee_id: 'emp-uuid-1',
+                sell_price: '5000',
+                buy_price: '3500',
+                margin: '1500',
+                currency: 'USD',
+              },
+              // Cargo transaction: sell 10,000,000 UZS, buy 8,000,000 UZS, margin 2,000,000 UZS
+              {
+                employee_id: 'emp-uuid-1',
+                sell_price: '10000000',
+                buy_price: '8000000',
+                margin: '2000000',
+                currency: 'UZS',
+              },
+            ]),
+          };
+        }
+        if (table === 'clients') {
+          return {
+            ...mockKnexQueryBuilder,
+            groupBy: jest.fn().mockResolvedValue([]),
+          };
+        }
+        return {
+          ...mockKnexQueryBuilder,
+          offset: jest.fn().mockResolvedValue([mockRawEmployee]),
+        };
+      });
+
+      mockKnexFn.raw = jest.fn((str: string) => str);
+      mockKnexFn.schema = {
+        hasTable: jest.fn().mockResolvedValue(true),
+        hasColumn: jest.fn().mockResolvedValue(true),
+      };
+
+      const customModule: TestingModule = await Test.createTestingModule({
+        providers: [
+          EmployeesService,
+          {
+            provide: KNEX_CONNECTION,
+            useValue: mockKnexFn,
+          },
+          {
+            provide: MinioService,
+            useValue: mockMinioService,
+          },
+          {
+            provide: RedisService,
+            useValue: mockRedisService,
+          },
+        ],
+      }).compile();
+
+      const customService =
+        customModule.get<EmployeesService>(EmployeesService);
+      const res = await customService.findAllEmployees({ page: 1, limit: 10 });
+
+      // Total Net Yields:
+      // USD: 4000 (cargo_reg) + 1500 (cargo_tx) = 5500 USD
+      // UZS: 12850000 (cargo_reg) + 2000000 (cargo_tx) = 14850000 UZS
+      // RUB: 200000 (cargo_reg) = 200000 RUB
+      expect(res.data[0].total_revenue.USD).toBe(5500);
+      expect(res.data[0].total_revenue.UZS).toBe(14850000);
+      expect(res.data[0].total_revenue.RUB).toBe(200000);
+
+      expect(res.meta.total_revenue.USD).toBe(5500);
+      expect(res.meta.total_revenue.UZS).toBe(14850000);
+      expect(res.meta.total_revenue.RUB).toBe(200000);
     });
   });
 });

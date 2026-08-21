@@ -330,7 +330,7 @@ Retrieves complete profile details of the currently authenticated user, includin
 
 ### 5.2. List All Employees (Paginated & Filtered)
 
-Retrieve a paginated list of all employees along with current month plan completion (two-direction LTL & FTL specs) and multi-currency revenues.
+Retrieve a paginated list of all employees along with current month plan completion (two-direction LTL & FTL specs) and multi-currency net yield revenues.
 
 - **Route:** `/api/v1/employees`
 - **Method:** `GET`
@@ -346,7 +346,7 @@ Retrieve a paginated list of all employees along with current month plan complet
 - `offset` (number): Direct offset override.
 
 > [!NOTE]
-> This endpoint operates strictly on the **current calendar month** for `plan_completed` / `plan_completion` metrics and `total_revenue` multi-currency figures.
+> This endpoint operates strictly on the **current calendar month** for `plan_completed` / `plan_completion` metrics and `total_revenue` multi-currency figures. All `total_revenue` metrics (in `meta.total_revenue` and each employee's `data[].total_revenue`) represent **net yields only** (calculated as `sell_price - purchase_price` / `margin` converted to target currency using snapshot/CBU exchange rates, rather than gross sales prices).
 
 #### Success Response (200 OK) Example
 

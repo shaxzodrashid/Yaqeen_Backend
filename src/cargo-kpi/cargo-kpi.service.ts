@@ -1082,24 +1082,56 @@ export class CargoKpiService {
 
     const netYieldUsd = sellUsd - purchaseUsd;
 
-    if (planCurrency === Currency.USD || !this.currencyService) {
+    if (planCurrency === Currency.USD) {
       return netYieldUsd;
     }
 
     if (planCurrency === Currency.UZS) {
-      return await this.currencyService.convertToUzs(
-        netYieldUsd,
-        Currency.USD,
-        rates,
-      );
+      if (this.currencyService) {
+        return await this.currencyService.convertToUzs(
+          netYieldUsd,
+          Currency.USD,
+          rates,
+        );
+      }
+      const rateUsed =
+        Number(reg.sell_custom_rate) ||
+        Number(reg.sell_usd_rate) ||
+        Number(reg.purchase_custom_rate) ||
+        Number(reg.purchase_usd_rate) ||
+        defaultUsd;
+      return netYieldUsd * rateUsed;
     }
 
-    const conv = await this.currencyService.convert(
-      netYieldUsd,
-      Currency.USD,
-      planCurrency,
-    );
-    return conv.converted_amount;
+    if (planCurrency === Currency.RUB) {
+      if (this.currencyService) {
+        const conv = await this.currencyService.convert(
+          netYieldUsd,
+          Currency.USD,
+          Currency.RUB,
+        );
+        return conv.converted_amount;
+      }
+      const rubObj = rates?.['RUB'] || { rate: 145, nominal: 1 };
+      const rubRate = rubObj.rate / (rubObj.nominal || 1);
+      const rateUsed =
+        Number(reg.sell_custom_rate) ||
+        Number(reg.sell_usd_rate) ||
+        Number(reg.purchase_custom_rate) ||
+        Number(reg.purchase_usd_rate) ||
+        defaultUsd;
+      return rubRate > 0 ? (netYieldUsd * rateUsed) / rubRate : 0;
+    }
+
+    if (this.currencyService) {
+      const conv = await this.currencyService.convert(
+        netYieldUsd,
+        Currency.USD,
+        planCurrency,
+      );
+      return conv.converted_amount;
+    }
+    return netYieldUsd;
   }
 
   async getEmployeePlansProgress(query?: QueryEmployeePlanDto) {
