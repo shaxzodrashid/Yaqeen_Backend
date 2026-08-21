@@ -1180,18 +1180,7 @@ export class EmployeesService implements OnModuleInit {
         hasCargoRegTable
           ? this.knex('cargo_registrations')
               .whereIn('employee_id', matchingEmpSubquery.clone())
-              .where((qb) => {
-                qb.whereBetween('confirmed_date', [startDate, endDate])
-                  .orWhere((sub) => {
-                    sub
-                      .whereNull('confirmed_date')
-                      .whereBetween('created_at', [
-                        startDate + ' 00:00:00',
-                        endDate + ' 23:59:59.999',
-                      ]);
-                  })
-                  .orWhereBetween('sell_date', [startDate, endDate]);
-              })
+              .whereBetween('confirmed_date', [startDate, endDate])
               .select(
                 'employee_id',
                 'cargo_type',
@@ -1278,6 +1267,14 @@ export class EmployeesService implements OnModuleInit {
     >();
 
     for (const cr of allCargoRegs as any[]) {
+      const confirmedStr = this.formatDateFromDb(cr.confirmed_date);
+      const isConfirmedInMonth =
+        confirmedStr >= startDate && confirmedStr <= endDate;
+
+      if (!isConfirmedInMonth) {
+        continue;
+      }
+
       const empId = String(cr.employee_id);
       const curr = String(cr.sell_currency || 'UZS').toUpperCase();
       const price = parseFloat(String(cr.sell_price || '0')) || 0;
@@ -1298,23 +1295,16 @@ export class EmployeesService implements OnModuleInit {
       else if (curr === 'UZS') current.uzs += price;
 
       // Plan progress calculation strictly by confirmed_date (matching GET /api/v1/cargo-kpi/plans)
-      const confirmedStr = this.formatDateFromDb(cr.confirmed_date);
-      const isConfirmedInMonth =
-        !cr.confirmed_date ||
-        (confirmedStr >= startDate && confirmedStr <= endDate);
-
-      if (isConfirmedInMonth) {
-        if (type === 'LTL') {
-          current.ltlVolume += vol;
-        } else if (type === 'FTL') {
-          const planCurrency = empPlanMap.get(empId)?.currency || Currency.USD;
-          const netYield = await this.calculateFtlCargoNetYield(
-            cr,
-            planCurrency,
-            rates,
-          );
-          current.ftlAmount += netYield;
-        }
+      if (type === 'LTL') {
+        current.ltlVolume += vol;
+      } else if (type === 'FTL') {
+        const planCurrency = empPlanMap.get(empId)?.currency || Currency.USD;
+        const netYield = await this.calculateFtlCargoNetYield(
+          cr,
+          planCurrency,
+          rates,
+        );
+        current.ftlAmount += netYield;
       }
 
       empRegMap.set(empId, current);

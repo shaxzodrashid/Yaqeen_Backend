@@ -99,6 +99,11 @@ describe('EmployeesService', () => {
         hasColumn: jest.fn().mockResolvedValue(true),
       };
 
+      const now = new Date();
+      const currentYear = now.getFullYear();
+      const currentMonth = String(now.getMonth() + 1).padStart(2, '0');
+      const testConfirmedDate = `${currentYear}-${currentMonth}-15`;
+
       const mockKnexFn: any = jest.fn((table: string) => {
         if (table === 'employee_plans') {
           return {
@@ -109,6 +114,7 @@ describe('EmployeesService', () => {
                 ltl_target_volume: '100',
                 ftl_target_amount: '50000',
                 currency: 'USD',
+                period: `${currentYear}-${currentMonth}-01`,
               },
             ]),
           };
@@ -123,6 +129,7 @@ describe('EmployeesService', () => {
                 volume: '80',
                 sell_price: '0',
                 sell_currency: 'USD',
+                confirmed_date: testConfirmedDate,
               },
               {
                 employee_id: 'emp-uuid-1',
@@ -130,6 +137,7 @@ describe('EmployeesService', () => {
                 volume: '0',
                 sell_price: '40000',
                 sell_currency: 'USD',
+                confirmed_date: testConfirmedDate,
               },
               {
                 employee_id: 'emp-uuid-1',
@@ -138,6 +146,7 @@ describe('EmployeesService', () => {
                 sell_price: '12850000',
                 sell_currency: 'UZS',
                 sell_usd_rate: 12850,
+                confirmed_date: testConfirmedDate,
               },
             ]),
           };
