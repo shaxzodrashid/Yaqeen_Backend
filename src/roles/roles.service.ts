@@ -16,6 +16,7 @@ export interface ModulePermissionAction {
   read: boolean;
   update: boolean;
   delete: boolean;
+  assign_cargo?: boolean;
   register_for_everyone?: boolean;
   can_work_with_all_clients?: boolean;
 }
@@ -53,6 +54,11 @@ export const SYSTEM_MODULES = [
     module: 'cargo_registrations',
     label: 'Cargo Registrations',
     actions: ['create', 'read', 'update', 'delete', 'register_for_everyone'],
+  },
+  {
+    module: 'cargo_consolidations',
+    label: 'Cargo Consolidations & Trucks',
+    actions: ['create', 'read', 'update', 'delete', 'assign_cargo'],
   },
   {
     module: 'finance',
@@ -124,6 +130,13 @@ export class RolesService implements OnModuleInit {
               delete: true,
               register_for_everyone: true,
             },
+            cargo_consolidations: {
+              create: true,
+              read: true,
+              update: true,
+              delete: true,
+              assign_cargo: true,
+            },
             finance: { create: true, read: true, update: true, delete: true },
             commercial_offers: {
               create: true,
@@ -174,6 +187,13 @@ export class RolesService implements OnModuleInit {
               update: true,
               delete: true,
               register_for_everyone: true,
+            },
+            cargo_consolidations: {
+              create: true,
+              read: true,
+              update: true,
+              delete: true,
+              assign_cargo: true,
             },
             finance: {
               create: false,
@@ -240,6 +260,13 @@ export class RolesService implements OnModuleInit {
               update: true,
               delete: false,
               register_for_everyone: false,
+            },
+            cargo_consolidations: {
+              create: true,
+              read: true,
+              update: true,
+              delete: false,
+              assign_cargo: true,
             },
             finance: {
               create: false,
@@ -323,6 +350,18 @@ export class RolesService implements OnModuleInit {
         update: Boolean(rawModule.update),
         delete: Boolean(rawModule.delete),
       };
+
+      if (item.actions.includes('assign_cargo')) {
+        normalized[moduleKey].assign_cargo = Boolean(
+          rawModule.assign_cargo !== undefined
+            ? rawModule.assign_cargo
+            : rawModule.update !== undefined
+              ? rawModule.update
+              : rawModule.create !== undefined
+                ? rawModule.create
+                : false,
+        );
+      }
 
       if (item.actions.includes('register_for_everyone')) {
         normalized[moduleKey].register_for_everyone = Boolean(

@@ -21,6 +21,7 @@ import { KanbanModule } from './kanban/kanban.module';
 import { CommercialOffersModule } from './commercial-offers/commercial-offers.module';
 import { SalesManagerKpiModule } from './sales-manager-kpi/sales-manager-kpi.module';
 import { CargoRegistrationsModule } from './cargo-registrations/cargo-registrations.module';
+import { CargoConsolidationsModule } from './cargo-consolidations/cargo-consolidations.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { KpiSummaryModule } from './kpi-summary/kpi-summary.module';
 
@@ -71,6 +72,7 @@ import { KpiSummaryModule } from './kpi-summary/kpi-summary.module';
     ClientsModule,
     CargoKpiModule,
     CargoRegistrationsModule,
+    CargoConsolidationsModule,
     FinanceModule,
     CurrencyModule,
     RolesModule,

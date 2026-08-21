@@ -396,16 +396,102 @@ export class CargoRegistrationsService {
       dto.sell_exchange_rate,
     );
 
+    // Handle Consolidation logic (Search or Create Dropdown support)
+    let finalConsolidationId: string | null = null;
+    let finalContainerTruckId = dto.container_truck_id
+      ? dto.container_truck_id.trim()
+      : '';
+    let finalContainerType = dto.container_type
+      ? dto.container_type.trim()
+      : null;
+
+    if (dto.new_consolidation) {
+      const nc = dto.new_consolidation;
+      const now = new Date();
+      const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+      const prefix = `CNS-${yearMonth}-`;
+      const latest = await this.knex('cargo_consolidations')
+        .where('consolidation_code', 'like', `${prefix}%`)
+        .orderBy('consolidation_code', 'desc')
+        .first();
+      let seq = 1;
+      if (latest && latest.consolidation_code) {
+        const parts = latest.consolidation_code.split('-');
+        const lastSeq = parseInt(parts[parts.length - 1], 10);
+        if (!isNaN(lastSeq)) seq = lastSeq + 1;
+      }
+      const code = `${prefix}${String(seq).padStart(4, '0')}`;
+
+      const [newConsInserted] = await this.knex('cargo_consolidations')
+        .insert({
+          consolidation_code: code,
+          container_truck_id: nc.container_truck_id.trim(),
+          container_type: nc.container_type ? nc.container_type.trim() : null,
+          max_volume_capacity:
+            nc.max_volume_capacity !== undefined
+              ? nc.max_volume_capacity
+              : null,
+          max_weight_capacity:
+            nc.max_weight_capacity !== undefined
+              ? nc.max_weight_capacity
+              : null,
+          carrier_name: nc.carrier_name ? nc.carrier_name.trim() : null,
+          carrier_phone: nc.carrier_phone ? nc.carrier_phone.trim() : null,
+          origin_place: nc.origin_place ? nc.origin_place.trim() : null,
+          destination_place: nc.destination_place
+            ? nc.destination_place.trim()
+            : null,
+          departure_date: nc.departure_date || null,
+          status: nc.status || 'Planning',
+          description: nc.description || null,
+          created_by_user_id: user?.id || null,
+        })
+        .returning('id');
+
+      finalConsolidationId =
+        typeof newConsInserted === 'object'
+          ? newConsInserted.id
+          : newConsInserted;
+      finalContainerTruckId = nc.container_truck_id.trim();
+      if (nc.container_type) finalContainerType = nc.container_type.trim();
+    } else if (dto.consolidation_id) {
+      const consolidation = await this.knex('cargo_consolidations')
+        .where('id', dto.consolidation_id)
+        .first();
+      if (!consolidation) {
+        throw new NotFoundException({
+          message: 'Selected cargo consolidation truck not found',
+          location: 'consolidation_not_found',
+        });
+      }
+      finalConsolidationId = consolidation.id;
+      if (!finalContainerTruckId) {
+        finalContainerTruckId = consolidation.container_truck_id;
+      }
+      if (!finalContainerType && consolidation.container_type) {
+        finalContainerType = consolidation.container_type;
+      }
+    }
+
+    if (!finalContainerTruckId) {
+      throw new BadRequestException({
+        message:
+          'container_truck_id, consolidation_id, or new_consolidation is required',
+        location: 'container_truck_id_required',
+      });
+    }
+
     const [inserted] = await this.knex('cargo_registrations')
       .insert({
         cargo_type: dto.cargo_type,
         volume: dto.cargo_type === 'LTL' ? dto.volume : null,
         weight: dto.cargo_type === 'LTL' ? dto.weight : null,
         container_type:
-          dto.cargo_type === 'FTL' && dto.container_type
-            ? dto.container_type.trim()
-            : null,
-        container_truck_id: dto.container_truck_id.trim(),
+          dto.cargo_type === 'FTL' && finalContainerType
+            ? finalContainerType
+            : finalContainerType || null,
+        container_truck_id: finalContainerTruckId,
+        consolidation_id: finalConsolidationId,
         agent_name: dto.agent_name.trim(),
         cargo: dto.cargo.trim(),
         confirmed_date: dto.confirmed_date || null,
@@ -628,6 +714,29 @@ export class CargoRegistrationsService {
     if (dto.employee_id !== undefined)
       updatePayload.employee_id = dto.employee_id;
 
+    if (dto.consolidation_id !== undefined) {
+      if (dto.consolidation_id === null || dto.consolidation_id === '') {
+        updatePayload.consolidation_id = null;
+      } else {
+        const consExists = await this.knex('cargo_consolidations')
+          .where('id', dto.consolidation_id)
+          .first();
+        if (!consExists) {
+          throw new NotFoundException({
+            message: 'Cargo consolidation not found',
+            location: 'consolidation_not_found',
+          });
+        }
+        updatePayload.consolidation_id = dto.consolidation_id;
+        if (dto.container_truck_id === undefined) {
+          updatePayload.container_truck_id = consExists.container_truck_id;
+        }
+        if (dto.container_type === undefined && consExists.container_type) {
+          updatePayload.container_type = consExists.container_type;
+        }
+      }
+    }
+
     await this.knex('cargo_registrations')
       .where('id', id)
       .update(updatePayload);
@@ -658,6 +767,17 @@ export class CargoRegistrationsService {
     }
     if (query.container_type) {
       baseQuery.where('cr.container_type', query.container_type);
+    }
+    if (query.consolidation_id) {
+      baseQuery.where('cr.consolidation_id', query.consolidation_id);
+    }
+    if (query.has_consolidation === 'true' || query.has_consolidation === '1') {
+      baseQuery.whereNotNull('cr.consolidation_id');
+    } else if (
+      query.has_consolidation === 'false' ||
+      query.has_consolidation === '0'
+    ) {
+      baseQuery.whereNull('cr.consolidation_id');
     }
 
     // Date filters
@@ -848,6 +968,7 @@ export class CargoRegistrationsService {
         .clone()
         .leftJoin('clients as c', 'cr.client_id', 'c.id')
         .leftJoin('employees as e', 'cr.employee_id', 'e.id')
+        .leftJoin('cargo_consolidations as cc', 'cr.consolidation_id', 'cc.id')
         .select(
           'cr.id',
           'cr.cargo_type',
@@ -855,6 +976,7 @@ export class CargoRegistrationsService {
           'cr.weight',
           'cr.container_type',
           'cr.container_truck_id',
+          'cr.consolidation_id',
           'cr.agent_name',
           'cr.cargo',
           'cr.confirmed_date',
@@ -879,6 +1001,9 @@ export class CargoRegistrationsService {
           'c.company_name as client_company',
           'e.first_name as emp_first_name',
           'e.last_name as emp_last_name',
+          'cc.consolidation_code',
+          'cc.status as consolidation_status',
+          'cc.carrier_name as consolidation_carrier_name',
         );
 
       this.applySorting(
@@ -987,6 +1112,16 @@ export class CargoRegistrationsService {
             weight: r.weight ? Number(r.weight) : null,
             container_type: r.container_type,
             container_truck_id: r.container_truck_id,
+            consolidation_id: r.consolidation_id || null,
+            consolidation: r.consolidation_id
+              ? {
+                  id: r.consolidation_id,
+                  consolidation_code: r.consolidation_code,
+                  container_truck_id: r.container_truck_id,
+                  status: r.consolidation_status,
+                  carrier_name: r.consolidation_carrier_name,
+                }
+              : null,
             agent_name: r.agent_name,
             client_full_name: clientName,
             cargo: r.cargo,
@@ -1223,6 +1358,7 @@ export class CargoRegistrationsService {
     const row = await this.knex('cargo_registrations as cr')
       .leftJoin('clients as c', 'cr.client_id', 'c.id')
       .leftJoin('employees as e', 'cr.employee_id', 'e.id')
+      .leftJoin('cargo_consolidations as cc', 'cr.consolidation_id', 'cc.id')
       .select(
         'cr.*',
         'c.first_name as client_first_name',
@@ -1231,6 +1367,11 @@ export class CargoRegistrationsService {
         'c.phone as client_phone',
         'e.first_name as emp_first_name',
         'e.last_name as emp_last_name',
+        'cc.consolidation_code',
+        'cc.status as consolidation_status',
+        'cc.carrier_name as consolidation_carrier_name',
+        'cc.max_volume_capacity as consolidation_max_volume',
+        'cc.max_weight_capacity as consolidation_max_weight',
       )
       .where('cr.id', id)
       .first();
@@ -1304,6 +1445,22 @@ export class CargoRegistrationsService {
       weight: row.weight ? Number(row.weight) : null,
       container_type: row.container_type,
       container_truck_id: row.container_truck_id,
+      consolidation_id: row.consolidation_id || null,
+      consolidation: row.consolidation_id
+        ? {
+            id: row.consolidation_id,
+            consolidation_code: row.consolidation_code,
+            container_truck_id: row.container_truck_id,
+            status: row.consolidation_status,
+            carrier_name: row.consolidation_carrier_name,
+            max_volume_capacity: row.consolidation_max_volume
+              ? Number(row.consolidation_max_volume)
+              : null,
+            max_weight_capacity: row.consolidation_max_weight
+              ? Number(row.consolidation_max_weight)
+              : null,
+          }
+        : null,
       agent_name: row.agent_name,
       cargo: row.cargo,
       confirmed_date: row.confirmed_date

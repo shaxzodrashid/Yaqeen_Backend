@@ -1377,4 +1377,207 @@ describe('CargoRegistrationsService', () => {
       );
     });
   });
+
+  describe('Consolidation linkage in Cargo Registrations', () => {
+    it('should link existing consolidation_id and inherit container_truck_id', async () => {
+      const user = { id: 'user-uuid-1', role: 'CEO' };
+      const dto: CreateCargoRegistrationDto = {
+        cargo_type: 'LTL',
+        volume: 5.5,
+        weight: 800,
+        consolidation_id: 'cons-uuid-1',
+        agent_name: 'Test Agent',
+        cargo: 'Auto Parts',
+        purchase_price: 500,
+        purchase_currency: 'USD',
+        sell_price: 800,
+        sell_currency: 'USD',
+        client_id: 'client-uuid-1',
+        employee_id: 'emp-uuid-1',
+      };
+
+      knexMock.mockImplementation((tableName: string) => {
+        if (tableName === 'users as u') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ role: 'CEO' }),
+          };
+        }
+        if (tableName === 'users') {
+          return {
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ employee_id: 'emp-uuid-1' }),
+          };
+        }
+        if (tableName === 'employees') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest
+              .fn()
+              .mockResolvedValue({ id: 'emp-uuid-1', first_name: 'Jamshid' }),
+          };
+        }
+        if (tableName === 'clients') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'client-uuid-1',
+              company_name: 'Aigul LLC',
+            }),
+          };
+        }
+        if (tableName === 'cargo_consolidations') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'cons-uuid-1',
+              container_truck_id: 'TRK-9090',
+              container_type: '86m3',
+            }),
+          };
+        }
+        if (tableName === 'cargo_registrations') {
+          return {
+            insert: jest.fn().mockReturnValue({
+              returning: jest.fn().mockResolvedValue([{ id: 'cargo-reg-1' }]),
+            }),
+          };
+        }
+        if (tableName === 'cargo_registrations as cr') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'cargo-reg-1',
+              cargo_type: 'LTL',
+              volume: 5.5,
+              weight: 800,
+              container_truck_id: 'TRK-9090',
+              consolidation_id: 'cons-uuid-1',
+              consolidation_code: 'CNS-202608-0001',
+              consolidation_status: 'Planning',
+              agent_name: 'Test Agent',
+              cargo: 'Auto Parts',
+              purchase_price: 500,
+              purchase_currency: 'USD',
+              sell_price: 800,
+              sell_currency: 'USD',
+              status: 'Waiting',
+              client_id: 'client-uuid-1',
+              employee_id: 'emp-uuid-1',
+            }),
+          };
+        }
+        return {};
+      });
+
+      const res = await service.createCargoRegistration(user, dto);
+      expect(res).toBeDefined();
+      expect(res.consolidation_id).toBe('cons-uuid-1');
+      expect(res.consolidation).toBeDefined();
+      expect(res.consolidation.consolidation_code).toBe('CNS-202608-0001');
+    });
+
+    it('should create new consolidation inline when new_consolidation is provided', async () => {
+      const user = { id: 'user-uuid-1', role: 'CEO' };
+      const dto: CreateCargoRegistrationDto = {
+        cargo_type: 'LTL',
+        volume: 10,
+        weight: 1500,
+        new_consolidation: {
+          container_truck_id: '01B888BB',
+          container_type: '120m3',
+          max_volume_capacity: 120,
+          carrier_name: 'Silk Road Express',
+        },
+        agent_name: 'Test Agent',
+        cargo: 'Electronics',
+        purchase_price: 1000,
+        purchase_currency: 'USD',
+        sell_price: 1600,
+        sell_currency: 'USD',
+        client_id: 'client-uuid-1',
+        employee_id: 'emp-uuid-1',
+      };
+
+      const consInsertMock = jest.fn().mockReturnValue({
+        returning: jest.fn().mockResolvedValue([{ id: 'new-cons-uuid' }]),
+      });
+
+      knexMock.mockImplementation((tableName: string) => {
+        if (tableName === 'users as u') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ role: 'CEO' }),
+          };
+        }
+        if (tableName === 'users') {
+          return {
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ employee_id: 'emp-uuid-1' }),
+          };
+        }
+        if (tableName === 'employees') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ id: 'emp-uuid-1' }),
+          };
+        }
+        if (tableName === 'clients') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ id: 'client-uuid-1' }),
+          };
+        }
+        if (tableName === 'cargo_consolidations') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            orderBy: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue(null),
+            insert: consInsertMock,
+          };
+        }
+        if (tableName === 'cargo_registrations') {
+          return {
+            insert: jest.fn().mockReturnValue({
+              returning: jest.fn().mockResolvedValue([{ id: 'cargo-reg-2' }]),
+            }),
+          };
+        }
+        if (tableName === 'cargo_registrations as cr') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'cargo-reg-2',
+              cargo_type: 'LTL',
+              volume: 10,
+              weight: 1500,
+              container_truck_id: '01B888BB',
+              consolidation_id: 'new-cons-uuid',
+              consolidation_code: 'CNS-202608-0001',
+              purchase_price: 1000,
+              purchase_currency: 'USD',
+              sell_price: 1600,
+              sell_currency: 'USD',
+            }),
+          };
+        }
+        return {};
+      });
+
+      const res = await service.createCargoRegistration(user, dto);
+      expect(consInsertMock).toHaveBeenCalled();
+      expect(res).toBeDefined();
+      expect(res.consolidation_id).toBe('new-cons-uuid');
+    });
+  });
 });

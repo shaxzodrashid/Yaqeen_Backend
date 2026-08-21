@@ -32,6 +32,13 @@ export const DEFAULT_SYSTEM_PERMISSIONS: Record<string, any> = {
       delete: true,
       register_for_everyone: true,
     },
+    cargo_consolidations: {
+      create: true,
+      read: true,
+      update: true,
+      delete: true,
+      assign_cargo: true,
+    },
     finance: { create: false, read: true, update: false, delete: false },
     commercial_offers: { create: true, read: true, update: true, delete: true },
     tasks: { create: true, read: true, update: true, delete: true },
@@ -56,6 +63,13 @@ export const DEFAULT_SYSTEM_PERMISSIONS: Record<string, any> = {
       update: true,
       delete: false,
       register_for_everyone: false,
+    },
+    cargo_consolidations: {
+      create: true,
+      read: true,
+      update: true,
+      delete: false,
+      assign_cargo: true,
     },
     finance: { create: false, read: false, update: false, delete: false },
     commercial_offers: {
@@ -158,9 +172,29 @@ export class PermissionsGuard implements CanActivate {
         ? JSON.parse(rawPermissions)
         : rawPermissions || {};
 
-    const modulePerms = permissions[requiredPermission.module];
-    const hasAction =
+    const modulePerms =
+      permissions[requiredPermission.module] ||
+      (requiredPermission.module === 'cargo_consolidations'
+        ? permissions['consolidations']
+        : undefined) ||
+      (requiredPermission.module === 'consolidations'
+        ? permissions['cargo_consolidations']
+        : undefined);
+
+    let hasAction =
       modulePerms && modulePerms[requiredPermission.action] === true;
+
+    // Action fallback mappings (e.g. view <-> read, assign_cargo <-> update)
+    if (!hasAction && modulePerms) {
+      if (requiredPermission.action === 'view') {
+        hasAction = modulePerms['read'] === true;
+      } else if (requiredPermission.action === 'read') {
+        hasAction = modulePerms['view'] === true;
+      } else if (requiredPermission.action === 'assign_cargo') {
+        hasAction =
+          modulePerms['update'] === true || modulePerms['create'] === true;
+      }
+    }
 
     if (!hasAction) {
       throw new ForbiddenException({

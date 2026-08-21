@@ -65,27 +65,32 @@ Permissions in the Yaqeen Backend are structured around **10 core system modules
 
 ### Available System Modules (`GET /roles/modules`)
 
-| Module Key          | Label                         | Scope & Description                                                                   |
-| :------------------ | :---------------------------- | :------------------------------------------------------------------------------------ |
-| `clients`           | Clients Management            | Access to client catalog, company profiles, contacts, and client tags.                |
-| `employees`         | Employee Management           | Access to employee profiles, salary details, onboarding, and profile pictures.        |
-| `departments`       | Department Management         | Access to organizational department listings, creation, and department edits.         |
-| `cargo_kpi`         | Cargo KPI                     | Access to cargo transaction records, shipments, metrics, and KPI target calculations. |
-| `finance`           | Finance & Expenses            | Access to financial expense logs, income/expense reports, and ledger entries.         |
-| `commercial_offers` | Commercial Offers             | Access to commercial offer generation, price quotes, PDFs, and client proposals.      |
-| `tasks`             | Kanban Tasks & Board          | Access to workspace task boards, columns, cards, task status, and comments.           |
-| `currency`          | Currency Rates                | Access to exchange rate configurations and Central Bank sync settings.                |
-| `attachments`       | Attachments & Documents       | Access to uploading, viewing presigned URLs, and deleting MinIO document files.       |
-| `roles`             | Role & Permissions Management | Access to creating, viewing, updating, and deleting custom roles and permissions.     |
+| Module Key             | Label                         | Scope & Description                                                                   |
+| :--------------------- | :---------------------------- | :------------------------------------------------------------------------------------ |
+| `clients`              | Clients Management            | Access to client catalog, company profiles, contacts, and client tags.                |
+| `employees`            | Employee Management           | Access to employee profiles, salary details, onboarding, and profile pictures.        |
+| `departments`          | Department Management         | Access to organizational department listings, creation, and department edits.         |
+| `cargo_kpi`            | Cargo KPI                     | Access to cargo transaction records, shipments, metrics, and KPI target calculations. |
+| `cargo_registrations`  | Cargo Registrations           | Access to client cargo loads, price currencies, and registering cargo.                |
+| `cargo_consolidations` | Cargo Consolidations & Trucks | Access to truck trips, groupage capacity planning, assigning cargos, and tracking.    |
+| `finance`              | Finance & Expenses            | Access to financial expense logs, income/expense reports, and ledger entries.         |
+| `commercial_offers`    | Commercial Offers             | Access to commercial offer generation, price quotes, PDFs, and client proposals.      |
+| `tasks`                | Kanban Tasks & Board          | Access to workspace task boards, columns, cards, task status, and comments.           |
+| `currency`             | Currency Rates                | Access to exchange rate configurations and Central Bank sync settings.                |
+| `attachments`          | Attachments & Documents       | Access to uploading, viewing presigned URLs, and deleting MinIO document files.       |
+| `roles`                | Role & Permissions Management | Access to creating, viewing, updating, and deleting custom roles and permissions.     |
 
 ### CRUD Action Definitions
 
 Each action flag inside a module object represents an explicit authorization rule:
 
 - **`create` (`boolean`)**: Grants permission to add new records in the module (e.g., POST endpoints).
-- **`read` (`boolean`)**: Grants permission to view listings, search, and retrieve details of existing records (e.g., GET endpoints).
+- **`read` / `view` (`boolean`)**: Grants permission to view listings, search, and retrieve details of existing records (e.g., GET endpoints).
 - **`update` (`boolean`)**: Grants permission to edit or modify existing records (e.g., PUT / PATCH endpoints).
 - **`delete` (`boolean`)**: Grants permission to permanently delete or soft-archive records (e.g., DELETE endpoints).
+- **`assign_cargo` (`boolean`)**: Special permission in `cargo_consolidations` to batch assign/remove cargo registrations to/from trucks.
+- **`register_for_everyone` (`boolean`)**: Special permission in `cargo_registrations` allowing users to register cargos under other employees.
+- **`can_work_with_all_clients` (`boolean`)**: Special permission in `clients` allowing users to view and work with all clients.
 
 ---
 
@@ -104,18 +109,20 @@ The system seeds 3 built-in **System Roles** (`is_system: true`). System roles c
 
 ### System Role Permission Matrix
 
-| Module Key              | Action                                  |   CEO (Chief Executive Officer)   |      ROP (Head of Sales / Ops)       |       EMPLOYEE (Standard Staff)       |
-| :---------------------- | :-------------------------------------- | :-------------------------------: | :----------------------------------: | :-----------------------------------: |
-| **`clients`**           | `create` / `read` / `update` / `delete` | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   |  `false` / `true` / `true` / `false`  |
-| **`employees`**         | `create` / `read` / `update` / `delete` | `true` / `true` / `true` / `true` | `false` / `true` / `true` / `false`  | `false` / `true` / `false` / `false`  |
-| **`departments`**       | `create` / `read` / `update` / `delete` | `true` / `true` / `true` / `true` | `false` / `true` / `false` / `false` | `false` / `true` / `false` / `false`  |
-| **`cargo_kpi`**         | `create` / `read` / `update` / `delete` | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   | `false` / `true` / `false` / `false`  |
-| **`finance`**           | `create` / `read` / `update` / `delete` | `true` / `true` / `true` / `true` | `false` / `true` / `false` / `false` | `false` / `false` / `false` / `false` |
-| **`commercial_offers`** | `create` / `read` / `update` / `delete` | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   |  `true` / `true` / `false` / `false`  |
-| **`tasks`**             | `create` / `read` / `update` / `delete` | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   |  `true` / `true` / `true` / `false`   |
-| **`currency`**          | `create` / `read` / `update` / `delete` | `true` / `true` / `true` / `true` | `false` / `true` / `false` / `false` | `false` / `true` / `false` / `false`  |
-| **`attachments`**       | `create` / `read` / `update` / `delete` | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   |  `true` / `true` / `false` / `false`  |
-| **`roles`**             | `create` / `read` / `update` / `delete` | `true` / `true` / `true` / `true` | `false` / `true` / `false` / `false` | `false` / `false` / `false` / `false` |
+| Module Key                 | Action                                                   |   CEO (Chief Executive Officer)   |      ROP (Head of Sales / Ops)       |       EMPLOYEE (Standard Staff)       |
+| :------------------------- | :------------------------------------------------------- | :-------------------------------: | :----------------------------------: | :-----------------------------------: |
+| **`clients`**              | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   |  `false` / `true` / `true` / `false`  |
+| **`employees`**            | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` | `false` / `true` / `true` / `false`  | `false` / `true` / `false` / `false`  |
+| **`departments`**          | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` | `false` / `true` / `false` / `false` | `false` / `true` / `false` / `false`  |
+| **`cargo_kpi`**            | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   | `false` / `true` / `false` / `false`  |
+| **`cargo_registrations`**  | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   |  `true` / `true` / `true` / `false`   |
+| **`cargo_consolidations`** | `create` / `read` / `update` / `delete` / `assign_cargo` | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   |  `true` / `true` / `true` / `false`   |
+| **`finance`**              | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` | `false` / `true` / `false` / `false` | `false` / `false` / `false` / `false` |
+| **`commercial_offers`**    | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   |  `true` / `true` / `false` / `false`  |
+| **`tasks`**                | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   |  `true` / `true` / `true` / `false`   |
+| **`currency`**             | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` | `false` / `true` / `false` / `false` | `false` / `true` / `false` / `false`  |
+| **`attachments`**          | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   |  `true` / `true` / `false` / `false`  |
+| **`roles`**                | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` | `false` / `true` / `false` / `false` | `false` / `false` / `false` / `false` |
 
 > [!NOTE]
 > The **CEO** role possesses administrative superuser privileges: the backend's `PermissionsGuard` automatically bypasses all individual permission checks for users with `role: 'CEO'` or `role_name: 'CEO'`.

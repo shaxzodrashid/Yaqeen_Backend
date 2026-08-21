@@ -7,8 +7,10 @@ import {
   Min,
   IsUUID,
   Matches,
+  ValidateNested,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
+import { CreateConsolidationInlineDto } from '../../cargo-consolidations/dto/cargo-consolidations.dto';
 
 export const ALLOWED_CONTAINER_TYPES = [
   '40HQ',
@@ -73,13 +75,22 @@ export class CreateCargoRegistrationDto {
   @IsString()
   container_type?: string;
 
+  @IsOptional()
+  @IsUUID('4', { message: 'consolidation_id must be a valid UUID' })
+  consolidation_id?: string;
+
+  @IsOptional()
+  @ValidateNested()
+  @Type(() => CreateConsolidationInlineDto)
+  new_consolidation?: CreateConsolidationInlineDto;
+
+  @IsOptional()
   @IsString()
-  @IsNotEmpty({ message: 'container_truck_id is required' })
-  @Matches(/^[a-zA-Z0-9-]+$/, {
+  @Matches(/^[a-zA-Z0-9 -]+$/, {
     message:
-      'container_truck_id must contain only letters, numbers, and hyphens',
+      'container_truck_id must contain only letters, numbers, hyphens, and spaces',
   })
-  container_truck_id: string;
+  container_truck_id?: string;
 
   @IsString()
   @IsNotEmpty({ message: 'agent_name is required' })
@@ -299,6 +310,10 @@ export class UpdateCargoRegistrationDto {
   @IsOptional()
   @IsUUID('4')
   employee_id?: string;
+
+  @IsOptional()
+  @IsUUID('4')
+  consolidation_id?: string | null;
 }
 
 export class QueryCargoRegistrationDto {
@@ -439,4 +454,13 @@ export class QueryCargoRegistrationDto {
   @IsOptional()
   @IsString()
   search?: string;
+
+  @IsOptional()
+  @IsUUID('4')
+  consolidation_id?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['true', 'false', '1', '0'])
+  has_consolidation?: string;
 }
