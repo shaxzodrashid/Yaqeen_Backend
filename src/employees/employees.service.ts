@@ -5,12 +5,16 @@ import {
   Inject,
   Logger,
   OnModuleInit,
+  Optional,
 } from '@nestjs/common';
 import 'multer';
 import { KNEX_CONNECTION } from '../database/database.module';
 import { Knex } from 'knex';
 import { MinioService } from '../minio/minio.service';
 import { RedisService } from '../redis/redis.service';
+import { CurrencyService } from '../currency/currency.service';
+import { CargoKpiService } from '../cargo-kpi/cargo-kpi.service';
+import { Currency } from '../currency/currency.types';
 import { CreateDepartmentDto } from './dto/create-department.dto';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
@@ -305,6 +309,8 @@ export class EmployeesService implements OnModuleInit {
     @Inject(KNEX_CONNECTION) private readonly knex: Knex,
     private readonly minioService: MinioService,
     private readonly redisService: RedisService,
+    @Optional() private readonly cargoKpiService?: CargoKpiService,
+    @Optional() private readonly currencyService?: CurrencyService,
   ) {}
 
   async onModuleInit() {
@@ -888,29 +894,169 @@ export class EmployeesService implements OnModuleInit {
   }
 
   /**
-   * Helper to convert an amount in a given currency to USD equivalent.
+   * Helper to format DB date values to YYYY-MM-DD string.
    */
-  private convertPriceToUsd(
-    amount: number,
-    currency?: string,
-    sellUsdRate?: number | string | null,
-    sellCustomRate?: number | string | null,
-    usdRmbRate?: number | string | null,
-  ): number {
-    const curr = (currency || 'USD').toUpperCase();
-    if (curr === 'USD') return amount;
-    const rate = sellCustomRate
-      ? Number(sellCustomRate)
-      : sellUsdRate
-        ? Number(sellUsdRate)
-        : 12850;
-    if (curr === 'UZS') return rate > 0 ? amount / rate : amount;
-    if (curr === 'RUB') return rate > 0 ? (amount * 145.0) / rate : amount;
-    if (curr === 'RMB' || curr === 'CNY') {
-      const rmbRate = usdRmbRate ? Number(usdRmbRate) : 7.2;
-      return rmbRate > 0 ? amount / rmbRate : amount;
+  private formatDateFromDb(dateVal: any): string {
+    if (!dateVal) return '';
+    if (dateVal instanceof Date) {
+      const year = dateVal.getFullYear();
+      const month = String(dateVal.getMonth() + 1).padStart(2, '0');
+      const day = String(dateVal.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
     }
-    return amount;
+    return String(dateVal).slice(0, 10);
+  }
+
+  /**
+   * Helper to compute net yield (profit margin) in target plan currency for an FTL cargo registration.
+   */
+  async calculateFtlCargoNetYield(
+    reg: any,
+    planCurrency: Currency = Currency.USD,
+    rates?: Record<string, any>,
+  ): Promise<number> {
+    if (this.cargoKpiService) {
+      return this.cargoKpiService.calculateFtlCargoNetYield(
+        reg,
+        planCurrency,
+        rates,
+      );
+    }
+
+    const purchaseAmount = Number(reg.purchase_price || 0);
+    const purchaseCurrency =
+      (reg.purchase_currency as Currency) || Currency.USD;
+    let purchaseUsd = 0;
+
+    const defaultUsd = rates?.['USD']
+      ? rates['USD'].rate / (rates['USD'].nominal || 1)
+      : 12850;
+
+    if (purchaseAmount > 0) {
+      if (purchaseCurrency === Currency.USD) {
+        purchaseUsd = purchaseAmount;
+      } else if (purchaseCurrency === Currency.UZS) {
+        const rateUsed =
+          Number(reg.purchase_custom_rate) ||
+          Number(reg.purchase_usd_rate) ||
+          defaultUsd;
+        purchaseUsd = rateUsed > 0 ? purchaseAmount / rateUsed : 0;
+      } else if (
+        purchaseCurrency === Currency.RMB ||
+        purchaseCurrency === Currency.CNY
+      ) {
+        if (reg.usd_rmb_rate && Number(reg.usd_rmb_rate) > 0) {
+          purchaseUsd = purchaseAmount / Number(reg.usd_rmb_rate);
+        } else {
+          const rmbObj = rates?.['RMB'] ||
+            rates?.['CNY'] || { rate: 1815, nominal: 1 };
+          const rmbRate = rmbObj.rate / (rmbObj.nominal || 1);
+          const rateUsed =
+            Number(reg.purchase_custom_rate) ||
+            Number(reg.purchase_usd_rate) ||
+            defaultUsd;
+          purchaseUsd =
+            rateUsed > 0 ? (purchaseAmount * rmbRate) / rateUsed : 0;
+        }
+      } else if (purchaseCurrency === Currency.RUB) {
+        const rubObj = rates?.['RUB'] || { rate: 145, nominal: 1 };
+        const rubRate = rubObj.rate / (rubObj.nominal || 1);
+        const rateUsed =
+          Number(reg.purchase_custom_rate) ||
+          Number(reg.purchase_usd_rate) ||
+          defaultUsd;
+        purchaseUsd = rateUsed > 0 ? (purchaseAmount * rubRate) / rateUsed : 0;
+      } else if (this.currencyService) {
+        const amtUzs = await this.currencyService.convertToUzs(
+          purchaseAmount,
+          purchaseCurrency,
+          rates,
+        );
+        const conv = await this.currencyService.convert(
+          amtUzs,
+          Currency.UZS,
+          Currency.USD,
+        );
+        purchaseUsd = conv.converted_amount;
+      } else {
+        purchaseUsd = purchaseAmount;
+      }
+    }
+
+    const sellAmount = Number(reg.sell_price || 0);
+    const sellCurrency = (reg.sell_currency as Currency) || Currency.USD;
+    let sellUsd = 0;
+
+    if (sellAmount > 0) {
+      if (sellCurrency === Currency.USD) {
+        sellUsd = sellAmount;
+      } else if (sellCurrency === Currency.UZS) {
+        const rateUsed =
+          Number(reg.sell_custom_rate) ||
+          Number(reg.sell_usd_rate) ||
+          defaultUsd;
+        sellUsd = rateUsed > 0 ? sellAmount / rateUsed : 0;
+      } else if (
+        sellCurrency === Currency.RMB ||
+        sellCurrency === Currency.CNY
+      ) {
+        if (reg.usd_rmb_rate && Number(reg.usd_rmb_rate) > 0) {
+          sellUsd = sellAmount / Number(reg.usd_rmb_rate);
+        } else {
+          const rmbObj = rates?.['RMB'] ||
+            rates?.['CNY'] || { rate: 1815, nominal: 1 };
+          const rmbRate = rmbObj.rate / (rmbObj.nominal || 1);
+          const rateUsed =
+            Number(reg.sell_custom_rate) ||
+            Number(reg.sell_usd_rate) ||
+            defaultUsd;
+          sellUsd = rateUsed > 0 ? (sellAmount * rmbRate) / rateUsed : 0;
+        }
+      } else if (sellCurrency === Currency.RUB) {
+        const rubObj = rates?.['RUB'] || { rate: 145, nominal: 1 };
+        const rubRate = rubObj.rate / (rubObj.nominal || 1);
+        const rateUsed =
+          Number(reg.sell_custom_rate) ||
+          Number(reg.sell_usd_rate) ||
+          defaultUsd;
+        sellUsd = rateUsed > 0 ? (sellAmount * rubRate) / rateUsed : 0;
+      } else if (this.currencyService) {
+        const amtUzs = await this.currencyService.convertToUzs(
+          sellAmount,
+          sellCurrency,
+          rates,
+        );
+        const conv = await this.currencyService.convert(
+          amtUzs,
+          Currency.UZS,
+          Currency.USD,
+        );
+        sellUsd = conv.converted_amount;
+      } else {
+        sellUsd = sellAmount;
+      }
+    }
+
+    const netYieldUsd = sellUsd - purchaseUsd;
+
+    if (planCurrency === Currency.USD || !this.currencyService) {
+      return netYieldUsd;
+    }
+
+    if (planCurrency === Currency.UZS) {
+      return await this.currencyService.convertToUzs(
+        netYieldUsd,
+        Currency.USD,
+        rates,
+      );
+    }
+
+    const conv = await this.currencyService.convert(
+      netYieldUsd,
+      Currency.USD,
+      planCurrency,
+    );
+    return conv.converted_amount;
   }
 
   async findAllEmployees(filters: {
@@ -1016,7 +1162,7 @@ export class EmployeesService implements OnModuleInit {
       ? await this.knex.schema.hasColumn('employee_plans', 'ltl_target_volume')
       : false;
 
-    const planColumns = ['employee_id', 'target_amount', 'currency'];
+    const planColumns = ['employee_id', 'target_amount', 'currency', 'period'];
     if (hasLtlTargetVolume) {
       planColumns.push('ltl_target_volume', 'ftl_target_amount');
     }
@@ -1050,11 +1196,16 @@ export class EmployeesService implements OnModuleInit {
                 'employee_id',
                 'cargo_type',
                 'volume',
+                'purchase_price',
+                'purchase_currency',
+                'purchase_usd_rate',
+                'purchase_custom_rate',
                 'sell_price',
                 'sell_currency',
                 'sell_usd_rate',
                 'sell_custom_rate',
                 'usd_rmb_rate',
+                'confirmed_date',
               )
           : Promise.resolve([]),
 
@@ -1084,28 +1235,123 @@ export class EmployeesService implements OnModuleInit {
           .groupBy('assigned_employee_id'),
       ]);
 
+    const rates = this.currencyService
+      ? await this.currencyService.getLatestRates()
+      : undefined;
+
+    // Build Plans Map per Employee
+    const empPlanMap = new Map<
+      string,
+      { ltlTarget: number; ftlTarget: number; currency: Currency }
+    >();
+    for (const p of allPlans as any[]) {
+      const empId = String(p.employee_id);
+      const ltl = parseFloat(String(p.ltl_target_volume || '0')) || 0;
+      const ftl =
+        p.ftl_target_amount !== undefined && p.ftl_target_amount !== null
+          ? parseFloat(String(p.ftl_target_amount))
+          : parseFloat(String(p.target_amount || '0')) || 0;
+      const planCurrency = (p.currency as Currency) || Currency.USD;
+
+      const existing = empPlanMap.get(empId) || {
+        ltlTarget: 0,
+        ftlTarget: 0,
+        currency: planCurrency,
+      };
+      empPlanMap.set(empId, {
+        ltlTarget: existing.ltlTarget + ltl,
+        ftlTarget: existing.ftlTarget + ftl,
+        currency: planCurrency,
+      });
+    }
+
+    // Build Registrations / Revenue / Plan Actuals Map per Employee
+    const empRegMap = new Map<
+      string,
+      {
+        ltlVolume: number;
+        ftlAmount: number;
+        usd: number;
+        uzs: number;
+        rub: number;
+      }
+    >();
+
+    for (const cr of allCargoRegs as any[]) {
+      const empId = String(cr.employee_id);
+      const curr = String(cr.sell_currency || 'UZS').toUpperCase();
+      const price = parseFloat(String(cr.sell_price || '0')) || 0;
+      const vol = parseFloat(String(cr.volume || '0')) || 0;
+      const type = String(cr.cargo_type || '').toUpperCase();
+
+      const current = empRegMap.get(empId) || {
+        ltlVolume: 0,
+        ftlAmount: 0,
+        usd: 0,
+        uzs: 0,
+        rub: 0,
+      };
+
+      // Multi-currency revenue calculation
+      if (curr === 'USD') current.usd += price;
+      else if (curr === 'RUB') current.rub += price;
+      else if (curr === 'UZS') current.uzs += price;
+
+      // Plan progress calculation strictly by confirmed_date (matching GET /api/v1/cargo-kpi/plans)
+      const confirmedStr = this.formatDateFromDb(cr.confirmed_date);
+      const isConfirmedInMonth =
+        !cr.confirmed_date ||
+        (confirmedStr >= startDate && confirmedStr <= endDate);
+
+      if (isConfirmedInMonth) {
+        if (type === 'LTL') {
+          current.ltlVolume += vol;
+        } else if (type === 'FTL') {
+          const planCurrency = empPlanMap.get(empId)?.currency || Currency.USD;
+          const netYield = await this.calculateFtlCargoNetYield(
+            cr,
+            planCurrency,
+            rates,
+          );
+          current.ftlAmount += netYield;
+        }
+      }
+
+      empRegMap.set(empId, current);
+    }
+
+    for (const tx of allCargoTxs as any[]) {
+      const empId = String(tx.employee_id);
+      const curr = String(tx.currency || 'UZS').toUpperCase();
+      const price = parseFloat(String(tx.sell_price || '0')) || 0;
+
+      const current = empRegMap.get(empId) || {
+        ltlVolume: 0,
+        ftlAmount: 0,
+        usd: 0,
+        uzs: 0,
+        rub: 0,
+      };
+
+      if (curr === 'USD') current.usd += price;
+      else if (curr === 'RUB') current.rub += price;
+      else if (curr === 'UZS') current.uzs += price;
+
+      empRegMap.set(empId, current);
+    }
+
     // Aggregate Meta Total Revenue across matching employees in current month
     let metaRevenueUsd = 0;
     let metaRevenueUzs = 0;
     let metaRevenueRub = 0;
 
-    for (const cr of allCargoRegs as any[]) {
-      const price = parseFloat(String(cr.sell_price || '0')) || 0;
-      const curr = String(cr.sell_currency || 'UZS').toUpperCase();
-      if (curr === 'USD') metaRevenueUsd += price;
-      else if (curr === 'RUB') metaRevenueRub += price;
-      else if (curr === 'UZS') metaRevenueUzs += price;
+    for (const reg of empRegMap.values()) {
+      metaRevenueUsd += reg.usd;
+      metaRevenueUzs += reg.uzs;
+      metaRevenueRub += reg.rub;
     }
 
-    for (const tx of allCargoTxs as any[]) {
-      const price = parseFloat(String(tx.sell_price || '0')) || 0;
-      const curr = String(tx.currency || 'UZS').toUpperCase();
-      if (curr === 'USD') metaRevenueUsd += price;
-      else if (curr === 'RUB') metaRevenueRub += price;
-      else if (curr === 'UZS') metaRevenueUzs += price;
-    }
-
-    // Aggregate Meta Plan Completed across matching employees in current month
+    // Aggregate Meta Plan Completed across matching employees in current month (matching GET /api/v1/cargo-kpi/plans/stats)
     let metaTargetLtlVolume = 0;
     let metaTargetFtlAmount = 0;
 
@@ -1122,130 +1368,30 @@ export class EmployeesService implements OnModuleInit {
     let metaActualLtlVolume = 0;
     let metaActualFtlAmount = 0;
 
-    for (const cr of allCargoRegs as any[]) {
-      const type = String(cr.cargo_type || '').toUpperCase();
-      if (type === 'LTL') {
-        metaActualLtlVolume += parseFloat(String(cr.volume || '0')) || 0;
-      } else if (type === 'FTL') {
-        const rawPrice = parseFloat(String(cr.sell_price || '0')) || 0;
-        const priceUsd = this.convertPriceToUsd(
-          rawPrice,
-          cr.sell_currency,
-          cr.sell_usd_rate,
-          cr.sell_custom_rate,
-          cr.usd_rmb_rate,
-        );
-        metaActualFtlAmount += priceUsd;
-      }
+    for (const reg of empRegMap.values()) {
+      metaActualLtlVolume += reg.ltlVolume;
+      metaActualFtlAmount += reg.ftlAmount;
     }
 
-    for (const tx of allCargoTxs as any[]) {
-      const rawPrice = parseFloat(String(tx.sell_price || '0')) || 0;
-      const priceUsd = this.convertPriceToUsd(rawPrice, tx.currency);
-      metaActualFtlAmount += priceUsd;
-    }
-
+    const roundedMetaLtlActual = Math.round(metaActualLtlVolume * 100) / 100;
+    const roundedMetaLtlTarget = Math.round(metaTargetLtlVolume * 100) / 100;
     const metaLtlCompletion =
-      metaTargetLtlVolume > 0
-        ? Number(((metaActualLtlVolume / metaTargetLtlVolume) * 100).toFixed(2))
-        : metaActualLtlVolume > 0
+      roundedMetaLtlTarget > 0
+        ? Math.round((roundedMetaLtlActual / roundedMetaLtlTarget) * 10000) /
+          100
+        : roundedMetaLtlActual > 0
           ? 100
           : 0;
 
+    const roundedMetaFtlActual = Math.round(metaActualFtlAmount * 100) / 100;
+    const roundedMetaFtlTarget = Math.round(metaTargetFtlAmount * 100) / 100;
     const metaFtlCompletion =
-      metaTargetFtlAmount > 0
-        ? Number(((metaActualFtlAmount / metaTargetFtlAmount) * 100).toFixed(2))
-        : metaActualFtlAmount > 0
+      roundedMetaFtlTarget > 0
+        ? Math.round((roundedMetaFtlActual / roundedMetaFtlTarget) * 10000) /
+          100
+        : roundedMetaFtlActual > 0
           ? 100
           : 0;
-
-    // Build Maps per Employee
-    const empPlanMap = new Map<
-      string,
-      { ltlTarget: number; ftlTarget: number }
-    >();
-    for (const p of allPlans as any[]) {
-      const empId = String(p.employee_id);
-      const ltl = parseFloat(String(p.ltl_target_volume || '0')) || 0;
-      const ftl =
-        p.ftl_target_amount !== undefined && p.ftl_target_amount !== null
-          ? parseFloat(String(p.ftl_target_amount))
-          : parseFloat(String(p.target_amount || '0')) || 0;
-
-      const existing = empPlanMap.get(empId) || { ltlTarget: 0, ftlTarget: 0 };
-      empPlanMap.set(empId, {
-        ltlTarget: existing.ltlTarget + ltl,
-        ftlTarget: existing.ftlTarget + ftl,
-      });
-    }
-
-    const empRegMap = new Map<
-      string,
-      {
-        ltlVolume: number;
-        ftlSales: number;
-        usd: number;
-        uzs: number;
-        rub: number;
-      }
-    >();
-
-    for (const cr of allCargoRegs as any[]) {
-      const empId = String(cr.employee_id);
-      const curr = String(cr.sell_currency || 'UZS').toUpperCase();
-      const price = parseFloat(String(cr.sell_price || '0')) || 0;
-      const vol = parseFloat(String(cr.volume || '0')) || 0;
-      const type = String(cr.cargo_type || '').toUpperCase();
-
-      const current = empRegMap.get(empId) || {
-        ltlVolume: 0,
-        ftlSales: 0,
-        usd: 0,
-        uzs: 0,
-        rub: 0,
-      };
-
-      if (type === 'LTL') {
-        current.ltlVolume += vol;
-      } else if (type === 'FTL') {
-        const priceUsd = this.convertPriceToUsd(
-          price,
-          cr.sell_currency,
-          cr.sell_usd_rate,
-          cr.sell_custom_rate,
-          cr.usd_rmb_rate,
-        );
-        current.ftlSales += priceUsd;
-      }
-
-      if (curr === 'USD') current.usd += price;
-      else if (curr === 'RUB') current.rub += price;
-      else if (curr === 'UZS') current.uzs += price;
-
-      empRegMap.set(empId, current);
-    }
-
-    for (const tx of allCargoTxs as any[]) {
-      const empId = String(tx.employee_id);
-      const curr = String(tx.currency || 'UZS').toUpperCase();
-      const price = parseFloat(String(tx.sell_price || '0')) || 0;
-
-      const current = empRegMap.get(empId) || {
-        ltlVolume: 0,
-        ftlSales: 0,
-        usd: 0,
-        uzs: 0,
-        rub: 0,
-      };
-
-      const priceUsd = this.convertPriceToUsd(price, tx.currency);
-      current.ftlSales += priceUsd;
-      if (curr === 'USD') current.usd += price;
-      else if (curr === 'RUB') current.rub += price;
-      else if (curr === 'UZS') current.uzs += price;
-
-      empRegMap.set(empId, current);
-    }
 
     const clientCountMap = new Map<string, number>();
     for (const c of allClientCounts as any[]) {
@@ -1258,27 +1404,33 @@ export class EmployeesService implements OnModuleInit {
     // Build data array
     const data: EmployeeListItem[] = rawItems.map((item): EmployeeListItem => {
       const empId = item.id;
-      const plan = empPlanMap.get(empId) || { ltlTarget: 0, ftlTarget: 0 };
+      const plan = empPlanMap.get(empId) || {
+        ltlTarget: 0,
+        ftlTarget: 0,
+        currency: Currency.USD,
+      };
       const reg = empRegMap.get(empId) || {
         ltlVolume: 0,
-        ftlSales: 0,
+        ftlAmount: 0,
         usd: 0,
         uzs: 0,
         rub: 0,
       };
       const assignedCount = clientCountMap.get(empId) || 0;
 
+      const roundedLtlActual = Math.round(reg.ltlVolume * 100) / 100;
       const ltlCompletion =
         plan.ltlTarget > 0
-          ? Number(((reg.ltlVolume / plan.ltlTarget) * 100).toFixed(2))
-          : reg.ltlVolume > 0
+          ? Math.round((roundedLtlActual / plan.ltlTarget) * 10000) / 100
+          : roundedLtlActual > 0
             ? 100
             : 0;
 
+      const roundedFtlActual = Math.round(reg.ftlAmount * 100) / 100;
       const ftlCompletion =
         plan.ftlTarget > 0
-          ? Number(((reg.ftlSales / plan.ftlTarget) * 100).toFixed(2))
-          : reg.ftlSales > 0
+          ? Math.round((roundedFtlActual / plan.ftlTarget) * 10000) / 100
+          : roundedFtlActual > 0
             ? 100
             : 0;
 

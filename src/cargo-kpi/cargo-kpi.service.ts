@@ -961,9 +961,9 @@ export class CargoKpiService {
   /**
    * Helper to compute net yield (profit margin) in target plan currency for an FTL cargo registration.
    */
-  private async calculateFtlCargoNetYield(
+  async calculateFtlCargoNetYield(
     reg: any,
-    planCurrency: Currency,
+    planCurrency: Currency = Currency.USD,
     rates?: Record<string, any>,
   ): Promise<number> {
     const purchaseAmount = Number(reg.purchase_price || 0);
