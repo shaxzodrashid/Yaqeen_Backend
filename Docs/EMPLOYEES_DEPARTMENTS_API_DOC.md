@@ -330,12 +330,65 @@ Retrieves complete profile details of the currently authenticated user, includin
 
 ### 5.2. List All Employees (Paginated & Filtered)
 
-Retrieve a paginated list of all employees.
+Retrieve a paginated list of all employees along with current month plan completion (two-direction LTL & FTL specs) and multi-currency revenues.
 
-- **Route:** `/employees`
+- **Route:** `/api/v1/employees`
 - **Method:** `GET`
 - **Access:** `Private` (Requires `employees:read` permission)
 - **Success Status:** `200 OK`
+
+#### Query Parameters (All optional):
+
+- `department_id` (UUID): Filter by department UUID.
+- `search` (string): Search by employee first name, last name, or phone.
+- `page` (number, default: 1): Page number.
+- `limit` (number, default: 10): Items per page.
+- `offset` (number): Direct offset override.
+
+> [!NOTE]
+> This endpoint operates strictly on the **current calendar month** for `plan_completed` / `plan_completion` metrics and `total_revenue` multi-currency figures.
+
+#### Success Response (200 OK) Example
+
+```json
+{
+  "meta": {
+    "total": 12,
+    "offset": 0,
+    "limit": 10,
+    "open_employees": 10,
+    "plan_completed": {
+      "ltl_completion": 85.5,
+      "ftl_completion": 110.0
+    },
+    "total_revenue": {
+      "USD": 125000.0,
+      "UZS": 95000000.0,
+      "RUB": 450000.0
+    }
+  },
+  "data": [
+    {
+      "id": "31eadb44-e6d7-4d5f-b649-295b793fab43",
+      "full_name": "Jasur Yoldoshev",
+      "role_name": "Logistics & Cargo Manager",
+      "department_name": "Sales",
+      "status": "Open",
+      "total_revenue": {
+        "USD": 55000.0,
+        "UZS": 25000000.0,
+        "RUB": 120000.0
+      },
+      "plan_completion": {
+        "ltl_completion": 90.0,
+        "ftl_completion": 110.0
+      },
+      "total_assigned_employees": 8,
+      "color": "#FF5733"
+    }
+  ]
+}
+```
 
 ---
 

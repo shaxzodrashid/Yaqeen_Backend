@@ -16,6 +16,43 @@ import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import * as crypto from 'crypto';
 
+export interface PlanCompletionSpec {
+  ltl_completion: number;
+  ftl_completion: number;
+}
+
+export interface TotalRevenueSpec {
+  USD: number;
+  UZS: number;
+  RUB: number;
+}
+
+export interface EmployeesListMeta {
+  total: number;
+  offset: number;
+  limit: number;
+  open_employees: number;
+  plan_completed: PlanCompletionSpec;
+  total_revenue: TotalRevenueSpec;
+}
+
+export interface EmployeeListItem {
+  id: string;
+  full_name: string;
+  role_name: string;
+  department_name: string;
+  status: string;
+  total_revenue: TotalRevenueSpec;
+  plan_completion: PlanCompletionSpec;
+  total_assigned_employees: number;
+  color: string;
+}
+
+export interface EmployeesListResponse {
+  meta: EmployeesListMeta;
+  data: EmployeeListItem[];
+}
+
 export interface TushumMetric {
   amount: number;
   currency: string;
@@ -834,125 +871,469 @@ export class EmployeesService implements OnModuleInit {
     });
   }
 
+  /**
+   * Helper to get start date and end date for the current calendar month.
+   */
+  private getCurrentMonthRange(): { startDate: string; endDate: string } {
+    const now = new Date();
+    const currentYear = now.getFullYear();
+    const currentMonth = now.getMonth() + 1;
+    const lastDay = new Date(currentYear, currentMonth, 0).getDate();
+    const mm = String(currentMonth).padStart(2, '0');
+    const dd = String(lastDay).padStart(2, '0');
+    return {
+      startDate: `${currentYear}-${mm}-01`,
+      endDate: `${currentYear}-${mm}-${dd}`,
+    };
+  }
+
+  /**
+   * Helper to convert an amount in a given currency to USD equivalent.
+   */
+  private convertPriceToUsd(
+    amount: number,
+    currency?: string,
+    sellUsdRate?: number | string | null,
+    sellCustomRate?: number | string | null,
+    usdRmbRate?: number | string | null,
+  ): number {
+    const curr = (currency || 'USD').toUpperCase();
+    if (curr === 'USD') return amount;
+    const rate = sellCustomRate
+      ? Number(sellCustomRate)
+      : sellUsdRate
+        ? Number(sellUsdRate)
+        : 12850;
+    if (curr === 'UZS') return rate > 0 ? amount / rate : amount;
+    if (curr === 'RUB') return rate > 0 ? (amount * 145.0) / rate : amount;
+    if (curr === 'RMB' || curr === 'CNY') {
+      const rmbRate = usdRmbRate ? Number(usdRmbRate) : 7.2;
+      return rmbRate > 0 ? amount / rmbRate : amount;
+    }
+    return amount;
+  }
+
   async findAllEmployees(filters: {
     department_id?: string;
     search?: string;
     page?: number;
     limit?: number;
-  }): Promise<{ items: EmployeeWithMetrics[]; meta: PaginationMeta }> {
+    offset?: number;
+  }): Promise<EmployeesListResponse> {
     const page = filters.page && filters.page > 0 ? filters.page : 1;
     const limit = filters.limit && filters.limit > 0 ? filters.limit : 10;
-    const offset = (page - 1) * limit;
+    const offset =
+      filters.offset !== undefined && filters.offset >= 0
+        ? filters.offset
+        : (page - 1) * limit;
 
+    const { startDate, endDate } = this.getCurrentMonthRange();
+
+    const applyEmployeeFilters = (qb: Knex.QueryBuilder) => {
+      if (filters.department_id) {
+        qb.where('e.department_id', filters.department_id);
+      }
+      if (filters.search && filters.search.trim()) {
+        const searchPattern = `%${filters.search.trim()}%`;
+        qb.where((sub) => {
+          sub
+            .where('e.first_name', 'ilike', searchPattern)
+            .orWhere('e.last_name', 'ilike', searchPattern)
+            .orWhere('e.phone', 'like', searchPattern);
+        });
+      }
+    };
+
+    // 1. Count query for total matching and open_employees
+    const countQuery = this.knex('employees as e').leftJoin(
+      'users as u',
+      'e.id',
+      'u.employee_id',
+    );
+    applyEmployeeFilters(countQuery);
+
+    const countResult = (await countQuery
+      .select(
+        this.knex.raw('COUNT(DISTINCT e.id) as total'),
+        this.knex.raw(`
+          COUNT(DISTINCT CASE 
+            WHEN u.status = 'Open' OR (u.status IS NULL AND e.is_active = true) 
+            THEN e.id 
+          END) as open_employees
+        `),
+      )
+      .first()) as unknown as
+      { total?: string | number; open_employees?: string | number } | undefined;
+
+    const total = parseInt(String(countResult?.total || '0'), 10);
+    const openEmployees = parseInt(
+      String(countResult?.open_employees || '0'),
+      10,
+    );
+
+    // 2. Fetch paginated employees
     const query = this.knex('employees as e')
       .leftJoin('departments as d', 'e.department_id', 'd.id')
       .leftJoin('users as u', 'e.id', 'u.employee_id')
+      .leftJoin('roles as r', 'u.role_id', 'r.id')
       .select(
         'e.id',
         'e.first_name',
         'e.last_name',
-        'e.phone',
-        'e.secondary_phone',
-        'e.address',
-        'e.department_id',
-        'e.fixed_salary',
-        'e.currency',
         'e.color',
-        'e.picture_url as _raw_picture_path',
         'e.is_active',
         'e.created_at',
-        'e.updated_at',
         'd.name as department_name',
         'd.display_name as department_display_name',
         'u.id as user_id',
-        'u.username',
         'u.role as user_role',
         'u.status as user_status',
+        'r.name as role_name',
+        'r.display_name as role_display_name',
       );
-
-    if (filters.department_id) {
-      query.where('e.department_id', filters.department_id);
-    }
-
-    if (filters.search) {
-      const searchPattern = `%${filters.search}%`;
-      query.where((qb) => {
-        qb.where('e.first_name', 'ilike', searchPattern)
-          .orWhere('e.last_name', 'ilike', searchPattern)
-          .orWhere('e.phone', 'like', searchPattern);
-      });
-    }
-
-    // Clone query to count total records before pagination
-    const totalQuery = this.knex('employees as e');
-    if (filters.department_id) {
-      totalQuery.where('e.department_id', filters.department_id);
-    }
-    if (filters.search) {
-      const searchPattern = `%${filters.search}%`;
-      totalQuery.where((qb) => {
-        qb.where('e.first_name', 'ilike', searchPattern)
-          .orWhere('e.last_name', 'ilike', searchPattern)
-          .orWhere('e.phone', 'like', searchPattern);
-      });
-    }
-    const [{ count }] = (await totalQuery.count(
-      'e.id as count',
-    )) as unknown as [{ count: string | number }];
-    const totalItems = parseInt(String(count || '0'), 10);
+    applyEmployeeFilters(query);
 
     const rawItems = (await query
       .orderBy('e.created_at', 'desc')
       .limit(limit)
-      .offset(offset)) as unknown as JoinedEmployeeRow[];
+      .offset(offset)) as unknown as (JoinedEmployeeRow & {
+      role_name?: string | null;
+      role_display_name?: string | null;
+    })[];
 
-    const employeeIds = rawItems.map((item) => item.id);
-    const metricsMap = await this.getEmployeesMetricsMap(employeeIds);
+    // 3. Batch fetch current month plan, revenue, and client metrics for all matching employees
+    const matchingEmpSubquery = this.knex('employees as e').select('e.id');
+    applyEmployeeFilters(matchingEmpSubquery);
 
-    const items = await Promise.all(
-      rawItems.map(async (item): Promise<EmployeeWithMetrics> => {
-        const rawPath = item._raw_picture_path;
-        delete item._raw_picture_path;
-        const presignedUrl = await this.resolvePictureUrl(item.id, rawPath);
+    const [hasPlansTable, hasCargoRegTable, hasCargoTxTable] =
+      await Promise.all([
+        this.knex.schema.hasTable('employee_plans'),
+        this.knex.schema.hasTable('cargo_registrations'),
+        this.knex.schema.hasTable('cargo_transactions'),
+      ]);
 
-        const metrics = metricsMap.get(item.id) || {
-          tushum: {
-            amount: 0,
-            currency: item.currency || 'UZS',
-            formatted: this.formatCurrency(0, item.currency),
-          },
-          reja_fakt: {
-            plan_target: 0,
-            fact_amount: 0,
-            percentage: 0,
-            currency: item.currency || 'UZS',
-            status: 'Jarayonda',
-            status_code: 'IN_PROGRESS',
-            formatted_plan: this.formatCurrency(0, item.currency),
-            formatted_fact: this.formatCurrency(0, item.currency),
-          },
-          mijozlar_count: 0,
-        };
+    const hasLtlTargetVolume = hasPlansTable
+      ? await this.knex.schema.hasColumn('employee_plans', 'ltl_target_volume')
+      : false;
 
-        return {
-          ...item,
-          picture_url: presignedUrl,
-          tushum: metrics.tushum,
-          reja_fakt: metrics.reja_fakt,
-          mijozlar_count: metrics.mijozlar_count,
-        };
-      }),
-    );
+    const planColumns = ['employee_id', 'target_amount', 'currency'];
+    if (hasLtlTargetVolume) {
+      planColumns.push('ltl_target_volume', 'ftl_target_amount');
+    }
+
+    const [allPlans, allCargoRegs, allCargoTxs, allClientCounts] =
+      await Promise.all([
+        hasPlansTable
+          ? this.knex('employee_plans')
+              .whereIn('employee_id', matchingEmpSubquery.clone())
+              .where('period', '>=', startDate)
+              .where('period', '<=', endDate)
+              .select(planColumns)
+          : Promise.resolve([]),
+
+        hasCargoRegTable
+          ? this.knex('cargo_registrations')
+              .whereIn('employee_id', matchingEmpSubquery.clone())
+              .where((qb) => {
+                qb.whereBetween('confirmed_date', [startDate, endDate])
+                  .orWhere((sub) => {
+                    sub
+                      .whereNull('confirmed_date')
+                      .whereBetween('created_at', [
+                        startDate + ' 00:00:00',
+                        endDate + ' 23:59:59.999',
+                      ]);
+                  })
+                  .orWhereBetween('sell_date', [startDate, endDate]);
+              })
+              .select(
+                'employee_id',
+                'cargo_type',
+                'volume',
+                'sell_price',
+                'sell_currency',
+                'sell_usd_rate',
+                'sell_custom_rate',
+                'usd_rmb_rate',
+              )
+          : Promise.resolve([]),
+
+        hasCargoTxTable
+          ? this.knex('cargo_transactions')
+              .whereIn('employee_id', matchingEmpSubquery.clone())
+              .where((qb) => {
+                qb.whereBetween('transaction_date', [
+                  startDate,
+                  endDate,
+                ]).orWhere((sub) => {
+                  sub
+                    .whereNull('transaction_date')
+                    .whereBetween('created_at', [
+                      startDate + ' 00:00:00',
+                      endDate + ' 23:59:59.999',
+                    ]);
+                });
+              })
+              .select('employee_id', 'sell_price', 'currency')
+          : Promise.resolve([]),
+
+        this.knex('clients')
+          .whereIn('assigned_employee_id', matchingEmpSubquery.clone())
+          .select('assigned_employee_id as employee_id')
+          .count('id as count')
+          .groupBy('assigned_employee_id'),
+      ]);
+
+    // Aggregate Meta Total Revenue across matching employees in current month
+    let metaRevenueUsd = 0;
+    let metaRevenueUzs = 0;
+    let metaRevenueRub = 0;
+
+    for (const cr of allCargoRegs as any[]) {
+      const price = parseFloat(String(cr.sell_price || '0')) || 0;
+      const curr = String(cr.sell_currency || 'UZS').toUpperCase();
+      if (curr === 'USD') metaRevenueUsd += price;
+      else if (curr === 'RUB') metaRevenueRub += price;
+      else if (curr === 'UZS') metaRevenueUzs += price;
+    }
+
+    for (const tx of allCargoTxs as any[]) {
+      const price = parseFloat(String(tx.sell_price || '0')) || 0;
+      const curr = String(tx.currency || 'UZS').toUpperCase();
+      if (curr === 'USD') metaRevenueUsd += price;
+      else if (curr === 'RUB') metaRevenueRub += price;
+      else if (curr === 'UZS') metaRevenueUzs += price;
+    }
+
+    // Aggregate Meta Plan Completed across matching employees in current month
+    let metaTargetLtlVolume = 0;
+    let metaTargetFtlAmount = 0;
+
+    for (const p of allPlans as any[]) {
+      metaTargetLtlVolume +=
+        parseFloat(String(p.ltl_target_volume || '0')) || 0;
+      const ftl =
+        p.ftl_target_amount !== undefined && p.ftl_target_amount !== null
+          ? parseFloat(String(p.ftl_target_amount))
+          : parseFloat(String(p.target_amount || '0')) || 0;
+      metaTargetFtlAmount += ftl;
+    }
+
+    let metaActualLtlVolume = 0;
+    let metaActualFtlAmount = 0;
+
+    for (const cr of allCargoRegs as any[]) {
+      const type = String(cr.cargo_type || '').toUpperCase();
+      if (type === 'LTL') {
+        metaActualLtlVolume += parseFloat(String(cr.volume || '0')) || 0;
+      } else if (type === 'FTL') {
+        const rawPrice = parseFloat(String(cr.sell_price || '0')) || 0;
+        const priceUsd = this.convertPriceToUsd(
+          rawPrice,
+          cr.sell_currency,
+          cr.sell_usd_rate,
+          cr.sell_custom_rate,
+          cr.usd_rmb_rate,
+        );
+        metaActualFtlAmount += priceUsd;
+      }
+    }
+
+    for (const tx of allCargoTxs as any[]) {
+      const rawPrice = parseFloat(String(tx.sell_price || '0')) || 0;
+      const priceUsd = this.convertPriceToUsd(rawPrice, tx.currency);
+      metaActualFtlAmount += priceUsd;
+    }
+
+    const metaLtlCompletion =
+      metaTargetLtlVolume > 0
+        ? Number(((metaActualLtlVolume / metaTargetLtlVolume) * 100).toFixed(2))
+        : metaActualLtlVolume > 0
+          ? 100
+          : 0;
+
+    const metaFtlCompletion =
+      metaTargetFtlAmount > 0
+        ? Number(((metaActualFtlAmount / metaTargetFtlAmount) * 100).toFixed(2))
+        : metaActualFtlAmount > 0
+          ? 100
+          : 0;
+
+    // Build Maps per Employee
+    const empPlanMap = new Map<
+      string,
+      { ltlTarget: number; ftlTarget: number }
+    >();
+    for (const p of allPlans as any[]) {
+      const empId = String(p.employee_id);
+      const ltl = parseFloat(String(p.ltl_target_volume || '0')) || 0;
+      const ftl =
+        p.ftl_target_amount !== undefined && p.ftl_target_amount !== null
+          ? parseFloat(String(p.ftl_target_amount))
+          : parseFloat(String(p.target_amount || '0')) || 0;
+
+      const existing = empPlanMap.get(empId) || { ltlTarget: 0, ftlTarget: 0 };
+      empPlanMap.set(empId, {
+        ltlTarget: existing.ltlTarget + ltl,
+        ftlTarget: existing.ftlTarget + ftl,
+      });
+    }
+
+    const empRegMap = new Map<
+      string,
+      {
+        ltlVolume: number;
+        ftlSales: number;
+        usd: number;
+        uzs: number;
+        rub: number;
+      }
+    >();
+
+    for (const cr of allCargoRegs as any[]) {
+      const empId = String(cr.employee_id);
+      const curr = String(cr.sell_currency || 'UZS').toUpperCase();
+      const price = parseFloat(String(cr.sell_price || '0')) || 0;
+      const vol = parseFloat(String(cr.volume || '0')) || 0;
+      const type = String(cr.cargo_type || '').toUpperCase();
+
+      const current = empRegMap.get(empId) || {
+        ltlVolume: 0,
+        ftlSales: 0,
+        usd: 0,
+        uzs: 0,
+        rub: 0,
+      };
+
+      if (type === 'LTL') {
+        current.ltlVolume += vol;
+      } else if (type === 'FTL') {
+        const priceUsd = this.convertPriceToUsd(
+          price,
+          cr.sell_currency,
+          cr.sell_usd_rate,
+          cr.sell_custom_rate,
+          cr.usd_rmb_rate,
+        );
+        current.ftlSales += priceUsd;
+      }
+
+      if (curr === 'USD') current.usd += price;
+      else if (curr === 'RUB') current.rub += price;
+      else if (curr === 'UZS') current.uzs += price;
+
+      empRegMap.set(empId, current);
+    }
+
+    for (const tx of allCargoTxs as any[]) {
+      const empId = String(tx.employee_id);
+      const curr = String(tx.currency || 'UZS').toUpperCase();
+      const price = parseFloat(String(tx.sell_price || '0')) || 0;
+
+      const current = empRegMap.get(empId) || {
+        ltlVolume: 0,
+        ftlSales: 0,
+        usd: 0,
+        uzs: 0,
+        rub: 0,
+      };
+
+      const priceUsd = this.convertPriceToUsd(price, tx.currency);
+      current.ftlSales += priceUsd;
+      if (curr === 'USD') current.usd += price;
+      else if (curr === 'RUB') current.rub += price;
+      else if (curr === 'UZS') current.uzs += price;
+
+      empRegMap.set(empId, current);
+    }
+
+    const clientCountMap = new Map<string, number>();
+    for (const c of allClientCounts as any[]) {
+      clientCountMap.set(
+        String(c.employee_id),
+        parseInt(String(c.count || '0'), 10),
+      );
+    }
+
+    // Build data array
+    const data: EmployeeListItem[] = rawItems.map((item): EmployeeListItem => {
+      const empId = item.id;
+      const plan = empPlanMap.get(empId) || { ltlTarget: 0, ftlTarget: 0 };
+      const reg = empRegMap.get(empId) || {
+        ltlVolume: 0,
+        ftlSales: 0,
+        usd: 0,
+        uzs: 0,
+        rub: 0,
+      };
+      const assignedCount = clientCountMap.get(empId) || 0;
+
+      const ltlCompletion =
+        plan.ltlTarget > 0
+          ? Number(((reg.ltlVolume / plan.ltlTarget) * 100).toFixed(2))
+          : reg.ltlVolume > 0
+            ? 100
+            : 0;
+
+      const ftlCompletion =
+        plan.ftlTarget > 0
+          ? Number(((reg.ftlSales / plan.ftlTarget) * 100).toFixed(2))
+          : reg.ftlSales > 0
+            ? 100
+            : 0;
+
+      const totalRevenue: TotalRevenueSpec = {
+        USD: Number(reg.usd.toFixed(2)),
+        UZS: Number(reg.uzs.toFixed(2)),
+        RUB: Number(reg.rub.toFixed(2)),
+      };
+
+      const planCompletion: PlanCompletionSpec = {
+        ltl_completion: ltlCompletion,
+        ftl_completion: ftlCompletion,
+      };
+
+      const roleName =
+        item.role_display_name ||
+        item.role_name ||
+        item.user_role ||
+        'EMPLOYEE';
+      const departmentName =
+        item.department_display_name || item.department_name || 'N/A';
+      const status = item.user_status || (item.is_active ? 'Open' : 'Banned');
+      const fullName =
+        `${item.first_name || ''} ${item.last_name || ''}`.trim();
+
+      return {
+        id: item.id,
+        full_name: fullName,
+        role_name: roleName,
+        department_name: departmentName,
+        status: status,
+        total_revenue: totalRevenue,
+        plan_completion: planCompletion,
+        total_assigned_employees: assignedCount,
+        color: item.color || '#CCCCCC',
+      };
+    });
 
     return {
-      items,
       meta: {
-        totalItems,
-        itemCount: items.length,
-        itemsPerPage: limit,
-        totalPages: Math.ceil(totalItems / limit),
-        currentPage: page,
+        total,
+        offset,
+        limit,
+        open_employees: openEmployees,
+        plan_completed: {
+          ltl_completion: metaLtlCompletion,
+          ftl_completion: metaFtlCompletion,
+        },
+        total_revenue: {
+          USD: Number(metaRevenueUsd.toFixed(2)),
+          UZS: Number(metaRevenueUzs.toFixed(2)),
+          RUB: Number(metaRevenueRub.toFixed(2)),
+        },
       },
+      data,
     };
   }
 

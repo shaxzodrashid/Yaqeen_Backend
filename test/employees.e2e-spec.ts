@@ -19,7 +19,6 @@ describe('Employees and Departments (e2e)', () => {
   const empUserId = '33333333-3333-3333-3333-333333333333';
 
   let ceoToken: string;
-  let ropToken: string;
   let empToken: string;
 
   let testDeptId: string;
@@ -53,10 +52,6 @@ describe('Employees and Departments (e2e)', () => {
     // Generate tokens
     ceoToken = jwt.sign(
       { sub: ceoUserId, phone_number: '998991112233', role: 'CEO' },
-      jwtSecret,
-    );
-    ropToken = jwt.sign(
-      { sub: ropUserId, phone_number: '998991112244', role: 'ROP' },
       jwtSecret,
     );
     empToken = jwt.sign(
@@ -240,15 +235,51 @@ describe('Employees and Departments (e2e)', () => {
       expect(response.status).toBe(HttpStatus.FORBIDDEN);
     });
 
-    it('GET /employees (CEO) - Should return list of employees with search', async () => {
+    it('GET /employees (CEO) - Should return list of employees with search and new schema', async () => {
       const response = await request(app.getHttpServer())
         .get('/api/v1/employees?search=John')
         .set('Authorization', `Bearer ${ceoToken}`);
 
       expect(response.status).toBe(HttpStatus.OK);
-      expect(response.body).toHaveProperty('items');
-      expect(response.body.items.length).toBeGreaterThan(0);
-      expect(response.body.items[0].first_name).toBe('John');
+      expect(response.body).toHaveProperty('meta');
+      expect(response.body).toHaveProperty('data');
+      expect(response.body.meta).toHaveProperty('total');
+      expect(response.body.meta).toHaveProperty('offset');
+      expect(response.body.meta).toHaveProperty('limit');
+      expect(response.body.meta).toHaveProperty('open_employees');
+      expect(response.body.meta).toHaveProperty('plan_completed');
+      expect(response.body.meta.plan_completed).toHaveProperty(
+        'ltl_completion',
+      );
+      expect(response.body.meta.plan_completed).toHaveProperty(
+        'ftl_completion',
+      );
+      expect(response.body.meta).toHaveProperty('total_revenue');
+      expect(response.body.meta.total_revenue).toHaveProperty('USD');
+      expect(response.body.meta.total_revenue).toHaveProperty('UZS');
+      expect(response.body.meta.total_revenue).toHaveProperty('RUB');
+
+      expect(response.body.data.length).toBeGreaterThan(0);
+      const firstEmp = response.body.data[0];
+      expect(firstEmp.full_name).toBe('John Doe');
+      expect(firstEmp).toHaveProperty('role_name');
+      expect(firstEmp).toHaveProperty('department_name');
+      expect(firstEmp).toHaveProperty('status');
+      expect(firstEmp).toHaveProperty('total_revenue');
+      expect(firstEmp.total_revenue).toHaveProperty('USD');
+      expect(firstEmp.total_revenue).toHaveProperty('UZS');
+      expect(firstEmp.plan_completion).toHaveProperty('ltl_completion');
+      expect(firstEmp.plan_completion).toHaveProperty('ftl_completion');
+      expect(firstEmp).toHaveProperty('total_assigned_employees');
+      expect(firstEmp).toHaveProperty('color');
+      expect(firstEmp.first_name).toBeUndefined();
+      expect(firstEmp.last_name).toBeUndefined();
+      expect(firstEmp.phone).toBeUndefined();
+      expect(firstEmp.secondary_phone).toBeUndefined();
+      expect(firstEmp.address).toBeUndefined();
+      expect(firstEmp.department_id).toBeUndefined();
+      expect(firstEmp.fixed_salary).toBeUndefined();
+      expect(firstEmp.currency).toBeUndefined();
     });
 
     it('PUT /employees/:id - Should update and sync deactivation', async () => {
