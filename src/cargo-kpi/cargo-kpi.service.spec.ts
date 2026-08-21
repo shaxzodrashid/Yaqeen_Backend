@@ -13,6 +13,8 @@ describe('CargoKpiService', () => {
     mockQueryBuilder = {
       select: jest.fn().mockReturnThis(),
       where: jest.fn().mockReturnThis(),
+      whereBetween: jest.fn().mockReturnThis(),
+      whereNull: jest.fn().mockReturnThis(),
       whereRaw: jest.fn().mockReturnThis(),
       orderBy: jest.fn().mockReturnThis(),
       limit: jest.fn().mockReturnThis(),
@@ -854,6 +856,39 @@ describe('CargoKpiService', () => {
       expect(plan.ftl_plan.is_completed).toBe(true);
       expect(plan.ftl_plan.cargo_count).toBe(2);
       expect(plan.actual_sales).toBe(1600);
+    });
+
+    it('filters shipments strictly by confirmed_date within target month without fallbacks', async () => {
+      mockKnex.mockImplementation((table: string) => {
+        const qb = { ...mockQueryBuilder };
+        if (table === 'employee_plans') {
+          qb.then = jest.fn((resolve: any) =>
+            resolve([
+              {
+                id: 'plan-1',
+                employee_id: 'emp-uuid-1',
+                first_name: 'Jamshid',
+                last_name: 'Atxamov',
+                ltl_target_volume: 0,
+                ftl_target_amount: 6000,
+                currency: 'USD',
+                period: '2026-08-01',
+              },
+            ]),
+          );
+        } else if (table === 'cargo_registrations') {
+          qb.then = jest.fn((resolve: any) => resolve([]));
+        } else {
+          qb.then = jest.fn((resolve: any) => resolve([]));
+        }
+        return qb;
+      });
+
+      await service.getEmployeePlansProgress({ period: '2026-08' });
+      expect(mockQueryBuilder.whereBetween).toHaveBeenCalledWith(
+        'confirmed_date',
+        ['2026-08-01', '2026-08-31'],
+      );
     });
 
     it('updates employee plan targets and period', async () => {

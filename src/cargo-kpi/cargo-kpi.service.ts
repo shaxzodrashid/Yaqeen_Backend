@@ -1163,30 +1163,17 @@ export class CargoKpiService {
       let actualFtlAmount = 0;
       let ftlCargoCount = 0;
 
-      // Query cargo registrations for this employee in period month
+      // Query cargo registrations for this employee in period month strictly by confirmed_date
       let regQuery = this.knex('cargo_registrations').where(
         'employee_id',
         p.employee_id,
       );
       const dateRange = this.getMonthDateRange(p.period);
       if (dateRange) {
-        regQuery = regQuery.where((builder) => {
-          builder
-            .whereBetween('confirmed_date', [
-              dateRange.startDate,
-              dateRange.endDate,
-            ])
-            .orWhere((b2) => {
-              b2.whereNull('confirmed_date').whereBetween('created_at', [
-                `${dateRange.startDate}T00:00:00.000Z`,
-                `${dateRange.endDate}T23:59:59.999Z`,
-              ]);
-            })
-            .orWhereBetween('sell_date', [
-              dateRange.startDate,
-              dateRange.endDate,
-            ]);
-        });
+        regQuery = regQuery.whereBetween('confirmed_date', [
+          dateRange.startDate,
+          dateRange.endDate,
+        ]);
       }
 
       const regRows = await regQuery.select(
