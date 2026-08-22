@@ -324,7 +324,10 @@ describe('CargoConsolidationsService', () => {
       expect(details.financials.total_sell_usd).toBe(7500);
       expect(details.financials.total_purchase_usd).toBe(4500);
       expect(details.financials.carrier_cost.amount_usd).toBe(2000);
-      expect(details.financials.consolidated_net_margin_usd).toBe(1000);
+      expect(details.financials.consolidated_net_margin).toEqual({
+        amount: 1000,
+        currency: 'USD',
+      });
       expect(details.cargos).toHaveLength(2);
       expect(details.cargos[0].id).toBe('cargo-1');
       expect(details.cargos[0].client.name).toBe('Alisher');
@@ -336,10 +339,17 @@ describe('CargoConsolidationsService', () => {
 
   describe('findAllConsolidations', () => {
     it('should return paginated consolidations list with all assigned cargos attached', async () => {
-      const qbCount = {
-        clone: jest.fn().mockReturnThis(),
-        count: jest.fn().mockReturnThis(),
-        first: jest.fn().mockResolvedValue({ total: '1' }),
+      const innerAggMock = {
+        as: jest.fn().mockReturnValue('t'),
+      };
+
+      const qbAgg = {
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnValue(innerAggMock),
+      };
+
+      const qbPaginated = {
         leftJoin: jest.fn().mockReturnThis(),
         select: jest.fn().mockReturnThis(),
         groupBy: jest.fn().mockReturnThis(),
@@ -365,11 +375,35 @@ describe('CargoConsolidationsService', () => {
         ]),
       };
 
-      knexMock.mockImplementation((tableName: string) => {
-        if (tableName === 'cargo_consolidations as cc') {
-          return qbCount;
+      let cloneCount = 0;
+      const baseWhereMock = {
+        clone: jest.fn().mockImplementation(() => {
+          cloneCount++;
+          if (cloneCount === 1) return qbAgg;
+          return qbPaginated;
+        }),
+      };
+
+      knexMock.mockImplementation((tableNameOrSubquery: any) => {
+        if (tableNameOrSubquery === 'cargo_consolidations as cc') {
+          return baseWhereMock;
         }
-        if (tableName === 'cargo_registrations as cr') {
+        if (
+          tableNameOrSubquery === 't' ||
+          tableNameOrSubquery === innerAggMock ||
+          (tableNameOrSubquery && typeof tableNameOrSubquery === 'object')
+        ) {
+          return {
+            select: jest.fn().mockReturnValue({
+              first: jest.fn().mockResolvedValue({
+                total_count: '1',
+                total_active: '1',
+                total_net_margin_usd: '300.0',
+              }),
+            }),
+          };
+        }
+        if (tableNameOrSubquery === 'cargo_registrations as cr') {
           return {
             leftJoin: jest.fn().mockReturnThis(),
             select: jest.fn().mockReturnThis(),
@@ -400,14 +434,80 @@ describe('CargoConsolidationsService', () => {
 
       expect(result).toBeDefined();
       expect(result.meta.total).toBe(1);
+      expect(result.meta.total_active).toBe(1);
+      expect(result.meta.consolidated_net_margin).toEqual({
+        USD: 300,
+        UZS: 3855000,
+        RUB: 26586.21,
+        RMB: 2123.97,
+      });
+      expect((result.meta as any).page).toBeUndefined();
+      expect((result.meta as any).total_pages).toBeUndefined();
       expect(result.data).toHaveLength(1);
       expect(result.data[0].id).toBe('cons-1');
+      expect(result.data[0].financials.consolidated_net_margin).toEqual({
+        amount: 300,
+        currency: 'USD',
+      });
       expect(result.data[0].cargos).toHaveLength(1);
       expect(result.data[0].cargos[0].id).toBe('cargo-1');
       expect(result.data[0].cargos[0].cargo).toBe('Chemicals');
       expect(result.data[0].cargos[0].client.name).toBe('Bobur');
       expect(result.data[0].cargos[0].employee.name).toBe('Aziz');
       expect(result.data[0].cargos[0].net_yield_usd).toBe(800.0);
+    });
+
+    it('should handle empty results gracefully with zeros in consolidated_net_margin', async () => {
+      const innerAggMock = {
+        as: jest.fn().mockReturnValue('t'),
+      };
+
+      const qbAgg = {
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockReturnValue(innerAggMock),
+      };
+
+      const baseWhereMock = {
+        clone: jest.fn().mockReturnValue(qbAgg),
+      };
+
+      knexMock.mockImplementation((tableNameOrSubquery: any) => {
+        if (tableNameOrSubquery === 'cargo_consolidations as cc') {
+          return baseWhereMock;
+        }
+        if (
+          tableNameOrSubquery === 't' ||
+          tableNameOrSubquery === innerAggMock ||
+          (tableNameOrSubquery && typeof tableNameOrSubquery === 'object')
+        ) {
+          return {
+            select: jest.fn().mockReturnValue({
+              first: jest.fn().mockResolvedValue({
+                total_count: '0',
+                total_active: '0',
+                total_net_margin_usd: '0',
+              }),
+            }),
+          };
+        }
+        return {};
+      });
+
+      const result = await service.findAllConsolidations({});
+
+      expect(result).toBeDefined();
+      expect(result.meta.total).toBe(0);
+      expect(result.meta.total_active).toBe(0);
+      expect(result.meta.consolidated_net_margin).toEqual({
+        USD: 0,
+        UZS: 0,
+        RUB: 0,
+        RMB: 0,
+      });
+      expect((result.meta as any).page).toBeUndefined();
+      expect((result.meta as any).total_pages).toBeUndefined();
+      expect(result.data).toEqual([]);
     });
   });
 

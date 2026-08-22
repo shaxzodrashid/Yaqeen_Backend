@@ -174,10 +174,15 @@ Returns a paginated list of all consolidations, complete with their capacity uti
 {
   "meta": {
     "total": 1,
-    "page": 1,
+    "total_active": 1,
     "limit": 10,
     "offset": 0,
-    "total_pages": 1
+    "consolidated_net_margin": {
+      "USD": -1600.0,
+      "UZS": -20560000.0,
+      "RUB": -141793.1,
+      "RMB": -11327.82
+    }
   },
   "data": [
     {
@@ -185,7 +190,7 @@ Returns a paginated list of all consolidations, complete with their capacity uti
       "consolidation_code": "CNS-202608-0001",
       "container_truck_id": "01A777AA",
       "container_type": "86m3",
-      "status": "Loading",
+      "status": "Waiting",
       "carrier_name": "Baytur Turkish",
       "carrier_phone": "+998901234567",
       "origin_place": "Istanbul",
@@ -213,7 +218,10 @@ Returns a paginated list of all consolidations, complete with their capacity uti
           "currency": "USD",
           "amount_usd": 3500.0
         },
-        "consolidated_net_margin_usd": -1600.0
+        "consolidated_net_margin": {
+          "amount": -1600.0,
+          "currency": "USD"
+        }
       },
       "description": "Chemicals & Textile groupage batch",
       "cargos": [
@@ -304,7 +312,10 @@ Retrieves full operational and financial details of a specific consolidation (id
       "currency": "USD",
       "amount_usd": 3500.0
     },
-    "consolidated_net_margin_usd": -1600.0
+    "consolidated_net_margin": {
+      "amount": -1600.0,
+      "currency": "USD"
+    }
   },
   "description": "Chemicals & Textile groupage batch",
   "cargos": [
@@ -418,7 +429,10 @@ Retrieves full operational and financial details of a specific consolidation (id
       "currency": "USD",
       "amount_usd": 3500.0
     },
-    "consolidated_net_margin_usd": -1600.0
+    "consolidated_net_margin": {
+      "amount": -1600.0,
+      "currency": "USD"
+    }
   },
   "description": "Chemicals & Textile groupage batch",
   "cargos": [

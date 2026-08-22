@@ -330,12 +330,90 @@ export class CargoConsolidationsService {
       baseWhere.where('cc.arrived_date', '<=', query.arrived_end_date);
     }
 
-    // Count query
-    const countRes = await baseWhere.clone().count('cc.id as total').first();
+    // Aggregation query: count total, active count, and net margin across matching consolidations
+    const innerAggQuery = baseWhere
+      .clone()
+      .leftJoin('cargo_registrations as cr', 'cc.id', 'cr.consolidation_id')
+      .select(
+        'cc.id',
+        'cc.status',
+        this.knex.raw(`
+          CASE
+            WHEN cc.carrier_cost_currency = 'UZS' AND cc.carrier_cost_usd_rate > 0 THEN COALESCE(cc.total_carrier_cost, 0) / cc.carrier_cost_usd_rate
+            WHEN cc.carrier_cost_currency = 'RUB' AND cc.carrier_cost_usd_rate > 0 THEN (COALESCE(cc.total_carrier_cost, 0) * 145.0) / 12850.0
+            WHEN cc.carrier_cost_currency IN ('RMB', 'CNY') AND cc.carrier_cost_usd_rate > 0 THEN (COALESCE(cc.total_carrier_cost, 0) * 1815.0) / 12850.0
+            ELSE COALESCE(cc.total_carrier_cost, 0)
+          END as carrier_cost_usd
+        `),
+        this.knex.raw(`
+          COALESCE(SUM(
+            CASE
+              WHEN cr.sell_currency = 'USD' THEN cr.sell_price
+              WHEN cr.sell_currency = 'UZS' THEN cr.sell_price / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+              WHEN cr.sell_currency IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.sell_price / cr.usd_rmb_rate
+              WHEN cr.sell_currency = 'RUB' THEN (cr.sell_price * 145.0) / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+              ELSE 0
+            END
+          ), 0) as total_cargos_sell_usd
+        `),
+        this.knex.raw(`
+          COALESCE(SUM(
+            CASE
+              WHEN cr.purchase_currency = 'USD' THEN cr.purchase_price
+              WHEN cr.purchase_currency = 'UZS' THEN cr.purchase_price / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
+              WHEN cr.purchase_currency IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.purchase_price / cr.usd_rmb_rate
+              WHEN cr.purchase_currency = 'RUB' THEN (cr.purchase_price * 145.0) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
+              ELSE 0
+            END
+          ), 0) as total_cargos_purchase_usd
+        `),
+      )
+      .groupBy('cc.id');
+
+    const aggQuery = this.knex(innerAggQuery.as('t')).select(
+      this.knex.raw('COUNT(t.id) as total_count'),
+      this.knex.raw(
+        "COALESCE(SUM(CASE WHEN COALESCE(t.status, 'Waiting') NOT IN ('Arrived') THEN 1 ELSE 0 END), 0) as total_active",
+      ),
+      this.knex.raw(
+        'COALESCE(SUM(t.total_cargos_sell_usd - t.total_cargos_purchase_usd - t.carrier_cost_usd), 0) as total_net_margin_usd',
+      ),
+    );
+
+    const aggResult = await aggQuery.first();
     const total = parseInt(
-      (countRes?.total as string) || (countRes?.count as string) || '0',
+      (aggResult?.total_count as string) || (aggResult?.total as string) || '0',
       10,
     );
+    const totalActive = parseInt(
+      (aggResult?.total_active as string) || '0',
+      10,
+    );
+    const totalNetMarginUsd = Number(aggResult?.total_net_margin_usd || 0);
+
+    const rates = await this.currencyService.getLatestRates();
+    const usdRate = rates['USD']
+      ? rates['USD'].rate / (rates['USD'].nominal || 1)
+      : 12850;
+    const rubRate = rates['RUB']
+      ? rates['RUB'].rate / (rates['RUB'].nominal || 1)
+      : 145;
+    const rmbRate = rates['RMB']
+      ? rates['RMB'].rate / (rates['RMB'].nominal || 1)
+      : rates['CNY']
+        ? rates['CNY'].rate / (rates['CNY'].nominal || 1)
+        : 1815;
+
+    const totalNetMarginUzs = totalNetMarginUsd * usdRate;
+    const totalNetMarginRub = rubRate > 0 ? totalNetMarginUzs / rubRate : 0;
+    const totalNetMarginRmb = rmbRate > 0 ? totalNetMarginUzs / rmbRate : 0;
+
+    const consolidatedNetMarginAll = {
+      USD: Math.round(totalNetMarginUsd * 100) / 100,
+      UZS: Math.round(totalNetMarginUzs * 100) / 100,
+      RUB: Math.round(totalNetMarginRub * 100) / 100,
+      RMB: Math.round(totalNetMarginRmb * 100) / 100,
+    };
 
     let rows: any[] = [];
     if (total > 0) {
@@ -472,6 +550,17 @@ export class CargoConsolidationsService {
       let carrierCostUsd = Number(r.total_carrier_cost || 0);
       if (r.carrier_cost_currency === 'UZS' && r.carrier_cost_usd_rate > 0) {
         carrierCostUsd = carrierCostUsd / r.carrier_cost_usd_rate;
+      } else if (
+        r.carrier_cost_currency === 'RUB' &&
+        r.carrier_cost_usd_rate > 0
+      ) {
+        carrierCostUsd = (carrierCostUsd * 145.0) / 12850.0;
+      } else if (
+        (r.carrier_cost_currency === 'RMB' ||
+          r.carrier_cost_currency === 'CNY') &&
+        r.carrier_cost_usd_rate > 0
+      ) {
+        carrierCostUsd = (carrierCostUsd * 1815.0) / 12850.0;
       }
       carrierCostUsd = Math.round(carrierCostUsd * 100) / 100;
 
@@ -514,7 +603,10 @@ export class CargoConsolidationsService {
             currency: r.carrier_cost_currency,
             amount_usd: carrierCostUsd,
           },
-          consolidated_net_margin_usd: netMarginUsd,
+          consolidated_net_margin: {
+            amount: netMarginUsd,
+            currency: 'USD',
+          },
         },
         description: r.description,
         cargos: assignedCargos,
@@ -526,10 +618,10 @@ export class CargoConsolidationsService {
     return {
       meta: {
         total,
-        page,
+        total_active: totalActive,
         limit,
         offset,
-        total_pages: Math.ceil(total / limit) || 1,
+        consolidated_net_margin: consolidatedNetMarginAll,
       },
       data: formattedData,
     };
@@ -731,6 +823,17 @@ export class CargoConsolidationsService {
       consolidation.carrier_cost_usd_rate > 0
     ) {
       carrierCostUsd = carrierCostUsd / consolidation.carrier_cost_usd_rate;
+    } else if (
+      consolidation.carrier_cost_currency === 'RUB' &&
+      consolidation.carrier_cost_usd_rate > 0
+    ) {
+      carrierCostUsd = (carrierCostUsd * 145.0) / 12850.0;
+    } else if (
+      (consolidation.carrier_cost_currency === 'RMB' ||
+        consolidation.carrier_cost_currency === 'CNY') &&
+      consolidation.carrier_cost_usd_rate > 0
+    ) {
+      carrierCostUsd = (carrierCostUsd * 1815.0) / 12850.0;
     }
     carrierCostUsd = Math.round(carrierCostUsd * 100) / 100;
 
@@ -773,7 +876,10 @@ export class CargoConsolidationsService {
           currency: consolidation.carrier_cost_currency,
           amount_usd: carrierCostUsd,
         },
-        consolidated_net_margin_usd: consolidatedNetMarginUsd,
+        consolidated_net_margin: {
+          amount: consolidatedNetMarginUsd,
+          currency: 'USD',
+        },
       },
       description: consolidation.description,
       cargos: formattedCargos,
