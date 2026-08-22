@@ -24,6 +24,7 @@ import { CargoRegistrationsModule } from './cargo-registrations/cargo-registrati
 import { CargoConsolidationsModule } from './cargo-consolidations/cargo-consolidations.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { KpiSummaryModule } from './kpi-summary/kpi-summary.module';
+import { LocationsModule } from './locations/locations.module';
 
 @Module({
   imports: [
@@ -81,6 +82,7 @@ import { KpiSummaryModule } from './kpi-summary/kpi-summary.module';
     SalesManagerKpiModule,
     DashboardModule,
     KpiSummaryModule,
+    LocationsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

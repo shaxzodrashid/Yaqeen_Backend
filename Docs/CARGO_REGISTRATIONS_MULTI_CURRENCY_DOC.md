@@ -69,6 +69,16 @@ The `cargo_registrations` table includes the following columns for currency date
 | `sell_usd_rate` | `decimal(14,4)` | YES | Rate of 1 USD in UZS snapshot at `sell_date` |
 | `sell_custom_rate` | `decimal(14,4)` | YES | Optional custom rate override provided in payload |
 | `usd_rmb_rate` | `decimal(14,4)` | YES | Custom USD to RMB cross-rate (required if currency is RMB) |
+| `origin_city` | `varchar(255)` | YES | Origin departure city (e.g. `Yiwu`, `Guangzhou`, `Istanbul`) |
+| `origin_country` | `varchar(100)` | YES | Origin country name (e.g. `China`, `Turkey`) |
+| `origin_country_code` | `varchar(10)` | YES | 2-letter ISO country code (`CN`, `TR`) |
+| `origin_geoname_id` | `integer` | YES | Global GeoNames ID for origin |
+| `origin_lat` / `origin_lng` | `decimal(10,7)` | YES | Origin geographic coordinates |
+| `destination_city` | `varchar(255)` | YES | Destination arrival city (e.g. `Tashkent`, `Samarkand`) |
+| `destination_country` | `varchar(100)` | YES | Destination country name (e.g. `Uzbekistan`) |
+| `destination_country_code` | `varchar(10)` | YES | 2-letter ISO country code (`UZ`) |
+| `destination_geoname_id` | `integer` | YES | Global GeoNames ID for destination |
+| `destination_lat` / `destination_lng` | `decimal(10,7)` | YES | Destination geographic coordinates |
 
 ---
 
@@ -98,17 +108,31 @@ Registers a new cargo transaction.
   "sell_price": 800,
   "sell_currency": "USD",
   "sell_date": "2026-08-06",
+  "origin_city": "Yiwu",
+  "origin_country": "China",
+  "origin_country_code": "CN",
+  "origin_geoname_id": 1787687,
+  "destination_city": "Tashkent",
+  "destination_country": "Uzbekistan",
+  "destination_country_code": "UZ",
+  "destination_geoname_id": 1512569,
+  "prevent_duplicate": true,
+  "idempotency_key": "order-req-20260822-001",
   "client_id": "8e3b4a21-9951-40ef-a442-123456789abc",
   "status": "On the way"
 }
 ```
 
-**Optional Payload Rate Fields**:
+**Optional Payload Rate & Route Fields**:
 - `purchase_date` (string, `YYYY-MM-DD`): If omitted, uses `confirmed_date` or current date.
 - `sell_date` (string, `YYYY-MM-DD`): If omitted, uses current date.
 - `purchase_exchange_rate` (number): Optional custom exchange rate override for purchase price.
 - `sell_exchange_rate` (number): Optional custom exchange rate override for sell price.
 - `usd_rmb_rate` (number): Required if `purchase_currency` or `sell_currency` is `RMB`.
+- `origin_city`, `origin_country`, `origin_country_code`, `origin_geoname_id`, `origin_lat`, `origin_lng`: Origin route metadata.
+- `destination_city`, `destination_country`, `destination_country_code`, `destination_geoname_id`, `destination_lat`, `destination_lng`: Destination route metadata.
+- `prevent_duplicate` (boolean): If true, checks for duplicate cargo entries and raises 400 Bad Request if identical cargo exists.
+- `idempotency_key` (string): Prevents duplicate submissions on rapid double clicks.
 
 **Example Response (201 Created)**:
 ```json
@@ -121,6 +145,41 @@ Registers a new cargo transaction.
   "container_truck_id": "TRK-6447",
   "agent_name": "SilkRoad Express",
   "cargo": "General Goods",
+  "origin": {
+    "city": "Yiwu",
+    "country": "China",
+    "country_code": "CN",
+    "geoname_id": 1787687,
+    "latitude": 29.31506,
+    "longitude": 120.07676,
+    "display_name": "Yiwu, China (CN)",
+    "google_maps_url": "https://www.google.com/maps/search/?api=1&query=29.31506,120.07676"
+  },
+  "destination": {
+    "city": "Tashkent",
+    "country": "Uzbekistan",
+    "country_code": "UZ",
+    "geoname_id": 1512569,
+    "latitude": 41.26465,
+    "longitude": 69.21627,
+    "display_name": "Tashkent, Uzbekistan (UZ)",
+    "google_maps_url": "https://www.google.com/maps/search/?api=1&query=41.26465,69.21627"
+  },
+  "route": {
+    "origin": "Yiwu",
+    "destination": "Tashkent",
+    "origin_display": "Yiwu, China",
+    "destination_display": "Tashkent, Uzbekistan",
+    "google_maps_dir_url": "https://www.google.com/maps/dir/?api=1&origin=29.31506,120.07676&destination=41.26465,69.21627"
+  },
+  "origin_city": "Yiwu",
+  "origin_country": "China",
+  "origin_country_code": "CN",
+  "origin_geoname_id": 1787687,
+  "destination_city": "Tashkent",
+  "destination_country": "Uzbekistan",
+  "destination_country_code": "UZ",
+  "destination_geoname_id": 1512569,
   "confirmed_date": "2026-07-20",
   "loaded_date": null,
   "arrived_date": null,
@@ -180,6 +239,12 @@ Retrieves a paginated list of cargo registrations with search, multi-timestamp f
 - `container_type` (optional): Filter by container type.
 - `client_id` (optional, UUID): Filter by client UUID.
 - `employee_id` (optional, UUID): Filter by assigned employee UUID.
+- `origin_city` (optional): Filter by origin departure city (case-insensitive).
+- `origin_country_code` (optional): Filter by 2-letter ISO origin country code (`CN`, `TR`, `UZ`).
+- `origin_geoname_id` (optional): Filter by origin GeoNames ID.
+- `destination_city` (optional): Filter by destination arrival city (case-insensitive).
+- `destination_country_code` (optional): Filter by 2-letter ISO destination country code (`UZ`, `KZ`, `RU`).
+- `destination_geoname_id` (optional): Filter by destination GeoNames ID.
 - `search` (optional): Case-insensitive search on `container_truck_id` or `cargo`.
 - `sort_by` (optional, default: `created_at`): Column / property to sort by:
   - Dates: `purchase_date`, `sell_date`, `confirmed_date`, `loaded_date`, `arrived_date`, `created_at`, `updated_at`
@@ -199,7 +264,7 @@ Retrieves a paginated list of cargo registrations with search, multi-timestamp f
 
 **Example Request**:
 ```http
-GET /api/v1/cargo-registrations?status=On%20the%20way&purchase_start_date=2026-08-01&purchase_end_date=2026-08-31&sort_by=purchase_date&sort_order=DESC&limit=20 HTTP/1.1
+GET /api/v1/cargo-registrations?status=On%20the%20way&origin_city=Yiwu&destination_country_code=UZ&limit=20 HTTP/1.1
 Authorization: Bearer <JWT_TOKEN>
 ```
 
@@ -238,6 +303,41 @@ Authorization: Bearer <JWT_TOKEN>
       "agent_name": "SilkRoad Express",
       "client_full_name": "Jasur Aliyev",
       "cargo": "General Goods",
+      "origin": {
+        "city": "Yiwu",
+        "country": "China",
+        "country_code": "CN",
+        "geoname_id": 1787687,
+        "latitude": 29.31506,
+        "longitude": 120.07676,
+        "display_name": "Yiwu, China (CN)",
+        "google_maps_url": "https://www.google.com/maps/search/?api=1&query=29.31506,120.07676"
+      },
+      "destination": {
+        "city": "Tashkent",
+        "country": "Uzbekistan",
+        "country_code": "UZ",
+        "geoname_id": 1512569,
+        "latitude": 41.26465,
+        "longitude": 69.21627,
+        "display_name": "Tashkent, Uzbekistan (UZ)",
+        "google_maps_url": "https://www.google.com/maps/search/?api=1&query=41.26465,69.21627"
+      },
+      "route": {
+        "origin": "Yiwu",
+        "destination": "Tashkent",
+        "origin_display": "Yiwu, China",
+        "destination_display": "Tashkent, Uzbekistan",
+        "google_maps_dir_url": "https://www.google.com/maps/dir/?api=1&origin=29.31506,120.07676&destination=41.26465,69.21627"
+      },
+      "origin_city": "Yiwu",
+      "origin_country": "China",
+      "origin_country_code": "CN",
+      "origin_geoname_id": 1787687,
+      "destination_city": "Tashkent",
+      "destination_country": "Uzbekistan",
+      "destination_country_code": "UZ",
+      "destination_geoname_id": 1512569,
       "confirmed_date": "2026-07-20",
       "loaded_date": "2026-07-22",
       "arrived_date": null,
@@ -281,13 +381,44 @@ Authorization: Bearer <JWT_TOKEN>
 
 #### `PATCH /api/v1/cargo-registrations/:id`
 
-Updates an existing cargo registration. Re-calculates rate snapshots if price, currency, or dates are modified.
+Updates an existing cargo registration. Re-calculates rate snapshots if price, currency, or dates are modified. Supports updating origin/destination routes.
 
 **Request Body (JSON)**:
 ```json
 {
   "sell_price": 850,
-  "sell_date": "2026-08-06"
+  "sell_date": "2026-08-06",
+  "destination_city": "Samarkand",
+  "destination_geoname_id": 1216265
+}
+```
+
+---
+
+### D. Check Duplicate Cargo Registration
+
+#### `POST /api/v1/cargo-registrations/check-duplicate`
+
+Pre-flight endpoint used by frontend forms to detect whether an identical shipment is already saved.
+
+**Request Body (JSON)**:
+```json
+{
+  "client_id": "8e3b4a21-9951-40ef-a442-123456789abc",
+  "cargo": "General Goods",
+  "container_truck_id": "TRK-6447",
+  "origin_city": "Yiwu",
+  "destination_city": "Tashkent",
+  "purchase_price": 4500000
+}
+```
+
+**Response (200 OK)**:
+```json
+{
+  "is_duplicate": true,
+  "existing_cargo_id": "7a06df8a-384c-4c8d-9932-57db348a3451",
+  "message": "An identical cargo entry \"General Goods\" (Yiwu -> Tashkent) with the exact same price and truck was already registered."
 }
 ```
 

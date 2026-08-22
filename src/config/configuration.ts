@@ -27,4 +27,8 @@ export default () => ({
     bucketName: process.env.MINIO_BUCKET_NAME || 'yaqeen-attachments',
     publicUrl: process.env.MINIO_PUBLIC_URL || '',
   },
+  geonames: {
+    username: process.env.GEONAMES_USERNAME || 'yaqeen_logistics',
+    apiUrl: process.env.GEONAMES_API_URL || 'http://api.geonames.org',
+  },
 });

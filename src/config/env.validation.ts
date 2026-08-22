@@ -28,4 +28,7 @@ export const envValidationSchema = Joi.object({
   MINIO_SECRET_KEY: Joi.string().required(),
   MINIO_BUCKET_NAME: Joi.string().default('yaqeen-attachments'),
   MINIO_PUBLIC_URL: Joi.string().allow('').optional(),
+
+  GEONAMES_USERNAME: Joi.string().allow('').default('yaqeen_logistics'),
+  GEONAMES_API_URL: Joi.string().allow('').default('http://api.geonames.org'),
 });

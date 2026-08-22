@@ -12,9 +12,12 @@ import {
   IsBoolean,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ALLOWED_CURRENCIES } from '../../cargo-registrations/dto/cargo-registrations.dto';
+import {
+  ALLOWED_CURRENCIES,
+  type CargoCurrency,
+} from '../../cargo-registrations/dto/cargo-registrations.dto';
 
-export type ConsolidationCurrency = (typeof ALLOWED_CURRENCIES)[number];
+export type ConsolidationCurrency = CargoCurrency;
 
 export const CONSOLIDATION_STATUSES = [
   'Planning',

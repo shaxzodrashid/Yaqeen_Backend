@@ -21,6 +21,7 @@ import {
   CreateCargoRegistrationDto,
   UpdateCargoRegistrationDto,
   QueryCargoRegistrationDto,
+  CheckDuplicateCargoDto,
 } from './dto/cargo-registrations.dto';
 
 interface AuthenticatedRequest extends Request {
@@ -48,6 +49,13 @@ export class CargoRegistrationsController {
       req.user,
       dto,
     );
+  }
+
+  @Post('check-duplicate')
+  @RequirePermission('cargo_registrations', 'read')
+  @HttpCode(HttpStatus.OK)
+  checkDuplicate(@Body() dto: CheckDuplicateCargoDto) {
+    return this.cargoRegistrationsService.checkDuplicateCargoRegistration(dto);
   }
 
   @Get()

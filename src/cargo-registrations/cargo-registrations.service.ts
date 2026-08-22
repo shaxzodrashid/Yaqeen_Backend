@@ -11,10 +11,12 @@ import { KNEX_CONNECTION } from '../database/database.module';
 import { Knex } from 'knex';
 import { CurrencyService } from '../currency/currency.service';
 import { RedisService } from '../redis/redis.service';
+import { LocationsService } from '../locations/locations.service';
 import {
   CreateCargoRegistrationDto,
   UpdateCargoRegistrationDto,
   QueryCargoRegistrationDto,
+  CheckDuplicateCargoDto,
   ALLOWED_CONTAINER_TYPES,
   CARGO_STATUSES,
 } from './dto/cargo-registrations.dto';
@@ -27,6 +29,7 @@ export class CargoRegistrationsService {
     @Inject(KNEX_CONNECTION) private readonly knex: Knex,
     private readonly currencyService: CurrencyService,
     @Optional() private readonly redisService?: RedisService,
+    @Optional() private readonly locationsService?: LocationsService,
   ) {}
 
   /**
@@ -297,12 +300,103 @@ export class CargoRegistrationsService {
   }
 
   /**
+   * Optional check to detect exact identical duplicate submissions (same client, same truck, exact same cargo, route, and purchase price).
+   * Note: Multiple legitimate loads in the same truck and route are fully supported.
+   */
+  async checkDuplicateCargoRegistration(dto: CheckDuplicateCargoDto) {
+    const cargoName = dto.cargo ? dto.cargo.trim().toLowerCase() : '';
+    const truckId = dto.container_truck_id
+      ? dto.container_truck_id.trim()
+      : null;
+    const originCity = dto.origin_city
+      ? dto.origin_city.trim().toLowerCase()
+      : null;
+    const destCity = dto.destination_city
+      ? dto.destination_city.trim().toLowerCase()
+      : null;
+
+    let query = this.knex('cargo_registrations as cr')
+      .where('cr.client_id', dto.client_id)
+      .whereRaw('LOWER(cr.cargo) = ?', [cargoName]);
+
+    if (truckId) {
+      query = query.whereILike('cr.container_truck_id', truckId);
+    }
+    if (dto.consolidation_id) {
+      query = query.where('cr.consolidation_id', dto.consolidation_id);
+    }
+    if (dto.cargo_type) {
+      query = query.where('cr.cargo_type', dto.cargo_type);
+    }
+
+    if (dto.purchase_price !== undefined && dto.purchase_price !== null) {
+      query = query.where('cr.purchase_price', dto.purchase_price);
+    }
+
+    if (dto.origin_geoname_id) {
+      query = query.where('cr.origin_geoname_id', dto.origin_geoname_id);
+    } else if (originCity) {
+      query = query.whereRaw('LOWER(cr.origin_city) = ?', [originCity]);
+    }
+
+    if (dto.destination_geoname_id) {
+      query = query.where(
+        'cr.destination_geoname_id',
+        dto.destination_geoname_id,
+      );
+    } else if (destCity) {
+      query = query.whereRaw('LOWER(cr.destination_city) = ?', [destCity]);
+    }
+
+    if (dto.confirmed_date) {
+      query = query.where('cr.confirmed_date', dto.confirmed_date);
+    }
+
+    const existing = await query.first();
+
+    if (existing) {
+      const routeStr =
+        existing.origin_city && existing.destination_city
+          ? ` (${existing.origin_city} -> ${existing.destination_city})`
+          : '';
+      return {
+        is_duplicate: true,
+        existing_cargo_id: existing.id,
+        message: `An identical cargo entry "${existing.cargo}"${routeStr} with the exact same price and truck was already registered.`,
+      };
+    }
+
+    return {
+      is_duplicate: false,
+      existing_cargo_id: null,
+      message: null,
+    };
+  }
+
+  /**
    * Create new cargo registration.
    */
   async createCargoRegistration(
     user: { id: string; role?: string },
     dto: CreateCargoRegistrationDto,
   ) {
+    // 0. Idempotency Key check to prevent rapid double-clicks and repeated submissions
+    if (dto.idempotency_key && this.redisService) {
+      const idempotencyKey = `cargo_registrations:idempotency:${dto.idempotency_key.trim()}`;
+      try {
+        const cachedId = await this.redisService.get(idempotencyKey);
+        if (cachedId) {
+          const cachedRecord =
+            await this.findCargoRegistrationDetails(cachedId);
+          if (cachedRecord) {
+            return cachedRecord;
+          }
+        }
+      } catch (err) {
+        this.logger.warn(`Idempotency check error: ${err.message}`);
+      }
+    }
+
     const canRegisterEveryone = await this.checkCanRegisterForEveryone(user);
     const userEmployeeId = await this.getUserEmployeeId(user.id);
 
@@ -371,6 +465,52 @@ export class CargoRegistrationsService {
       usd_rmb_rate: dto.usd_rmb_rate,
     });
 
+    // Resolve & normalize origin and destination city locations via LocationsService
+    let originPlace = {
+      city: dto.origin_city ? dto.origin_city.trim() : null,
+      country: dto.origin_country ? dto.origin_country.trim() : null,
+      country_code: dto.origin_country_code
+        ? dto.origin_country_code.trim().toUpperCase()
+        : null,
+      geoname_id: dto.origin_geoname_id || null,
+      lat: dto.origin_lat || null,
+      lng: dto.origin_lng || null,
+    };
+
+    let destPlace = {
+      city: dto.destination_city ? dto.destination_city.trim() : null,
+      country: dto.destination_country ? dto.destination_country.trim() : null,
+      country_code: dto.destination_country_code
+        ? dto.destination_country_code.trim().toUpperCase()
+        : null,
+      geoname_id: dto.destination_geoname_id || null,
+      lat: dto.destination_lat || null,
+      lng: dto.destination_lng || null,
+    };
+
+    if (this.locationsService) {
+      if (dto.origin_city || dto.origin_geoname_id) {
+        originPlace = await this.locationsService.normalizeAndResolvePlace({
+          city: dto.origin_city,
+          country: dto.origin_country,
+          country_code: dto.origin_country_code,
+          geoname_id: dto.origin_geoname_id,
+          lat: dto.origin_lat,
+          lng: dto.origin_lng,
+        });
+      }
+      if (dto.destination_city || dto.destination_geoname_id) {
+        destPlace = await this.locationsService.normalizeAndResolvePlace({
+          city: dto.destination_city,
+          country: dto.destination_country,
+          country_code: dto.destination_country_code,
+          geoname_id: dto.destination_geoname_id,
+          lat: dto.destination_lat,
+          lng: dto.destination_lng,
+        });
+      }
+    }
+
     const purchaseDate = this.formatDateStr(
       dto.purchase_date || dto.confirmed_date,
     );
@@ -437,10 +577,12 @@ export class CargoRegistrationsService {
               : null,
           carrier_name: nc.carrier_name ? nc.carrier_name.trim() : null,
           carrier_phone: nc.carrier_phone ? nc.carrier_phone.trim() : null,
-          origin_place: nc.origin_place ? nc.origin_place.trim() : null,
+          origin_place: nc.origin_place
+            ? nc.origin_place.trim()
+            : originPlace.city || null,
           destination_place: nc.destination_place
             ? nc.destination_place.trim()
-            : null,
+            : destPlace.city || null,
           departure_date: nc.departure_date || null,
           status: nc.status || 'Planning',
           description: nc.description || null,
@@ -481,6 +623,33 @@ export class CargoRegistrationsService {
       });
     }
 
+    // Duplicate Prevention: Check if duplicate prevention is requested or enabled
+    if (dto.prevent_duplicate) {
+      const dupCheck = await this.checkDuplicateCargoRegistration({
+        client_id: dto.client_id,
+        container_truck_id: finalContainerTruckId,
+        consolidation_id: finalConsolidationId || undefined,
+        cargo: dto.cargo,
+        cargo_type: dto.cargo_type,
+        origin_city: originPlace.city || undefined,
+        origin_geoname_id: originPlace.geoname_id || undefined,
+        destination_city: destPlace.city || undefined,
+        destination_geoname_id: destPlace.geoname_id || undefined,
+        confirmed_date: dto.confirmed_date,
+        purchase_price: dto.purchase_price,
+      });
+
+      if (dupCheck.is_duplicate) {
+        throw new BadRequestException({
+          message:
+            dupCheck.message ||
+            'Duplicate cargo registration detected for this client and route',
+          location: 'duplicate_cargo_detected',
+          existing_cargo_id: dupCheck.existing_cargo_id,
+        });
+      }
+    }
+
     const [inserted] = await this.knex('cargo_registrations')
       .insert({
         cargo_type: dto.cargo_type,
@@ -494,6 +663,18 @@ export class CargoRegistrationsService {
         consolidation_id: finalConsolidationId,
         agent_name: dto.agent_name.trim(),
         cargo: dto.cargo.trim(),
+        origin_city: originPlace.city,
+        origin_country: originPlace.country,
+        origin_country_code: originPlace.country_code,
+        origin_geoname_id: originPlace.geoname_id,
+        origin_lat: originPlace.lat,
+        origin_lng: originPlace.lng,
+        destination_city: destPlace.city,
+        destination_country: destPlace.country,
+        destination_country_code: destPlace.country_code,
+        destination_geoname_id: destPlace.geoname_id,
+        destination_lat: destPlace.lat,
+        destination_lng: destPlace.lng,
         confirmed_date: dto.confirmed_date || null,
         loaded_date: dto.loaded_date || null,
         arrived_date: dto.arrived_date || null,
@@ -518,6 +699,20 @@ export class CargoRegistrationsService {
     await this.invalidateCache();
 
     const insertedId = typeof inserted === 'object' ? inserted.id : inserted;
+
+    // Cache idempotency token if supplied (expires in 5 minutes)
+    if (dto.idempotency_key && this.redisService) {
+      try {
+        await this.redisService.set(
+          `cargo_registrations:idempotency:${dto.idempotency_key.trim()}`,
+          insertedId,
+          300,
+        );
+      } catch (err) {
+        this.logger.warn(`Failed to cache idempotency key: ${err.message}`);
+      }
+    }
+
     return this.findCargoRegistrationDetails(insertedId);
   }
 
@@ -714,6 +909,186 @@ export class CargoRegistrationsService {
     if (dto.employee_id !== undefined)
       updatePayload.employee_id = dto.employee_id;
 
+    // Origin location updates with normalization
+    if (
+      dto.origin_city !== undefined ||
+      dto.origin_country !== undefined ||
+      dto.origin_country_code !== undefined ||
+      dto.origin_geoname_id !== undefined ||
+      dto.origin_lat !== undefined ||
+      dto.origin_lng !== undefined
+    ) {
+      if (dto.origin_geoname_id === null && dto.origin_city === null) {
+        updatePayload.origin_city = null;
+        updatePayload.origin_country = null;
+        updatePayload.origin_country_code = null;
+        updatePayload.origin_geoname_id = null;
+        updatePayload.origin_lat = null;
+        updatePayload.origin_lng = null;
+      } else if (
+        this.locationsService &&
+        (dto.origin_city || dto.origin_geoname_id)
+      ) {
+        const isNewGeonameId =
+          dto.origin_geoname_id &&
+          dto.origin_geoname_id !== existing.origin_geoname_id;
+
+        const resolved = await this.locationsService.normalizeAndResolvePlace({
+          city:
+            dto.origin_city !== undefined
+              ? dto.origin_city
+              : isNewGeonameId
+                ? null
+                : existing.origin_city,
+          country:
+            dto.origin_country !== undefined
+              ? dto.origin_country
+              : isNewGeonameId
+                ? null
+                : existing.origin_country,
+          country_code:
+            dto.origin_country_code !== undefined
+              ? dto.origin_country_code
+              : isNewGeonameId
+                ? null
+                : existing.origin_country_code,
+          geoname_id:
+            dto.origin_geoname_id !== undefined
+              ? dto.origin_geoname_id
+              : existing.origin_geoname_id,
+          lat:
+            dto.origin_lat !== undefined
+              ? dto.origin_lat
+              : isNewGeonameId
+                ? null
+                : existing.origin_lat,
+          lng:
+            dto.origin_lng !== undefined
+              ? dto.origin_lng
+              : isNewGeonameId
+                ? null
+                : existing.origin_lng,
+        });
+        updatePayload.origin_city = resolved.city;
+        updatePayload.origin_country = resolved.country;
+        updatePayload.origin_country_code = resolved.country_code;
+        updatePayload.origin_geoname_id = resolved.geoname_id;
+        updatePayload.origin_lat = resolved.lat;
+        updatePayload.origin_lng = resolved.lng;
+      } else {
+        if (dto.origin_city !== undefined)
+          updatePayload.origin_city = dto.origin_city
+            ? dto.origin_city.trim()
+            : null;
+        if (dto.origin_country !== undefined)
+          updatePayload.origin_country = dto.origin_country
+            ? dto.origin_country.trim()
+            : null;
+        if (dto.origin_country_code !== undefined)
+          updatePayload.origin_country_code = dto.origin_country_code
+            ? dto.origin_country_code.trim().toUpperCase()
+            : null;
+        if (dto.origin_geoname_id !== undefined)
+          updatePayload.origin_geoname_id = dto.origin_geoname_id || null;
+        if (dto.origin_lat !== undefined)
+          updatePayload.origin_lat = dto.origin_lat;
+        if (dto.origin_lng !== undefined)
+          updatePayload.origin_lng = dto.origin_lng;
+      }
+    }
+
+    // Destination location updates with normalization
+    if (
+      dto.destination_city !== undefined ||
+      dto.destination_country !== undefined ||
+      dto.destination_country_code !== undefined ||
+      dto.destination_geoname_id !== undefined ||
+      dto.destination_lat !== undefined ||
+      dto.destination_lng !== undefined
+    ) {
+      if (
+        dto.destination_geoname_id === null &&
+        dto.destination_city === null
+      ) {
+        updatePayload.destination_city = null;
+        updatePayload.destination_country = null;
+        updatePayload.destination_country_code = null;
+        updatePayload.destination_geoname_id = null;
+        updatePayload.destination_lat = null;
+        updatePayload.destination_lng = null;
+      } else if (
+        this.locationsService &&
+        (dto.destination_city || dto.destination_geoname_id)
+      ) {
+        const isNewGeonameId =
+          dto.destination_geoname_id &&
+          dto.destination_geoname_id !== existing.destination_geoname_id;
+
+        const resolved = await this.locationsService.normalizeAndResolvePlace({
+          city:
+            dto.destination_city !== undefined
+              ? dto.destination_city
+              : isNewGeonameId
+                ? null
+                : existing.destination_city,
+          country:
+            dto.destination_country !== undefined
+              ? dto.destination_country
+              : isNewGeonameId
+                ? null
+                : existing.destination_country,
+          country_code:
+            dto.destination_country_code !== undefined
+              ? dto.destination_country_code
+              : isNewGeonameId
+                ? null
+                : existing.destination_country_code,
+          geoname_id:
+            dto.destination_geoname_id !== undefined
+              ? dto.destination_geoname_id
+              : existing.destination_geoname_id,
+          lat:
+            dto.destination_lat !== undefined
+              ? dto.destination_lat
+              : isNewGeonameId
+                ? null
+                : existing.destination_lat,
+          lng:
+            dto.destination_lng !== undefined
+              ? dto.destination_lng
+              : isNewGeonameId
+                ? null
+                : existing.destination_lng,
+        });
+        updatePayload.destination_city = resolved.city;
+        updatePayload.destination_country = resolved.country;
+        updatePayload.destination_country_code = resolved.country_code;
+        updatePayload.destination_geoname_id = resolved.geoname_id;
+        updatePayload.destination_lat = resolved.lat;
+        updatePayload.destination_lng = resolved.lng;
+      } else {
+        if (dto.destination_city !== undefined)
+          updatePayload.destination_city = dto.destination_city
+            ? dto.destination_city.trim()
+            : null;
+        if (dto.destination_country !== undefined)
+          updatePayload.destination_country = dto.destination_country
+            ? dto.destination_country.trim()
+            : null;
+        if (dto.destination_country_code !== undefined)
+          updatePayload.destination_country_code = dto.destination_country_code
+            ? dto.destination_country_code.trim().toUpperCase()
+            : null;
+        if (dto.destination_geoname_id !== undefined)
+          updatePayload.destination_geoname_id =
+            dto.destination_geoname_id || null;
+        if (dto.destination_lat !== undefined)
+          updatePayload.destination_lat = dto.destination_lat;
+        if (dto.destination_lng !== undefined)
+          updatePayload.destination_lng = dto.destination_lng;
+      }
+    }
+
     if (dto.consolidation_id !== undefined) {
       if (dto.consolidation_id === null || dto.consolidation_id === '') {
         updatePayload.consolidation_id = null;
@@ -844,13 +1219,53 @@ export class CargoRegistrationsService {
       baseQuery.where('cr.created_at', '<=', endDate);
     }
 
-    // Search filter across container_truck_id and cargo
+    // Origin location filters
+    if (query.origin_city && query.origin_city.trim()) {
+      baseQuery.whereILike('cr.origin_city', `%${query.origin_city.trim()}%`);
+    }
+    if (query.origin_country_code && query.origin_country_code.trim()) {
+      baseQuery.where(
+        'cr.origin_country_code',
+        query.origin_country_code.trim().toUpperCase(),
+      );
+    }
+    if (query.origin_geoname_id) {
+      baseQuery.where('cr.origin_geoname_id', Number(query.origin_geoname_id));
+    }
+
+    // Destination location filters
+    if (query.destination_city && query.destination_city.trim()) {
+      baseQuery.whereILike(
+        'cr.destination_city',
+        `%${query.destination_city.trim()}%`,
+      );
+    }
+    if (
+      query.destination_country_code &&
+      query.destination_country_code.trim()
+    ) {
+      baseQuery.where(
+        'cr.destination_country_code',
+        query.destination_country_code.trim().toUpperCase(),
+      );
+    }
+    if (query.destination_geoname_id) {
+      baseQuery.where(
+        'cr.destination_geoname_id',
+        Number(query.destination_geoname_id),
+      );
+    }
+
+    // Search filter across container_truck_id, cargo, agent_name, origin_city, destination_city
     if (query.search && query.search.trim()) {
       const searchTerm = `%${query.search.trim()}%`;
       baseQuery.where((builder) => {
         builder
           .where('cr.container_truck_id', 'ILIKE', searchTerm)
-          .orWhere('cr.cargo', 'ILIKE', searchTerm);
+          .orWhere('cr.cargo', 'ILIKE', searchTerm)
+          .orWhere('cr.agent_name', 'ILIKE', searchTerm)
+          .orWhere('cr.origin_city', 'ILIKE', searchTerm)
+          .orWhere('cr.destination_city', 'ILIKE', searchTerm);
       });
     }
   }
@@ -978,6 +1393,18 @@ export class CargoRegistrationsService {
           'cr.container_truck_id',
           'cr.consolidation_id',
           'cr.agent_name',
+          'cr.origin_city',
+          'cr.origin_country',
+          'cr.origin_country_code',
+          'cr.origin_geoname_id',
+          'cr.origin_lat',
+          'cr.origin_lng',
+          'cr.destination_city',
+          'cr.destination_country',
+          'cr.destination_country_code',
+          'cr.destination_geoname_id',
+          'cr.destination_lat',
+          'cr.destination_lng',
           'cr.cargo',
           'cr.confirmed_date',
           'cr.loaded_date',
@@ -1105,6 +1532,47 @@ export class CargoRegistrationsService {
             Math.round((sellRes.amount_uzs - purchaseRes.amount_uzs) * 100) /
             100;
 
+          const originLat =
+            r.origin_lat !== null && r.origin_lat !== undefined
+              ? Number(r.origin_lat)
+              : null;
+          const originLng =
+            r.origin_lng !== null && r.origin_lng !== undefined
+              ? Number(r.origin_lng)
+              : null;
+          const destLat =
+            r.destination_lat !== null && r.destination_lat !== undefined
+              ? Number(r.destination_lat)
+              : null;
+          const destLng =
+            r.destination_lng !== null && r.destination_lng !== undefined
+              ? Number(r.destination_lng)
+              : null;
+
+          const originMapsUrl =
+            originLat !== null && originLng !== null
+              ? `https://www.google.com/maps/search/?api=1&query=${originLat},${originLng}`
+              : r.origin_city
+                ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.origin_city + (r.origin_country ? ', ' + r.origin_country : ''))}`
+                : null;
+
+          const destMapsUrl =
+            destLat !== null && destLng !== null
+              ? `https://www.google.com/maps/search/?api=1&query=${destLat},${destLng}`
+              : r.destination_city
+                ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(r.destination_city + (r.destination_country ? ', ' + r.destination_country : ''))}`
+                : null;
+
+          const routeMapsUrl =
+            originLat !== null &&
+            originLng !== null &&
+            destLat !== null &&
+            destLng !== null
+              ? `https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${destLat},${destLng}`
+              : r.origin_city && r.destination_city
+                ? `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(r.origin_city + (r.origin_country ? ', ' + r.origin_country : ''))}&destination=${encodeURIComponent(r.destination_city + (r.destination_country ? ', ' + r.destination_country : ''))}`
+                : null;
+
           return {
             id: r.id,
             cargo_type: r.cargo_type,
@@ -1125,6 +1593,57 @@ export class CargoRegistrationsService {
             agent_name: r.agent_name,
             client_full_name: clientName,
             cargo: r.cargo,
+            origin: {
+              city: r.origin_city || null,
+              country: r.origin_country || null,
+              country_code: r.origin_country_code || null,
+              geoname_id: r.origin_geoname_id
+                ? Number(r.origin_geoname_id)
+                : null,
+              latitude: originLat,
+              longitude: originLng,
+              display_name: r.origin_city
+                ? `${r.origin_city}${r.origin_country ? ', ' + r.origin_country : ''}${r.origin_country_code ? ' (' + r.origin_country_code + ')' : ''}`
+                : null,
+              google_maps_url: originMapsUrl,
+            },
+            origin_city: r.origin_city || null,
+            origin_country: r.origin_country || null,
+            origin_country_code: r.origin_country_code || null,
+            origin_geoname_id: r.origin_geoname_id
+              ? Number(r.origin_geoname_id)
+              : null,
+            destination: {
+              city: r.destination_city || null,
+              country: r.destination_country || null,
+              country_code: r.destination_country_code || null,
+              geoname_id: r.destination_geoname_id
+                ? Number(r.destination_geoname_id)
+                : null,
+              latitude: destLat,
+              longitude: destLng,
+              display_name: r.destination_city
+                ? `${r.destination_city}${r.destination_country ? ', ' + r.destination_country : ''}${r.destination_country_code ? ' (' + r.destination_country_code + ')' : ''}`
+                : null,
+              google_maps_url: destMapsUrl,
+            },
+            destination_city: r.destination_city || null,
+            destination_country: r.destination_country || null,
+            destination_country_code: r.destination_country_code || null,
+            destination_geoname_id: r.destination_geoname_id
+              ? Number(r.destination_geoname_id)
+              : null,
+            route: {
+              origin: r.origin_city || null,
+              destination: r.destination_city || null,
+              origin_display: r.origin_city
+                ? `${r.origin_city}${r.origin_country ? ', ' + r.origin_country : ''}`
+                : null,
+              destination_display: r.destination_city
+                ? `${r.destination_city}${r.destination_country ? ', ' + r.destination_country : ''}`
+                : null,
+              google_maps_dir_url: routeMapsUrl,
+            },
             confirmed_date: r.confirmed_date
               ? this.formatDateStr(r.confirmed_date)
               : null,
@@ -1438,6 +1957,47 @@ export class CargoRegistrationsService {
     const netYieldUzs =
       Math.round((sellRes.amount_uzs - purchaseRes.amount_uzs) * 100) / 100;
 
+    const originLat =
+      row.origin_lat !== null && row.origin_lat !== undefined
+        ? Number(row.origin_lat)
+        : null;
+    const originLng =
+      row.origin_lng !== null && row.origin_lng !== undefined
+        ? Number(row.origin_lng)
+        : null;
+    const destLat =
+      row.destination_lat !== null && row.destination_lat !== undefined
+        ? Number(row.destination_lat)
+        : null;
+    const destLng =
+      row.destination_lng !== null && row.destination_lng !== undefined
+        ? Number(row.destination_lng)
+        : null;
+
+    const originMapsUrl =
+      originLat !== null && originLng !== null
+        ? `https://www.google.com/maps/search/?api=1&query=${originLat},${originLng}`
+        : row.origin_city
+          ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(row.origin_city + (row.origin_country ? ', ' + row.origin_country : ''))}`
+          : null;
+
+    const destMapsUrl =
+      destLat !== null && destLng !== null
+        ? `https://www.google.com/maps/search/?api=1&query=${destLat},${destLng}`
+        : row.destination_city
+          ? `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(row.destination_city + (row.destination_country ? ', ' + row.destination_country : ''))}`
+          : null;
+
+    const routeMapsUrl =
+      originLat !== null &&
+      originLng !== null &&
+      destLat !== null &&
+      destLng !== null
+        ? `https://www.google.com/maps/dir/?api=1&origin=${originLat},${originLng}&destination=${destLat},${destLng}`
+        : row.origin_city && row.destination_city
+          ? `https://www.google.com/maps/dir/?api=1&origin=${encodeURIComponent(row.origin_city + (row.origin_country ? ', ' + row.origin_country : ''))}&destination=${encodeURIComponent(row.destination_city + (row.destination_country ? ', ' + row.destination_country : ''))}`
+          : null;
+
     return {
       id: row.id,
       cargo_type: row.cargo_type,
@@ -1463,6 +2023,57 @@ export class CargoRegistrationsService {
         : null,
       agent_name: row.agent_name,
       cargo: row.cargo,
+      origin: {
+        city: row.origin_city || null,
+        country: row.origin_country || null,
+        country_code: row.origin_country_code || null,
+        geoname_id: row.origin_geoname_id
+          ? Number(row.origin_geoname_id)
+          : null,
+        latitude: originLat,
+        longitude: originLng,
+        display_name: row.origin_city
+          ? `${row.origin_city}${row.origin_country ? ', ' + row.origin_country : ''}${row.origin_country_code ? ' (' + row.origin_country_code + ')' : ''}`
+          : null,
+        google_maps_url: originMapsUrl,
+      },
+      origin_city: row.origin_city || null,
+      origin_country: row.origin_country || null,
+      origin_country_code: row.origin_country_code || null,
+      origin_geoname_id: row.origin_geoname_id
+        ? Number(row.origin_geoname_id)
+        : null,
+      destination: {
+        city: row.destination_city || null,
+        country: row.destination_country || null,
+        country_code: row.destination_country_code || null,
+        geoname_id: row.destination_geoname_id
+          ? Number(row.destination_geoname_id)
+          : null,
+        latitude: destLat,
+        longitude: destLng,
+        display_name: row.destination_city
+          ? `${row.destination_city}${row.destination_country ? ', ' + row.destination_country : ''}${row.destination_country_code ? ' (' + row.destination_country_code + ')' : ''}`
+          : null,
+        google_maps_url: destMapsUrl,
+      },
+      destination_city: row.destination_city || null,
+      destination_country: row.destination_country || null,
+      destination_country_code: row.destination_country_code || null,
+      destination_geoname_id: row.destination_geoname_id
+        ? Number(row.destination_geoname_id)
+        : null,
+      route: {
+        origin: row.origin_city || null,
+        destination: row.destination_city || null,
+        origin_display: row.origin_city
+          ? `${row.origin_city}${row.origin_country ? ', ' + row.origin_country : ''}`
+          : null,
+        destination_display: row.destination_city
+          ? `${row.destination_city}${row.destination_country ? ', ' + row.destination_country : ''}`
+          : null,
+        google_maps_dir_url: routeMapsUrl,
+      },
       confirmed_date: row.confirmed_date
         ? this.formatDateStr(row.confirmed_date)
         : null,

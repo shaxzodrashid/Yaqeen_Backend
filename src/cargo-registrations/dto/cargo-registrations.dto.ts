@@ -8,6 +8,8 @@ import {
   IsUUID,
   Matches,
   ValidateNested,
+  IsBoolean,
+  IsInt,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { CreateConsolidationInlineDto } from '../../cargo-consolidations/dto/cargo-consolidations.dto';
@@ -192,6 +194,71 @@ export class CreateCargoRegistrationDto {
   @IsOptional()
   @IsUUID('4', { message: 'employee_id must be a valid UUID' })
   employee_id?: string;
+
+  // Origin Location Fields
+  @IsOptional()
+  @IsString()
+  origin_city?: string;
+
+  @IsOptional()
+  @IsString()
+  origin_country?: string;
+
+  @IsOptional()
+  @IsString()
+  origin_country_code?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  origin_geoname_id?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  origin_lat?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  origin_lng?: number;
+
+  // Destination Location Fields
+  @IsOptional()
+  @IsString()
+  destination_city?: string;
+
+  @IsOptional()
+  @IsString()
+  destination_country?: string;
+
+  @IsOptional()
+  @IsString()
+  destination_country_code?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  destination_geoname_id?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  destination_lat?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  destination_lng?: number;
+
+  // Duplicate Prevention & Idempotency Controls
+  @IsOptional()
+  @IsBoolean()
+  prevent_duplicate?: boolean;
+
+  @IsOptional()
+  @IsString()
+  idempotency_key?: string;
 }
 
 export class UpdateCargoRegistrationDto {
@@ -314,6 +381,62 @@ export class UpdateCargoRegistrationDto {
   @IsOptional()
   @IsUUID('4')
   consolidation_id?: string | null;
+
+  // Origin Location Fields
+  @IsOptional()
+  @IsString()
+  origin_city?: string;
+
+  @IsOptional()
+  @IsString()
+  origin_country?: string;
+
+  @IsOptional()
+  @IsString()
+  origin_country_code?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  origin_geoname_id?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  origin_lat?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  origin_lng?: number;
+
+  // Destination Location Fields
+  @IsOptional()
+  @IsString()
+  destination_city?: string;
+
+  @IsOptional()
+  @IsString()
+  destination_country?: string;
+
+  @IsOptional()
+  @IsString()
+  destination_country_code?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  destination_geoname_id?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  destination_lat?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  destination_lng?: number;
 }
 
 export class QueryCargoRegistrationDto {
@@ -433,6 +556,31 @@ export class QueryCargoRegistrationDto {
   @IsString()
   sell_date?: string;
 
+  // Origin & Destination Query Filters
+  @IsOptional()
+  @IsString()
+  origin_city?: string;
+
+  @IsOptional()
+  @IsString()
+  origin_country_code?: string;
+
+  @IsOptional()
+  @IsString()
+  origin_geoname_id?: string;
+
+  @IsOptional()
+  @IsString()
+  destination_city?: string;
+
+  @IsOptional()
+  @IsString()
+  destination_country_code?: string;
+
+  @IsOptional()
+  @IsString()
+  destination_geoname_id?: string;
+
   @IsOptional()
   @IsString()
   sort_by?: string;
@@ -463,4 +611,53 @@ export class QueryCargoRegistrationDto {
   @IsString()
   @IsIn(['true', 'false', '1', '0'])
   has_consolidation?: string;
+}
+
+export class CheckDuplicateCargoDto {
+  @IsUUID('4', { message: 'client_id must be a valid UUID' })
+  client_id: string;
+
+  @IsOptional()
+  @IsString()
+  container_truck_id?: string;
+
+  @IsOptional()
+  @IsUUID('4')
+  consolidation_id?: string;
+
+  @IsString()
+  @IsNotEmpty({ message: 'cargo is required' })
+  cargo: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['LTL', 'FTL'])
+  cargo_type?: 'LTL' | 'FTL';
+
+  @IsOptional()
+  @IsString()
+  origin_city?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  origin_geoname_id?: number;
+
+  @IsOptional()
+  @IsString()
+  destination_city?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  destination_geoname_id?: number;
+
+  @IsOptional()
+  @IsString()
+  confirmed_date?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  purchase_price?: number;
 }

@@ -3,6 +3,8 @@ import { CargoConsolidationsService } from './cargo-consolidations.service';
 import { KNEX_CONNECTION } from '../database/database.module';
 import { CurrencyService } from '../currency/currency.service';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { validate } from 'class-validator';
+import { plainToInstance } from 'class-transformer';
 import {
   CreateCargoConsolidationDto,
   UpdateCargoConsolidationDto,
@@ -576,6 +578,63 @@ describe('CargoConsolidationsService', () => {
       expect(unlinkMock).toHaveBeenCalledWith({ consolidation_id: null });
       expect(delMock).toHaveBeenCalled();
       expect(res.deleted_id).toBe('cons-1');
+    });
+  });
+
+  describe('CreateCargoConsolidationDto validation', () => {
+    it('should pass validation with valid USD currency and user payload', async () => {
+      const payload = {
+        container_truck_id: 'TRK-00001',
+        container_type: '120m3',
+        max_volume_capacity: 120,
+        max_weight_capacity: 25000,
+        carrier_name: 'Alex',
+        carrier_phone: '+7255293364',
+        origin_place: 'Istanbul',
+        destination_place: 'Tashkent',
+        departure_date: '2026-08-21',
+        estimated_arrival_date: '2026-08-29',
+        loaded_date: '2026-08-23',
+        total_carrier_cost: 3800,
+        carrier_cost_currency: 'USD',
+        status: 'Planning',
+      };
+
+      const dto = plainToInstance(CreateCargoConsolidationDto, payload);
+      const errors = await validate(dto);
+      expect(errors.length).toBe(0);
+    });
+
+    it.each(['UZS', 'RUB', 'USD', 'RMB'])(
+      'should accept valid currency %s',
+      async (curr) => {
+        const payload = {
+          container_truck_id: 'TRK-00001',
+          carrier_cost_currency: curr,
+        };
+        const dto = plainToInstance(CreateCargoConsolidationDto, payload);
+        const errors = await validate(dto);
+        const currencyError = errors.find(
+          (e) => e.property === 'carrier_cost_currency',
+        );
+        expect(currencyError).toBeUndefined();
+      },
+    );
+
+    it('should reject invalid currency with proper message', async () => {
+      const payload = {
+        container_truck_id: 'TRK-00001',
+        carrier_cost_currency: 'EUR',
+      };
+      const dto = plainToInstance(CreateCargoConsolidationDto, payload);
+      const errors = await validate(dto);
+      const currencyError = errors.find(
+        (e) => e.property === 'carrier_cost_currency',
+      );
+      expect(currencyError).toBeDefined();
+      expect(currencyError?.constraints?.isIn).toBe(
+        'carrier_cost_currency must be UZS, RUB, USD, or RMB',
+      );
     });
   });
 });

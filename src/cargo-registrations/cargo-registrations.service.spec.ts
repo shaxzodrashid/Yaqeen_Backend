@@ -1579,5 +1579,130 @@ describe('CargoRegistrationsService', () => {
       expect(res).toBeDefined();
       expect(res.consolidation_id).toBe('new-cons-uuid');
     });
+
+    it('should prevent duplicate registration when prevent_duplicate is true', async () => {
+      const user = { id: 'user-uuid-1', role: 'CEO' };
+      const dto: CreateCargoRegistrationDto = {
+        cargo_type: 'FTL',
+        container_type: '40HQ',
+        container_truck_id: '01A777AA',
+        agent_name: 'FastCargo',
+        cargo: 'Textiles',
+        origin_city: 'Guangzhou',
+        destination_city: 'Tashkent',
+        purchase_price: 2000,
+        purchase_currency: 'USD',
+        sell_price: 3000,
+        sell_currency: 'USD',
+        client_id: 'client-uuid-1',
+        prevent_duplicate: true,
+      };
+
+      knexMock.mockImplementation((tableName: string) => {
+        if (tableName === 'users as u') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ role: 'CEO' }),
+          };
+        }
+        if (tableName === 'users') {
+          return {
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ employee_id: 'emp-uuid-1' }),
+          };
+        }
+        if (tableName === 'employees') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ id: 'emp-uuid-1' }),
+          };
+        }
+        if (tableName === 'clients') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ id: 'client-uuid-1' }),
+          };
+        }
+        if (tableName === 'cargo_registrations as cr') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            whereRaw: jest.fn().mockReturnThis(),
+            whereILike: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'existing-cargo-uuid',
+              cargo: 'Textiles',
+              container_truck_id: '01A777AA',
+              origin_city: 'Guangzhou',
+              destination_city: 'Tashkent',
+            }),
+          };
+        }
+        return {};
+      });
+
+      await expect(service.createCargoRegistration(user, dto)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('should return existing cargo details if duplicate check finds matching record', async () => {
+      knexMock.mockImplementation((tableName: string) => {
+        if (tableName === 'cargo_registrations as cr') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            whereRaw: jest.fn().mockReturnThis(),
+            whereILike: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'existing-dup-uuid',
+              cargo: 'Shoes',
+              container_truck_id: '01A999AA',
+              origin_city: 'Yiwu',
+              destination_city: 'Tashkent',
+            }),
+          };
+        }
+        return {};
+      });
+
+      const check = await service.checkDuplicateCargoRegistration({
+        client_id: 'client-uuid-1',
+        container_truck_id: '01A999AA',
+        cargo: 'Shoes',
+        origin_city: 'Yiwu',
+        destination_city: 'Tashkent',
+      });
+
+      expect(check.is_duplicate).toBe(true);
+      expect(check.existing_cargo_id).toBe('existing-dup-uuid');
+      expect(check.message).toContain('identical cargo entry');
+    });
+
+    it('should report no duplicate when no matching cargo exists', async () => {
+      knexMock.mockImplementation((tableName: string) => {
+        if (tableName === 'cargo_registrations as cr') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            whereRaw: jest.fn().mockReturnThis(),
+            whereILike: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue(null),
+          };
+        }
+        return {};
+      });
+
+      const check = await service.checkDuplicateCargoRegistration({
+        client_id: 'client-uuid-1',
+        container_truck_id: '01A999AA',
+        cargo: 'Unique Machinery',
+        origin_city: 'Istanbul',
+        destination_city: 'Samarkand',
+      });
+
+      expect(check.is_duplicate).toBe(false);
+      expect(check.existing_cargo_id).toBeNull();
+    });
   });
 });
