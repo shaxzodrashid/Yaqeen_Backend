@@ -156,6 +156,10 @@ export class AuthService {
           'register_for_everyone',
         ],
       },
+      {
+        module: 'cargo_consolidations',
+        actions: ['create', 'read', 'update', 'delete', 'assign_cargo'],
+      },
       { module: 'finance', actions: ['create', 'read', 'update', 'delete'] },
       {
         module: 'commercial_offers',
@@ -196,7 +200,15 @@ export class AuthService {
 
     for (const item of systemModules) {
       const mod = item.module;
-      const rawMod: Record<string, boolean> = parsedPermissions[mod] || {};
+      const rawMod: Record<string, boolean> =
+        parsedPermissions[mod] ||
+        (mod === 'cargo_consolidations'
+          ? parsedPermissions['consolidations']
+          : undefined) ||
+        (mod === 'consolidations'
+          ? parsedPermissions['cargo_consolidations']
+          : undefined) ||
+        {};
       const isCeo = user.role === 'CEO' || effectiveRole === 'CEO';
 
       permissions[mod] = {
@@ -205,6 +217,20 @@ export class AuthService {
         update: isCeo ? true : Boolean(rawMod.update),
         delete: isCeo ? true : Boolean(rawMod.delete),
       };
+
+      if (item.actions.includes('assign_cargo')) {
+        permissions[mod].assign_cargo = isCeo
+          ? true
+          : Boolean(
+              rawMod.assign_cargo !== undefined
+                ? rawMod.assign_cargo
+                : rawMod.update !== undefined
+                  ? rawMod.update
+                  : rawMod.create !== undefined
+                    ? rawMod.create
+                    : false,
+            );
+      }
 
       if (item.actions.includes('register_for_everyone')) {
         permissions[mod].register_for_everyone = isCeoOrRop

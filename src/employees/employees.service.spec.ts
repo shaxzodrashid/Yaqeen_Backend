@@ -574,4 +574,103 @@ describe('EmployeesService', () => {
       expect(res.meta.total_revenue.RUB).toBe(200000);
     });
   });
+
+  describe('findEmployeeByUserId', () => {
+    it('should include cargo_consolidations permissions in the returned profile', async () => {
+      const mockUserRow = {
+        user_id: 'usr-1',
+        user_phone: '+998901234567',
+        username: 'john_doe',
+        role: 'EMPLOYEE',
+        role_id: 'role-1',
+        status: 'active',
+        user_is_active: true,
+        user_created_at: new Date(),
+        user_updated_at: new Date(),
+        role_name: 'EMPLOYEE',
+        role_display_name: 'Employee',
+        role_description: 'Standard employee',
+        role_permissions: JSON.stringify({
+          cargo_consolidations: {
+            create: true,
+            read: true,
+            update: true,
+            delete: false,
+            assign_cargo: true,
+          },
+        }),
+        role_is_system: true,
+        employee_id: 'emp-1',
+        first_name: 'John',
+        last_name: 'Doe',
+        employee_phone: '+998901234567',
+        secondary_phone: null,
+        address: 'Tashkent',
+        fixed_salary: '1000',
+        currency: 'USD',
+        color: '#ff0000',
+        employee_picture_path: null,
+        employee_is_active: true,
+        department_id: 'dep-1',
+        department_name: 'logistics',
+        department_display_name: 'Logistics',
+      };
+
+      const mockQueryBuilder: any = {
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        whereIn: jest.fn().mockReturnThis(),
+        count: jest.fn().mockReturnThis(),
+        sum: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockResolvedValue([]),
+        orderBy: jest.fn().mockReturnThis(),
+        first: jest.fn().mockResolvedValue(mockUserRow),
+      };
+
+      const customKnex: any = jest.fn(() => mockQueryBuilder);
+      customKnex.schema = {
+        hasTable: jest.fn().mockResolvedValue(false),
+        hasColumn: jest.fn().mockResolvedValue(true),
+      };
+
+      const customModule: TestingModule = await Test.createTestingModule({
+        providers: [
+          EmployeesService,
+          {
+            provide: KNEX_CONNECTION,
+            useValue: customKnex,
+          },
+          {
+            provide: MinioService,
+            useValue: mockMinioService,
+          },
+          {
+            provide: RedisService,
+            useValue: mockRedisService,
+          },
+        ],
+      }).compile();
+
+      const customService =
+        customModule.get<EmployeesService>(EmployeesService);
+      const res = await customService.findEmployeeByUserId('usr-1');
+
+      expect(res.permissions).toBeDefined();
+      expect(res.permissions.cargo_consolidations).toEqual({
+        create: true,
+        read: true,
+        update: true,
+        delete: false,
+        assign_cargo: true,
+      });
+      expect(res.user.permissions.cargo_consolidations).toEqual({
+        create: true,
+        read: true,
+        update: true,
+        delete: false,
+        assign_cargo: true,
+      });
+    });
+  });
 });

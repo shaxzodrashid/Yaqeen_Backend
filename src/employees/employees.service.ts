@@ -222,6 +222,9 @@ export interface ModulePermissions {
   read: boolean;
   update: boolean;
   delete: boolean;
+  assign_cargo?: boolean;
+  register_for_everyone?: boolean;
+  can_work_with_all_clients?: boolean;
 }
 
 export interface UserEmployeeResponse {
@@ -1669,6 +1672,7 @@ export class EmployeesService implements OnModuleInit {
       'departments',
       'cargo_kpi',
       'cargo_registrations',
+      'cargo_consolidations',
       'finance',
       'commercial_offers',
       'tasks',
@@ -1702,11 +1706,22 @@ export class EmployeesService implements OnModuleInit {
         : {}
     ) as Record<string, Record<string, boolean>>;
 
+    const activeRoleName = user.role_name || user.role;
+    const isCeo = user.role === 'CEO' || activeRoleName === 'CEO';
+    const isCeoOrRop = isCeo || user.role === 'ROP' || activeRoleName === 'ROP';
+
     const permissions: Record<string, ModulePermissions> = {};
 
     for (const mod of systemModules) {
-      const rawMod = parsedPermissions[mod] || {};
-      const isCeo = user.role === 'CEO';
+      const rawMod =
+        parsedPermissions[mod] ||
+        (mod === 'cargo_consolidations'
+          ? parsedPermissions['consolidations']
+          : undefined) ||
+        (mod === 'consolidations'
+          ? parsedPermissions['cargo_consolidations']
+          : undefined) ||
+        {};
 
       permissions[mod] = {
         create: isCeo ? true : Boolean(rawMod.create),
@@ -1714,9 +1729,33 @@ export class EmployeesService implements OnModuleInit {
         update: isCeo ? true : Boolean(rawMod.update),
         delete: isCeo ? true : Boolean(rawMod.delete),
       };
-    }
 
-    const activeRoleName = user.role_name || user.role;
+      if (mod === 'cargo_consolidations') {
+        permissions[mod].assign_cargo = isCeo
+          ? true
+          : Boolean(
+              rawMod.assign_cargo !== undefined
+                ? rawMod.assign_cargo
+                : rawMod.update !== undefined
+                  ? rawMod.update
+                  : rawMod.create !== undefined
+                    ? rawMod.create
+                    : false,
+            );
+      }
+
+      if (mod === 'cargo_registrations') {
+        permissions[mod].register_for_everyone = isCeoOrRop
+          ? true
+          : Boolean(rawMod.register_for_everyone);
+      }
+
+      if (mod === 'clients') {
+        permissions[mod].can_work_with_all_clients = isCeoOrRop
+          ? true
+          : Boolean(rawMod.can_work_with_all_clients);
+      }
+    }
     const defaultCurrency = user.currency || 'UZS';
 
     let metrics: EmployeeMetrics = {
