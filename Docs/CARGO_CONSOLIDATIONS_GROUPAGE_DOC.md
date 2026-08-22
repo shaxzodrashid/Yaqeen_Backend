@@ -175,6 +175,8 @@ Returns a paginated list of all consolidations, complete with their capacity uti
   "meta": {
     "total": 1,
     "total_active": 1,
+    "volume_capacity_total": 86.0,
+    "volume_capacity_used": 17.5,
     "limit": 10,
     "offset": 0,
     "consolidated_net_margin": {

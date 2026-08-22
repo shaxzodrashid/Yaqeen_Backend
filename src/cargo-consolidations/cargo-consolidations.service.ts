@@ -330,13 +330,14 @@ export class CargoConsolidationsService {
       baseWhere.where('cc.arrived_date', '<=', query.arrived_end_date);
     }
 
-    // Aggregation query: count total, active count, and net margin across matching consolidations
+    // Aggregation query: count total, active count, volume capacities, and net margin across matching consolidations
     const innerAggQuery = baseWhere
       .clone()
       .leftJoin('cargo_registrations as cr', 'cc.id', 'cr.consolidation_id')
       .select(
         'cc.id',
         'cc.status',
+        'cc.max_volume_capacity',
         this.knex.raw(`
           CASE
             WHEN cc.carrier_cost_currency = 'UZS' AND cc.carrier_cost_usd_rate > 0 THEN COALESCE(cc.total_carrier_cost, 0) / cc.carrier_cost_usd_rate
@@ -367,6 +368,9 @@ export class CargoConsolidationsService {
             END
           ), 0) as total_cargos_purchase_usd
         `),
+        this.knex.raw(`
+          COALESCE(SUM(CASE WHEN cr.cargo_type = 'LTL' THEN cr.volume ELSE 0 END), 0) as total_assigned_volume
+        `),
       )
       .groupBy('cc.id');
 
@@ -377,6 +381,12 @@ export class CargoConsolidationsService {
       ),
       this.knex.raw(
         'COALESCE(SUM(t.total_cargos_sell_usd - t.total_cargos_purchase_usd - t.carrier_cost_usd), 0) as total_net_margin_usd',
+      ),
+      this.knex.raw(
+        'COALESCE(SUM(t.max_volume_capacity), 0) as volume_capacity_total',
+      ),
+      this.knex.raw(
+        'COALESCE(SUM(t.total_assigned_volume), 0) as volume_capacity_used',
       ),
     );
 
@@ -390,6 +400,10 @@ export class CargoConsolidationsService {
       10,
     );
     const totalNetMarginUsd = Number(aggResult?.total_net_margin_usd || 0);
+    const volumeCapacityTotal =
+      Math.round(Number(aggResult?.volume_capacity_total || 0) * 100) / 100;
+    const volumeCapacityUsed =
+      Math.round(Number(aggResult?.volume_capacity_used || 0) * 100) / 100;
 
     const rates = await this.currencyService.getLatestRates();
     const usdRate = rates['USD']
@@ -619,6 +633,8 @@ export class CargoConsolidationsService {
       meta: {
         total,
         total_active: totalActive,
+        volume_capacity_total: volumeCapacityTotal,
+        volume_capacity_used: volumeCapacityUsed,
         limit,
         offset,
         consolidated_net_margin: consolidatedNetMarginAll,

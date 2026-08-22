@@ -399,6 +399,8 @@ describe('CargoConsolidationsService', () => {
                 total_count: '1',
                 total_active: '1',
                 total_net_margin_usd: '300.0',
+                volume_capacity_total: '86.0',
+                volume_capacity_used: '15.0',
               }),
             }),
           };
@@ -435,6 +437,8 @@ describe('CargoConsolidationsService', () => {
       expect(result).toBeDefined();
       expect(result.meta.total).toBe(1);
       expect(result.meta.total_active).toBe(1);
+      expect(result.meta.volume_capacity_total).toBe(86.0);
+      expect(result.meta.volume_capacity_used).toBe(15.0);
       expect(result.meta.consolidated_net_margin).toEqual({
         USD: 300,
         UZS: 3855000,
@@ -457,7 +461,7 @@ describe('CargoConsolidationsService', () => {
       expect(result.data[0].cargos[0].net_yield_usd).toBe(800.0);
     });
 
-    it('should handle empty results gracefully with zeros in consolidated_net_margin', async () => {
+    it('should handle empty results gracefully with zeros in consolidated_net_margin and volume capacities', async () => {
       const innerAggMock = {
         as: jest.fn().mockReturnValue('t'),
       };
@@ -487,6 +491,8 @@ describe('CargoConsolidationsService', () => {
                 total_count: '0',
                 total_active: '0',
                 total_net_margin_usd: '0',
+                volume_capacity_total: '0',
+                volume_capacity_used: '0',
               }),
             }),
           };
@@ -499,6 +505,8 @@ describe('CargoConsolidationsService', () => {
       expect(result).toBeDefined();
       expect(result.meta.total).toBe(0);
       expect(result.meta.total_active).toBe(0);
+      expect(result.meta.volume_capacity_total).toBe(0);
+      expect(result.meta.volume_capacity_used).toBe(0);
       expect(result.meta.consolidated_net_margin).toEqual({
         USD: 0,
         UZS: 0,
