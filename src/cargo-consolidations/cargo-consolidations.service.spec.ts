@@ -123,7 +123,7 @@ describe('CargoConsolidationsService', () => {
                 destination_place: 'Tashkent',
                 total_carrier_cost: 3500,
                 carrier_cost_currency: 'USD',
-                status: 'Planning',
+                status: 'Waiting',
               });
             }),
             insert: jest.fn().mockReturnValue({
@@ -217,7 +217,7 @@ describe('CargoConsolidationsService', () => {
                 max_weight_capacity: 22000.0,
                 origin_place: 'Istanbul',
                 destination_place: 'Tashkent',
-                status: 'Loading',
+                status: 'Waiting',
                 total_cargos_count: '2',
                 total_assigned_volume: '30.0',
                 total_assigned_weight: '7500.0',
@@ -353,7 +353,7 @@ describe('CargoConsolidationsService', () => {
             container_type: '86m3',
             max_volume_capacity: 86.0,
             max_weight_capacity: 22000.0,
-            status: 'Loading',
+            status: 'Waiting',
             total_cargos_count: '1',
             total_assigned_volume: '15.0',
             total_assigned_weight: '3000.0',
@@ -597,13 +597,56 @@ describe('CargoConsolidationsService', () => {
         loaded_date: '2026-08-23',
         total_carrier_cost: 3800,
         carrier_cost_currency: 'USD',
-        status: 'Planning',
+        status: 'Waiting',
       };
 
       const dto = plainToInstance(CreateCargoConsolidationDto, payload);
       const errors = await validate(dto);
       expect(errors.length).toBe(0);
     });
+
+    it.each([
+      'Waiting',
+      'Station',
+      'On the way',
+      'On the border',
+      'Reload',
+      'Arrived',
+    ])('should accept valid consolidation status "%s"', async (validStatus) => {
+      const payload = {
+        container_truck_id: 'TRK-00001',
+        status: validStatus,
+      };
+      const dto = plainToInstance(CreateCargoConsolidationDto, payload);
+      const errors = await validate(dto);
+      const statusError = errors.find((e) => e.property === 'status');
+      expect(statusError).toBeUndefined();
+    });
+
+    it.each([
+      'Planning',
+      'Loading',
+      'Completed',
+      'In Transit',
+      'Border',
+      'Delivered',
+      'InvalidStatus',
+    ])(
+      'should reject invalid/legacy consolidation status "%s"',
+      async (invalidStatus) => {
+        const payload = {
+          container_truck_id: 'TRK-00001',
+          status: invalidStatus,
+        };
+        const dto = plainToInstance(CreateCargoConsolidationDto, payload);
+        const errors = await validate(dto);
+        const statusError = errors.find((e) => e.property === 'status');
+        expect(statusError).toBeDefined();
+        expect(statusError?.constraints?.isIn).toContain(
+          'status must be one of: Waiting, Station, On the way, On the border, Reload, Arrived',
+        );
+      },
+    );
 
     it.each(['UZS', 'RUB', 'USD', 'RMB'])(
       'should accept valid currency %s',

@@ -247,7 +247,7 @@ export class CargoConsolidationsService {
         total_carrier_cost: dto.total_carrier_cost || 0,
         carrier_cost_currency: carrierCurrency,
         carrier_cost_usd_rate: carrierCostUsdRate,
-        status: dto.status || 'Planning',
+        status: dto.status || 'Waiting',
         description: dto.description || null,
         created_by_user_id: user?.id || null,
       })
@@ -562,7 +562,7 @@ export class CargoConsolidationsService {
           "COALESCE(SUM(CASE WHEN cr.cargo_type = 'LTL' THEN cr.weight ELSE 0 END), 0) as total_assigned_weight",
         ),
       )
-      .whereNotIn('cc.status', ['Completed', 'Arrived'])
+      .whereNotIn('cc.status', ['Arrived'])
       .groupBy('cc.id')
       .orderBy('cc.created_at', 'desc')
       .limit(50);

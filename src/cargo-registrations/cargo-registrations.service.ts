@@ -584,7 +584,7 @@ export class CargoRegistrationsService {
             ? nc.destination_place.trim()
             : destPlace.city || null,
           departure_date: nc.departure_date || null,
-          status: nc.status || 'Planning',
+          status: nc.status || 'Waiting',
           description: nc.description || null,
           created_by_user_id: user?.id || null,
         })

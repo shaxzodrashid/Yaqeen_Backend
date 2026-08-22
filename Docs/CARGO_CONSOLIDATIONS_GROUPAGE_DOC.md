@@ -30,7 +30,7 @@ erDiagram
         date arrived_date
         decimal total_carrier_cost "Total freight cost for the vehicle"
         string carrier_cost_currency "USD | UZS | RUB | RMB"
-        string status "Planning | Loading | On the way | Station | On the border | Reload | Arrived | Completed"
+        string status "Waiting | Station | On the way | On the border | Reload | Arrived"
     }
 
     CARGO_REGISTRATIONS {
@@ -53,37 +53,37 @@ erDiagram
 
 ### `cargo_consolidations` Table
 
-| Column                                | Type            | Constraints                                           | Description                                                                                               |
-| :------------------------------------ | :-------------- | :---------------------------------------------------- | :-------------------------------------------------------------------------------------------------------- |
-| `id`                                  | `UUID`          | `PRIMARY KEY`, Default: `uuid_generate_v4()`          | Unique consolidation record identifier                                                                    |
-| `consolidation_code`                  | `VARCHAR(50)`   | `NOT NULL`, `UNIQUE`, Indexed                         | Auto-generated code (e.g., `CNS-202608-0001`) or custom code                                              |
-| `container_truck_id`                  | `VARCHAR(100)`  | `NOT NULL`, Indexed                                   | Vehicle plate or container number (e.g. `01A777AA`, `TRK-9021`)                                           |
-| `container_type`                      | `VARCHAR(50)`   | `NULLABLE`                                            | Body/Container type (e.g. `86m3`, `120m3`, `40HQ`, `Tent`)                                                |
-| `max_volume_capacity`                 | `DECIMAL(12,4)` | `NULLABLE`                                            | Maximum volume capacity in $m^3$                                                                          |
-| `max_weight_capacity`                 | `DECIMAL(12,4)` | `NULLABLE`                                            | Maximum weight capacity in $kg$                                                                           |
-| `carrier_name`                        | `VARCHAR(255)`  | `NULLABLE`                                            | Transportation company or driver full name                                                                |
-| `carrier_phone`                       | `VARCHAR(50)`   | `NULLABLE`                                            | Driver/Carrier contact phone number                                                                       |
-| `origin_place`                        | `VARCHAR(255)`  | `NULLABLE`                                            | Origin loading station/city (e.g., `Beijing`, `Istanbul`, `Yiwu`)                                         |
-| `origin_country`                      | `VARCHAR(100)`  | `NULLABLE`                                            | Origin country name (e.g., `China`, `Turkey`)                                                             |
-| `origin_country_code`                 | `VARCHAR(10)`   | `NULLABLE`                                            | Origin 2-letter ISO country code (`CN`, `TR`)                                                             |
-| `origin_geoname_id`                   | `INTEGER`       | `NULLABLE`, Indexed                                   | Origin global GeoNames ID                                                                                 |
-| `origin_lat` / `origin_lng`           | `DECIMAL(10,7)` | `NULLABLE`                                            | Origin geographic coordinates                                                                             |
-| `destination_place`                   | `VARCHAR(255)`  | `NULLABLE`                                            | Final delivery city/customs (e.g., `Tashkent`, `Samarkand`)                                               |
-| `destination_country`                 | `VARCHAR(100)`  | `NULLABLE`                                            | Destination country name (e.g., `Uzbekistan`)                                                             |
-| `destination_country_code`            | `VARCHAR(10)`   | `NULLABLE`                                            | Destination 2-letter ISO country code (`UZ`)                                                              |
-| `destination_geoname_id`              | `INTEGER`       | `NULLABLE`, Indexed                                   | Destination global GeoNames ID                                                                            |
-| `destination_lat` / `destination_lng` | `DECIMAL(10,7)` | `NULLABLE`                                            | Destination geographic coordinates                                                                        |
-| `loaded_date`                         | `DATE`          | `NULLABLE`                                            | Loading completion date (`YYYY-MM-DD`)                                                                    |
-| `departure_date`                      | `DATE`          | `NULLABLE`, Indexed                                   | Truck departure date (`YYYY-MM-DD`)                                                                       |
-| `estimated_arrival_date`              | `DATE`          | `NULLABLE`                                            | Expected arrival date (`YYYY-MM-DD`)                                                                      |
-| `arrived_date`                        | `DATE`          | `NULLABLE`, Indexed                                   | Actual arrival date (`YYYY-MM-DD`)                                                                        |
-| `total_carrier_cost`                  | `DECIMAL(14,2)` | `NOT NULL`, Default: `0.00`                           | Full carrier cost paid for the whole truck/container                                                      |
-| `carrier_cost_currency`               | `VARCHAR(10)`   | `NOT NULL`, Default: `'USD'`                          | Currency for carrier cost (`USD`, `UZS`, `RUB`, `RMB`)                                                    |
-| `carrier_cost_usd_rate`               | `DECIMAL(14,4)` | `NULLABLE`                                            | Rate snapshot used to convert carrier cost to USD                                                         |
-| `status`                              | `VARCHAR(50)`   | `NOT NULL`, Default: `'Planning'`, Indexed            | Status: `Planning`, `Loading`, `On the way`, `Station`, `On the border`, `Reload`, `Arrived`, `Completed` |
-| `description`                         | `TEXT`          | `NULLABLE`                                            | Optional notes or customs documentation details                                                           |
-| `created_by_user_id`                  | `UUID`          | `NULLABLE`, `REFERENCES users(id) ON DELETE SET NULL` | Creator user account                                                                                      |
-| `created_at` / `updated_at`           | `TIMESTAMP`     | `NOT NULL`, Default: `NOW()`                          | Audit timestamps                                                                                          |
+| Column                                | Type            | Constraints                                           | Description                                                                      |
+| :------------------------------------ | :-------------- | :---------------------------------------------------- | :------------------------------------------------------------------------------- |
+| `id`                                  | `UUID`          | `PRIMARY KEY`, Default: `uuid_generate_v4()`          | Unique consolidation record identifier                                           |
+| `consolidation_code`                  | `VARCHAR(50)`   | `NOT NULL`, `UNIQUE`, Indexed                         | Auto-generated code (e.g., `CNS-202608-0001`) or custom code                     |
+| `container_truck_id`                  | `VARCHAR(100)`  | `NOT NULL`, Indexed                                   | Vehicle plate or container number (e.g. `01A777AA`, `TRK-9021`)                  |
+| `container_type`                      | `VARCHAR(50)`   | `NULLABLE`                                            | Body/Container type (e.g. `86m3`, `120m3`, `40HQ`, `Tent`)                       |
+| `max_volume_capacity`                 | `DECIMAL(12,4)` | `NULLABLE`                                            | Maximum volume capacity in $m^3$                                                 |
+| `max_weight_capacity`                 | `DECIMAL(12,4)` | `NULLABLE`                                            | Maximum weight capacity in $kg$                                                  |
+| `carrier_name`                        | `VARCHAR(255)`  | `NULLABLE`                                            | Transportation company or driver full name                                       |
+| `carrier_phone`                       | `VARCHAR(50)`   | `NULLABLE`                                            | Driver/Carrier contact phone number                                              |
+| `origin_place`                        | `VARCHAR(255)`  | `NULLABLE`                                            | Origin loading station/city (e.g., `Beijing`, `Istanbul`, `Yiwu`)                |
+| `origin_country`                      | `VARCHAR(100)`  | `NULLABLE`                                            | Origin country name (e.g., `China`, `Turkey`)                                    |
+| `origin_country_code`                 | `VARCHAR(10)`   | `NULLABLE`                                            | Origin 2-letter ISO country code (`CN`, `TR`)                                    |
+| `origin_geoname_id`                   | `INTEGER`       | `NULLABLE`, Indexed                                   | Origin global GeoNames ID                                                        |
+| `origin_lat` / `origin_lng`           | `DECIMAL(10,7)` | `NULLABLE`                                            | Origin geographic coordinates                                                    |
+| `destination_place`                   | `VARCHAR(255)`  | `NULLABLE`                                            | Final delivery city/customs (e.g., `Tashkent`, `Samarkand`)                      |
+| `destination_country`                 | `VARCHAR(100)`  | `NULLABLE`                                            | Destination country name (e.g., `Uzbekistan`)                                    |
+| `destination_country_code`            | `VARCHAR(10)`   | `NULLABLE`                                            | Destination 2-letter ISO country code (`UZ`)                                     |
+| `destination_geoname_id`              | `INTEGER`       | `NULLABLE`, Indexed                                   | Destination global GeoNames ID                                                   |
+| `destination_lat` / `destination_lng` | `DECIMAL(10,7)` | `NULLABLE`                                            | Destination geographic coordinates                                               |
+| `loaded_date`                         | `DATE`          | `NULLABLE`                                            | Loading completion date (`YYYY-MM-DD`)                                           |
+| `departure_date`                      | `DATE`          | `NULLABLE`, Indexed                                   | Truck departure date (`YYYY-MM-DD`)                                              |
+| `estimated_arrival_date`              | `DATE`          | `NULLABLE`                                            | Expected arrival date (`YYYY-MM-DD`)                                             |
+| `arrived_date`                        | `DATE`          | `NULLABLE`, Indexed                                   | Actual arrival date (`YYYY-MM-DD`)                                               |
+| `total_carrier_cost`                  | `DECIMAL(14,2)` | `NOT NULL`, Default: `0.00`                           | Full carrier cost paid for the whole truck/container                             |
+| `carrier_cost_currency`               | `VARCHAR(10)`   | `NOT NULL`, Default: `'USD'`                          | Currency for carrier cost (`USD`, `UZS`, `RUB`, `RMB`)                           |
+| `carrier_cost_usd_rate`               | `DECIMAL(14,4)` | `NULLABLE`                                            | Rate snapshot used to convert carrier cost to USD                                |
+| `status`                              | `VARCHAR(50)`   | `NOT NULL`, Default: `'Waiting'`, Indexed             | Status: `Waiting`, `Station`, `On the way`, `On the border`, `Reload`, `Arrived` |
+| `description`                         | `TEXT`          | `NULLABLE`                                            | Optional notes or customs documentation details                                  |
+| `created_by_user_id`                  | `UUID`          | `NULLABLE`, `REFERENCES users(id) ON DELETE SET NULL` | Creator user account                                                             |
+| `created_at` / `updated_at`           | `TIMESTAMP`     | `NOT NULL`, Default: `NOW()`                          | Audit timestamps                                                                 |
 
 ### `cargo_registrations` Alteration
 
@@ -158,7 +158,7 @@ Returns a paginated list of all consolidations, complete with their capacity uti
 - `page` (optional number, default: 1)
 - `limit` (optional number, default: 10)
 - `offset` (optional number)
-- `status` (optional string): Filter by status (`Planning`, `Loading`, `On the way`, `Station`, `On the border`, `Reload`, `Arrived`, `Completed`)
+- `status` (optional string): Filter by status (`Waiting`, `Station`, `On the way`, `On the border`, `Reload`, `Arrived`)
 - `search` (optional string): Multi-field search (code, truck plate, carrier, origin, destination)
 - `origin_place` (optional string)
 - `destination_place` (optional string)
@@ -372,7 +372,7 @@ Retrieves full operational and financial details of a specific consolidation (id
   "estimated_arrival_date": "2026-09-02", // Optional (YYYY-MM-DD)
   "total_carrier_cost": 3500, // Optional. Truck freight cost
   "carrier_cost_currency": "USD", // Optional. "USD" | "UZS" | "RUB" | "RMB"
-  "status": "Loading", // Optional. Default "Planning"
+  "status": "Waiting", // Optional. Default "Waiting"
   "description": "Chemicals & Textile groupage batch",
   "cargo_registration_ids": [
     // Optional. Attach existing cargos immediately
@@ -478,7 +478,7 @@ Purpose-built for the UI autocomplete / searchable select picker. Returns active
     "consolidation_code": "CNS-202608-0001",
     "container_truck_id": "01A777AA",
     "container_type": "86m3",
-    "status": "Loading",
+    "status": "Waiting",
     "carrier_name": "Baytur Turkish",
     "origin_place": "Istanbul",
     "destination_place": "Tashkent",
@@ -491,7 +491,7 @@ Purpose-built for the UI autocomplete / searchable select picker. Returns active
     "max_weight_capacity": 22000.0,
     "assigned_weight": 4200.0,
     "remaining_weight": 17800.0,
-    "label": "01A777AA [CNS-202608-0001] - 17.5/86.0 m³ (Istanbul -> Tashkent) • Loading"
+    "label": "01A777AA [CNS-202608-0001] - 17.5/86.0 m³ (Istanbul -> Tashkent) • Waiting"
   }
 ]
 ```

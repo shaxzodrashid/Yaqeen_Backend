@@ -1459,7 +1459,7 @@ describe('CargoRegistrationsService', () => {
               container_truck_id: 'TRK-9090',
               consolidation_id: 'cons-uuid-1',
               consolidation_code: 'CNS-202608-0001',
-              consolidation_status: 'Planning',
+              consolidation_status: 'Waiting',
               agent_name: 'Test Agent',
               cargo: 'Auto Parts',
               purchase_price: 500,
