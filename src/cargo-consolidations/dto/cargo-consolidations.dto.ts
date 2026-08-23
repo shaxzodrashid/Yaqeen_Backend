@@ -11,7 +11,18 @@ import {
   ArrayMinSize,
   IsBoolean,
 } from 'class-validator';
-import { Type } from 'class-transformer';
+import { Type, Transform } from 'class-transformer';
+
+export const ALLOWED_TRANSPORT_TYPES = [
+  'auto',
+  'railway',
+  'air',
+  'sea',
+  'other',
+] as const;
+export type ConsolidationTransportType =
+  (typeof ALLOWED_TRANSPORT_TYPES)[number];
+
 export const ALLOWED_CURRENCIES = ['UZS', 'RUB', 'USD', 'RMB'] as const;
 export type ConsolidationCurrency = (typeof ALLOWED_CURRENCIES)[number];
 
@@ -46,6 +57,14 @@ export class CreateCargoConsolidationDto {
   @IsOptional()
   @IsString()
   container_type?: string;
+
+  @IsOptional()
+  @IsArray({ message: 'transport_types must be an array of transport types' })
+  @IsIn(ALLOWED_TRANSPORT_TYPES, {
+    each: true,
+    message: `Each transport_type must be one of: ${ALLOWED_TRANSPORT_TYPES.join(', ')}`,
+  })
+  transport_types?: ConsolidationTransportType[];
 
   @IsOptional()
   @Type(() => Number)
@@ -152,6 +171,14 @@ export class UpdateCargoConsolidationDto {
   container_type?: string;
 
   @IsOptional()
+  @IsArray({ message: 'transport_types must be an array of transport types' })
+  @IsIn(ALLOWED_TRANSPORT_TYPES, {
+    each: true,
+    message: `Each transport_type must be one of: ${ALLOWED_TRANSPORT_TYPES.join(', ')}`,
+  })
+  transport_types?: ConsolidationTransportType[];
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber()
   @Min(0)
@@ -226,6 +253,10 @@ export class UpdateCargoConsolidationDto {
   @IsOptional()
   @IsBoolean()
   sync_dates_to_cargos?: boolean;
+
+  @IsOptional()
+  @IsBoolean()
+  sync_transport_types_to_cargos?: boolean;
 }
 
 export class QueryCargoConsolidationDto {
@@ -244,6 +275,24 @@ export class QueryCargoConsolidationDto {
   @IsOptional()
   @IsString()
   status?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string') {
+      return value
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+    }
+    return value;
+  })
+  @IsArray()
+  @IsIn(ALLOWED_TRANSPORT_TYPES, {
+    each: true,
+    message: `Each transport_type must be one of: ${ALLOWED_TRANSPORT_TYPES.join(', ')}`,
+  })
+  transport_types?: ConsolidationTransportType[];
 
   @IsOptional()
   @IsString()
@@ -332,6 +381,14 @@ export class CreateConsolidationInlineDto {
   @IsOptional()
   @IsString()
   container_type?: string;
+
+  @IsOptional()
+  @IsArray({ message: 'transport_types must be an array of transport types' })
+  @IsIn(ALLOWED_TRANSPORT_TYPES, {
+    each: true,
+    message: `Each transport_type must be one of: ${ALLOWED_TRANSPORT_TYPES.join(', ')}`,
+  })
+  transport_types?: ConsolidationTransportType[];
 
   @IsOptional()
   @Type(() => Number)

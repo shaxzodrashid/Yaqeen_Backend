@@ -46,7 +46,6 @@ async function run() {
   const phone = '998998887766';
   const formattedPhone = '+998 99 888-77-66';
   let employeeId: string | undefined = undefined;
-  let userId: string | undefined = undefined;
 
   try {
     // 1. Cleanup old test data
@@ -93,7 +92,7 @@ async function run() {
     // Create user in Open status
     console.log('Creating active user...');
     const passwordHash = await bcrypt.hash('password123', 10);
-    const [user] = await knex('users')
+    await knex('users')
       .insert({
         employee_id: employee.id,
         phone_number: phone,
@@ -104,7 +103,6 @@ async function run() {
         is_active: true,
       })
       .returning('*');
-    userId = user.id;
 
     // Generate fresh JWT token
     console.log('Generating fresh token via AuthService...');

@@ -96,7 +96,7 @@ export class CommercialOffersPdfService {
         doc.end();
       } catch (error) {
         this.logger.error('Failed to generate PDF', error);
-        reject(error);
+        reject(error instanceof Error ? error : new Error(String(error)));
       }
     });
   }

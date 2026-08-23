@@ -18,6 +18,7 @@ import {
   QueryCargoRegistrationDto,
   CheckDuplicateCargoDto,
   ALLOWED_CONTAINER_TYPES,
+  TransportType,
   CARGO_STATUSES,
 } from './dto/cargo-registrations.dto';
 
@@ -31,6 +32,61 @@ export class CargoRegistrationsService {
     @Optional() private readonly redisService?: RedisService,
     @Optional() private readonly locationsService?: LocationsService,
   ) {}
+
+  /**
+   * Infer default transport type from container_type, cargo_type, or truck ID.
+   */
+  inferTransportType(
+    containerType?: string | null,
+    cargoType?: string | null,
+    truckOrContainerId?: string | null,
+  ): TransportType {
+    const cType = (containerType || '').toLowerCase().trim();
+    const id = (truckOrContainerId || '').toLowerCase().trim();
+
+    if (
+      cType.includes('air') ||
+      cType.includes('avia') ||
+      cType.includes('plane') ||
+      cType.includes('flight') ||
+      id.includes('air')
+    ) {
+      return 'air';
+    }
+
+    if (
+      cType.includes('rail') ||
+      cType.includes('train') ||
+      cType.includes('poezd') ||
+      cType.includes('temir') ||
+      cType.includes('20gp') ||
+      cType.includes('20hq') ||
+      cType.includes('40gp') ||
+      cType.includes('40hq') ||
+      cType.includes('40hc') ||
+      cType.includes('45hq') ||
+      cType.includes('45hc') ||
+      cType.includes('40 gp') ||
+      cType.includes('40 hc') ||
+      cType.includes('45 hc')
+    ) {
+      return 'railway';
+    }
+
+    if (
+      cType.includes('sea') ||
+      cType.includes('ship') ||
+      cType.includes('vessel') ||
+      cType.includes('ocean') ||
+      cType.includes('dengiz') ||
+      cType.includes('marine') ||
+      cType.includes('port')
+    ) {
+      return 'sea';
+    }
+
+    return 'auto';
+  }
 
   /**
    * Generates deterministic Redis cache key for cargo registration list queries.
@@ -562,11 +618,25 @@ export class CargoRegistrationsService {
       }
       const code = `${prefix}${String(seq).padStart(4, '0')}`;
 
+      let consTransportTypes: string[] = ['auto'];
+      if (nc.transport_types && nc.transport_types.length > 0) {
+        consTransportTypes = nc.transport_types;
+      } else if (nc.container_type) {
+        consTransportTypes = [
+          this.inferTransportType(
+            nc.container_type,
+            null,
+            nc.container_truck_id,
+          ),
+        ];
+      }
+
       const [newConsInserted] = await this.knex('cargo_consolidations')
         .insert({
           consolidation_code: code,
           container_truck_id: nc.container_truck_id.trim(),
           container_type: nc.container_type ? nc.container_type.trim() : null,
+          transport_types: consTransportTypes,
           max_volume_capacity:
             nc.max_volume_capacity !== undefined
               ? nc.max_volume_capacity
@@ -650,6 +720,38 @@ export class CargoRegistrationsService {
       }
     }
 
+    let finalTransportTypes: string[] = ['auto'];
+    if (dto.transport_types && dto.transport_types.length > 0) {
+      finalTransportTypes = dto.transport_types;
+    } else if (finalConsolidationId) {
+      const parentCons = await this.knex('cargo_consolidations')
+        .where('id', finalConsolidationId)
+        .first();
+      if (
+        parentCons &&
+        Array.isArray(parentCons.transport_types) &&
+        parentCons.transport_types.length > 0
+      ) {
+        finalTransportTypes = parentCons.transport_types;
+      } else {
+        finalTransportTypes = [
+          this.inferTransportType(
+            finalContainerType,
+            dto.cargo_type,
+            finalContainerTruckId,
+          ),
+        ];
+      }
+    } else {
+      finalTransportTypes = [
+        this.inferTransportType(
+          finalContainerType,
+          dto.cargo_type,
+          finalContainerTruckId,
+        ),
+      ];
+    }
+
     const [inserted] = await this.knex('cargo_registrations')
       .insert({
         cargo_type: dto.cargo_type,
@@ -659,6 +761,7 @@ export class CargoRegistrationsService {
           dto.cargo_type === 'FTL' && finalContainerType
             ? finalContainerType
             : finalContainerType || null,
+        transport_types: finalTransportTypes,
         container_truck_id: finalContainerTruckId,
         consolidation_id: finalConsolidationId,
         agent_name: dto.agent_name.trim(),
@@ -833,6 +936,9 @@ export class CargoRegistrationsService {
       updatePayload.volume = null;
       updatePayload.weight = null;
     }
+
+    if (dto.transport_types !== undefined)
+      updatePayload.transport_types = dto.transport_types;
 
     if (dto.container_truck_id !== undefined)
       updatePayload.container_truck_id = dto.container_truck_id.trim();
@@ -1142,6 +1248,11 @@ export class CargoRegistrationsService {
     }
     if (query.container_type) {
       baseQuery.where('cr.container_type', query.container_type);
+    }
+    if (query.transport_types && query.transport_types.length > 0) {
+      baseQuery.whereRaw('cr.transport_types && ?::text[]', [
+        query.transport_types,
+      ]);
     }
     if (query.consolidation_id) {
       baseQuery.where('cr.consolidation_id', query.consolidation_id);
@@ -1579,6 +1690,17 @@ export class CargoRegistrationsService {
             volume: r.volume ? Number(r.volume) : null,
             weight: r.weight ? Number(r.weight) : null,
             container_type: r.container_type,
+            transport_types:
+              r.transport_types ||
+              (r.container_type
+                ? [
+                    this.inferTransportType(
+                      r.container_type,
+                      r.cargo_type,
+                      r.container_truck_id,
+                    ),
+                  ]
+                : ['auto']),
             container_truck_id: r.container_truck_id,
             consolidation_id: r.consolidation_id || null,
             consolidation: r.consolidation_id
@@ -2004,6 +2126,17 @@ export class CargoRegistrationsService {
       volume: row.volume ? Number(row.volume) : null,
       weight: row.weight ? Number(row.weight) : null,
       container_type: row.container_type,
+      transport_types:
+        row.transport_types ||
+        (row.container_type
+          ? [
+              this.inferTransportType(
+                row.container_type,
+                row.cargo_type,
+                row.container_truck_id,
+              ),
+            ]
+          : ['auto']),
       container_truck_id: row.container_truck_id,
       consolidation_id: row.consolidation_id || null,
       consolidation: row.consolidation_id

@@ -409,6 +409,20 @@ describe('DashboardService', () => {
         'Dengiz transporti',
       );
     });
+
+    it('should read transport_types array from record when present or fallback to heuristic', () => {
+      expect(
+        service.getTransportTypes({
+          transport_types: [TransportType.RAILWAY, TransportType.AUTO],
+        }),
+      ).toEqual([TransportType.RAILWAY, TransportType.AUTO]);
+
+      expect(
+        service.getTransportTypes({
+          container_type: '40HQ',
+        }),
+      ).toEqual([TransportType.RAILWAY]);
+    });
   });
 
   describe('getRouteAnalytics', () => {

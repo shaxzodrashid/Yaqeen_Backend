@@ -52,6 +52,61 @@ export class CargoConsolidationsService {
   }
 
   /**
+   * Infer default transport type from container_type, cargo_type, or truck ID.
+   */
+  inferTransportType(
+    containerType?: string | null,
+    cargoType?: string | null,
+    truckOrContainerId?: string | null,
+  ): string {
+    const cType = (containerType || '').toLowerCase().trim();
+    const id = (truckOrContainerId || '').toLowerCase().trim();
+
+    if (
+      cType.includes('air') ||
+      cType.includes('avia') ||
+      cType.includes('plane') ||
+      cType.includes('flight') ||
+      id.includes('air')
+    ) {
+      return 'air';
+    }
+
+    if (
+      cType.includes('rail') ||
+      cType.includes('train') ||
+      cType.includes('poezd') ||
+      cType.includes('temir') ||
+      cType.includes('20gp') ||
+      cType.includes('20hq') ||
+      cType.includes('40gp') ||
+      cType.includes('40hq') ||
+      cType.includes('40hc') ||
+      cType.includes('45hq') ||
+      cType.includes('45hc') ||
+      cType.includes('40 gp') ||
+      cType.includes('40 hc') ||
+      cType.includes('45 hc')
+    ) {
+      return 'railway';
+    }
+
+    if (
+      cType.includes('sea') ||
+      cType.includes('ship') ||
+      cType.includes('vessel') ||
+      cType.includes('ocean') ||
+      cType.includes('dengiz') ||
+      cType.includes('marine') ||
+      cType.includes('port')
+    ) {
+      return 'sea';
+    }
+
+    return 'auto';
+  }
+
+  /**
    * Helper to format an individual cargo registration attached to a consolidation.
    */
   private formatCargoItem(r: any) {
@@ -104,6 +159,17 @@ export class CargoConsolidationsService {
       volume: vol,
       weight: wt,
       container_type: r.container_type || null,
+      transport_types:
+        r.transport_types ||
+        (r.container_type
+          ? [
+              this.inferTransportType(
+                r.container_type,
+                r.cargo_type,
+                r.container_truck_id,
+              ),
+            ]
+          : ['auto']),
       container_truck_id: r.container_truck_id || null,
       agent_name: r.agent_name || null,
       client: {
@@ -221,11 +287,25 @@ export class CargoConsolidationsService {
       }
     }
 
+    let consTransportTypes: string[] = ['auto'];
+    if (dto.transport_types && dto.transport_types.length > 0) {
+      consTransportTypes = dto.transport_types;
+    } else if (dto.container_type) {
+      consTransportTypes = [
+        this.inferTransportType(
+          dto.container_type,
+          null,
+          dto.container_truck_id,
+        ),
+      ];
+    }
+
     const [inserted] = await this.knex('cargo_consolidations')
       .insert({
         consolidation_code: consolidationCode,
         container_truck_id: dto.container_truck_id.trim(),
         container_type: dto.container_type ? dto.container_type.trim() : null,
+        transport_types: consTransportTypes,
         max_volume_capacity:
           dto.max_volume_capacity !== undefined
             ? dto.max_volume_capacity
@@ -267,6 +347,7 @@ export class CargoConsolidationsService {
         .update({
           consolidation_id: consolidationId,
           container_truck_id: dto.container_truck_id.trim(),
+          transport_types: consTransportTypes,
           ...(dto.container_type
             ? { container_type: dto.container_type.trim() }
             : {}),
@@ -293,6 +374,11 @@ export class CargoConsolidationsService {
 
     if (query.status) {
       baseWhere.where('cc.status', query.status);
+    }
+    if (query.transport_types && query.transport_types.length > 0) {
+      baseWhere.whereRaw('cc.transport_types && ?::text[]', [
+        query.transport_types,
+      ]);
     }
     if (query.search && query.search.trim()) {
       const search = `%${query.search.trim()}%`;
@@ -439,6 +525,7 @@ export class CargoConsolidationsService {
           'cc.consolidation_code',
           'cc.container_truck_id',
           'cc.container_type',
+          'cc.transport_types',
           'cc.max_volume_capacity',
           'cc.max_weight_capacity',
           'cc.carrier_name',
@@ -589,6 +676,17 @@ export class CargoConsolidationsService {
         consolidation_code: r.consolidation_code,
         container_truck_id: r.container_truck_id,
         container_type: r.container_type,
+        transport_types:
+          r.transport_types ||
+          (r.container_type
+            ? [
+                this.inferTransportType(
+                  r.container_type,
+                  null,
+                  r.container_truck_id,
+                ),
+              ]
+            : ['auto']),
         status: r.status,
         carrier_name: r.carrier_name,
         carrier_phone: r.carrier_phone,
@@ -655,6 +753,7 @@ export class CargoConsolidationsService {
         'cc.consolidation_code',
         'cc.container_truck_id',
         'cc.container_type',
+        'cc.transport_types',
         'cc.max_volume_capacity',
         'cc.max_weight_capacity',
         'cc.carrier_name',
@@ -724,6 +823,17 @@ export class CargoConsolidationsService {
         consolidation_code: r.consolidation_code,
         container_truck_id: r.container_truck_id,
         container_type: r.container_type,
+        transport_types:
+          r.transport_types ||
+          (r.container_type
+            ? [
+                this.inferTransportType(
+                  r.container_type,
+                  null,
+                  r.container_truck_id,
+                ),
+              ]
+            : ['auto']),
         status: r.status,
         carrier_name: r.carrier_name,
         origin_place: r.origin_place,
@@ -801,11 +911,11 @@ export class CargoConsolidationsService {
       totalVolume += vol;
       totalWeight += wt;
 
-      const formatted = this.formatCargoItem(r);
-      totalSellUsd += formatted.sell_price.amount_usd;
-      totalPurchaseUsd += formatted.purchase_price.amount_usd;
+      const cargoItem = this.formatCargoItem(r);
+      totalSellUsd += cargoItem.sell_price.amount_usd;
+      totalPurchaseUsd += cargoItem.purchase_price.amount_usd;
 
-      return formatted;
+      return cargoItem;
     });
 
     const maxVolume = consolidation.max_volume_capacity
@@ -817,11 +927,11 @@ export class CargoConsolidationsService {
 
     const volumeUtilizationPercent =
       maxVolume && maxVolume > 0
-        ? Math.round((totalVolume / maxVolume) * 10000) / 100
+        ? Math.round(((totalVolume * 1.0) / maxVolume) * 10000) / 100
         : null;
     const weightUtilizationPercent =
       maxWeight && maxWeight > 0
-        ? Math.round((totalWeight / maxWeight) * 10000) / 100
+        ? Math.round(((totalWeight * 1.0) / maxWeight) * 10000) / 100
         : null;
 
     const remainingVolume =
@@ -862,6 +972,17 @@ export class CargoConsolidationsService {
       consolidation_code: consolidation.consolidation_code,
       container_truck_id: consolidation.container_truck_id,
       container_type: consolidation.container_type,
+      transport_types:
+        consolidation.transport_types ||
+        (consolidation.container_type
+          ? [
+              this.inferTransportType(
+                consolidation.container_type,
+                null,
+                consolidation.container_truck_id,
+              ),
+            ]
+          : ['auto']),
       status: consolidation.status,
       carrier_name: consolidation.carrier_name,
       carrier_phone: consolidation.carrier_phone,
@@ -951,6 +1072,8 @@ export class CargoConsolidationsService {
       updatePayload.container_type = dto.container_type
         ? dto.container_type.trim()
         : null;
+    if (dto.transport_types !== undefined)
+      updatePayload.transport_types = dto.transport_types;
     if (dto.max_volume_capacity !== undefined)
       updatePayload.max_volume_capacity = dto.max_volume_capacity;
     if (dto.max_weight_capacity !== undefined)
@@ -1000,6 +1123,9 @@ export class CargoConsolidationsService {
     if (dto.sync_status_to_cargos && dto.status) {
       cargoUpdates.status = dto.status;
     }
+    if (dto.sync_transport_types_to_cargos && dto.transport_types) {
+      cargoUpdates.transport_types = dto.transport_types;
+    }
     if (dto.sync_dates_to_cargos) {
       if (dto.loaded_date !== undefined)
         cargoUpdates.loaded_date = dto.loaded_date || null;
@@ -1045,11 +1171,24 @@ export class CargoConsolidationsService {
       });
     }
 
+    const consTransportTypes =
+      consolidation.transport_types ||
+      (consolidation.container_type
+        ? [
+            this.inferTransportType(
+              consolidation.container_type,
+              null,
+              consolidation.container_truck_id,
+            ),
+          ]
+        : ['auto']);
+
     await this.knex('cargo_registrations')
       .whereIn('id', dto.cargo_registration_ids)
       .update({
         consolidation_id: id,
         container_truck_id: consolidation.container_truck_id,
+        transport_types: consTransportTypes,
         ...(consolidation.container_type
           ? { container_type: consolidation.container_type }
           : {}),

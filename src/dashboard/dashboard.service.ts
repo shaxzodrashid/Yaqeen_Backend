@@ -1425,6 +1425,26 @@ export class DashboardService {
   }
 
   /**
+   * Get transport types array for a cargo registration record
+   */
+  getTransportTypes(record: any): TransportType[] {
+    if (
+      record.transport_types &&
+      Array.isArray(record.transport_types) &&
+      record.transport_types.length > 0
+    ) {
+      return record.transport_types as TransportType[];
+    }
+    return [
+      this.classifyTransportType(
+        record.container_type,
+        record.cargo_type,
+        record.container_truck_id,
+      ),
+    ];
+  }
+
+  /**
    * Transport Type distribution calculation (Auto, Railway, Air, Sea)
    */
   private computeTransportDistribution(
@@ -1462,11 +1482,7 @@ export class DashboardService {
     const totalCount = records.length || 1;
 
     for (const r of records) {
-      const tType = this.classifyTransportType(
-        r.container_type,
-        r.cargo_type,
-        r.container_truck_id,
-      );
+      const tTypes = this.getTransportTypes(r);
       const sPrice = Number(r.sell_price) || 0;
       const pPrice = Number(r.purchase_price) || 0;
       const sCurr = (r.sell_currency as Currency) || Currency.UZS;
@@ -1476,12 +1492,16 @@ export class DashboardService {
       const vol = Number(r.volume) || 0;
       const wt = Number(r.weight) || 0;
 
-      const item = typeMap.get(tType)!;
-      item.count += 1;
-      item.salesUzs += sUzs;
-      item.costUzs += pUzs;
-      item.volume += vol;
-      item.weight += wt;
+      for (const tType of tTypes) {
+        const item = typeMap.get(tType);
+        if (item) {
+          item.count += 1;
+          item.salesUzs += sUzs;
+          item.costUzs += pUzs;
+          item.volume += vol;
+          item.weight += wt;
+        }
+      }
     }
 
     const result: TransportDistributionItem[] = [];
@@ -2234,6 +2254,7 @@ export class DashboardService {
       status?: string;
       cargo_type?: string;
       transport_type?: TransportType;
+      transport_types?: TransportType[];
     },
   ) {
     const startDateStr = start.toISOString().slice(0, 10);
@@ -2255,17 +2276,24 @@ export class DashboardService {
     if (query.cargo_type) {
       dbQuery.where('cargo_type', query.cargo_type);
     }
+    if (query.transport_types && query.transport_types.length > 0) {
+      dbQuery.whereRaw('transport_types && ?::text[]', [query.transport_types]);
+    } else if (query.transport_type) {
+      dbQuery.whereRaw('? = ANY(transport_types)', [query.transport_type]);
+    }
 
     const rows = await dbQuery;
 
+    if (query.transport_types && query.transport_types.length > 0) {
+      return rows.filter((r) => {
+        const rTypes = this.getTransportTypes(r);
+        return query.transport_types!.some((qt) => rTypes.includes(qt));
+      });
+    }
+
     if (query.transport_type) {
-      return rows.filter(
-        (r) =>
-          this.classifyTransportType(
-            r.container_type,
-            r.cargo_type,
-            r.container_truck_id,
-          ) === query.transport_type,
+      return rows.filter((r) =>
+        this.getTransportTypes(r).includes(query.transport_type!),
       );
     }
 

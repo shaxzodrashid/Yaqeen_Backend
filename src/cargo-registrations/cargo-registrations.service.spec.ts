@@ -1705,4 +1705,35 @@ describe('CargoRegistrationsService', () => {
       expect(check.existing_cargo_id).toBeNull();
     });
   });
+
+  describe('transport_types handling', () => {
+    it('should infer correct transport type', () => {
+      expect(service.inferTransportType('air-delivery')).toBe('air');
+      expect(service.inferTransportType('40HQ')).toBe('railway');
+      expect(service.inferTransportType('sea container')).toBe('sea');
+      expect(service.inferTransportType('120 CBM')).toBe('auto');
+    });
+
+    it('should accept valid transport_types array in CreateCargoRegistrationDto', async () => {
+      const payload = {
+        cargo_type: 'FTL',
+        container_type: '40HQ',
+        container_truck_id: 'TRK-001',
+        agent_name: 'Agent A',
+        cargo: 'Electronics',
+        purchase_price: 1000,
+        purchase_currency: 'USD',
+        sell_price: 1500,
+        sell_currency: 'USD',
+        client_id: '11111111-1111-4111-8111-111111111111',
+        transport_types: ['railway', 'auto'],
+      };
+      const dto = plainToInstance(CreateCargoRegistrationDto, payload);
+      const errors = await validate(dto);
+      const transportError = errors.find(
+        (e) => e.property === 'transport_types',
+      );
+      expect(transportError).toBeUndefined();
+    });
+  });
 });

@@ -10,6 +10,7 @@ import {
   ValidateNested,
   IsBoolean,
   IsInt,
+  IsArray,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import { CreateConsolidationInlineDto } from '../../cargo-consolidations/dto/cargo-consolidations.dto';
@@ -40,6 +41,16 @@ export const ALLOWED_CONTAINER_TYPES = [
 ] as const;
 
 export type ContainerType = (typeof ALLOWED_CONTAINER_TYPES)[number];
+
+export const ALLOWED_TRANSPORT_TYPES = [
+  'auto',
+  'railway',
+  'air',
+  'sea',
+  'other',
+] as const;
+
+export type TransportType = (typeof ALLOWED_TRANSPORT_TYPES)[number];
 
 export const ALLOWED_CURRENCIES = ['UZS', 'RUB', 'USD', 'RMB'] as const;
 export type CargoCurrency = (typeof ALLOWED_CURRENCIES)[number];
@@ -76,6 +87,14 @@ export class CreateCargoRegistrationDto {
   @IsOptional()
   @IsString()
   container_type?: string;
+
+  @IsOptional()
+  @IsArray({ message: 'transport_types must be an array of transport types' })
+  @IsIn(ALLOWED_TRANSPORT_TYPES, {
+    each: true,
+    message: `Each transport_type must be one of: ${ALLOWED_TRANSPORT_TYPES.join(', ')}`,
+  })
+  transport_types?: TransportType[];
 
   @IsOptional()
   @IsUUID('4', { message: 'consolidation_id must be a valid UUID' })
@@ -282,6 +301,14 @@ export class UpdateCargoRegistrationDto {
   @IsOptional()
   @IsString()
   container_type?: string;
+
+  @IsOptional()
+  @IsArray({ message: 'transport_types must be an array of transport types' })
+  @IsIn(ALLOWED_TRANSPORT_TYPES, {
+    each: true,
+    message: `Each transport_type must be one of: ${ALLOWED_TRANSPORT_TYPES.join(', ')}`,
+  })
+  transport_types?: TransportType[];
 
   @IsOptional()
   @IsString()
@@ -515,6 +542,24 @@ export class QueryCargoRegistrationDto {
   @IsOptional()
   @IsString()
   container_type?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string') {
+      return value
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+    }
+    return value;
+  })
+  @IsArray()
+  @IsIn(ALLOWED_TRANSPORT_TYPES, {
+    each: true,
+    message: `Each transport_type must be one of: ${ALLOWED_TRANSPORT_TYPES.join(', ')}`,
+  })
+  transport_types?: TransportType[];
 
   @IsOptional()
   @IsString()

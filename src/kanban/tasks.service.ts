@@ -550,7 +550,10 @@ export class TasksService {
       changes.push('Description updated');
     }
 
-    if (dto.priority !== undefined && dto.priority !== existingTask.priority) {
+    if (
+      dto.priority !== undefined &&
+      (dto.priority as string) !== existingTask.priority
+    ) {
       updateData.priority = dto.priority;
       changes.push(`Priority changed to "${dto.priority}"`);
     }
@@ -621,7 +624,7 @@ export class TasksService {
     dto: MoveTaskDto,
     currentUser?: any,
   ): Promise<any> {
-    const column = await this.columnsService.validateStatusPermission(
+    await this.columnsService.validateStatusPermission(
       dto.column_id,
       currentUser?.role,
     );
@@ -647,6 +650,13 @@ export class TasksService {
         location: 'task_not_found',
       });
     }
+
+    await this.logActivity(
+      id,
+      currentUser?.id,
+      'TASK_DELETED',
+      `Task "${task.title}" deleted`,
+    );
 
     await this.knex('tasks').where('id', id).del();
   }

@@ -9,6 +9,7 @@ import {
   Min,
   Max,
   IsBoolean,
+  IsArray,
 } from 'class-validator';
 import { Type, Transform } from 'class-transformer';
 import {
@@ -62,6 +63,25 @@ export class SalesProgressQueryDto {
   transport_type?: TransportType;
 
   @IsOptional()
+  @Transform(({ value }) => {
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string') {
+      return value
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+    }
+    return value;
+  })
+  @IsArray()
+  @IsEnum(TransportType, {
+    each: true,
+    message:
+      'Each transport_type must be one of: auto, railway, air, sea, other',
+  })
+  transport_types?: TransportType[];
+
+  @IsOptional()
   @IsEnum(Currency, {
     message: 'currency must be one of: UZS, USD, RUB, RMB, CNY',
   })
@@ -101,6 +121,25 @@ export class DashboardSummaryQueryDto {
   @IsOptional()
   @IsEnum(TransportType)
   transport_type?: TransportType;
+
+  @IsOptional()
+  @Transform(({ value }) => {
+    if (Array.isArray(value)) return value;
+    if (typeof value === 'string') {
+      return value
+        .split(',')
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean);
+    }
+    return value;
+  })
+  @IsArray()
+  @IsEnum(TransportType, {
+    each: true,
+    message:
+      'Each transport_type must be one of: auto, railway, air, sea, other',
+  })
+  transport_types?: TransportType[];
 
   @IsOptional()
   @IsEnum(Currency, {

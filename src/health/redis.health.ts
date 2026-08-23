@@ -18,7 +18,7 @@ export class RedisHealthIndicator extends HealthIndicator {
       if (pong === 'PONG') {
         return this.getStatus(key, true);
       }
-      throw new Error(`Unexpected ping response: ${pong}`);
+      throw new Error(`Unexpected ping response: ${String(pong)}`);
     } catch (error: any) {
       throw new HealthCheckError(
         'Redis connection failed',

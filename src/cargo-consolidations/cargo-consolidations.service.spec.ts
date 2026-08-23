@@ -615,6 +615,7 @@ describe('CargoConsolidationsService', () => {
         consolidation_id: 'cons-1',
         container_truck_id: 'TRK-9900',
         container_type: '120m3',
+        transport_types: ['auto'],
       });
     });
 
@@ -772,20 +773,55 @@ describe('CargoConsolidationsService', () => {
       },
     );
 
-    it('should reject invalid currency with proper message', async () => {
+    it('should accept valid multiple transport types', async () => {
       const payload = {
         container_truck_id: 'TRK-00001',
-        carrier_cost_currency: 'EUR',
+        transport_types: ['railway', 'auto'],
       };
       const dto = plainToInstance(CreateCargoConsolidationDto, payload);
       const errors = await validate(dto);
-      const currencyError = errors.find(
-        (e) => e.property === 'carrier_cost_currency',
+      const transportError = errors.find(
+        (e) => e.property === 'transport_types',
       );
-      expect(currencyError).toBeDefined();
-      expect(currencyError?.constraints?.isIn).toBe(
-        'carrier_cost_currency must be UZS, RUB, USD, or RMB',
+      expect(transportError).toBeUndefined();
+    });
+
+    it('should reject invalid transport type', async () => {
+      const payload = {
+        container_truck_id: 'TRK-00001',
+        transport_types: ['spaceship'],
+      };
+      const dto = plainToInstance(CreateCargoConsolidationDto, payload);
+      const errors = await validate(dto);
+      const transportError = errors.find(
+        (e) => e.property === 'transport_types',
       );
+      expect(transportError).toBeDefined();
+    });
+  });
+
+  describe('inferTransportType', () => {
+    it('should infer air transport from air keywords', () => {
+      expect(service.inferTransportType('air-delivery')).toBe('air');
+      expect(service.inferTransportType('avia freight')).toBe('air');
+      expect(service.inferTransportType(null, null, 'AIR-001')).toBe('air');
+    });
+
+    it('should infer railway transport from container codes', () => {
+      expect(service.inferTransportType('40HQ')).toBe('railway');
+      expect(service.inferTransportType('20GP')).toBe('railway');
+      expect(service.inferTransportType('train-cargo')).toBe('railway');
+    });
+
+    it('should infer sea transport from maritime keywords', () => {
+      expect(service.inferTransportType('sea shipment')).toBe('sea');
+      expect(service.inferTransportType('vessel-01')).toBe('sea');
+    });
+
+    it('should default to auto for other trucks', () => {
+      expect(service.inferTransportType('120 CBM')).toBe('auto');
+      expect(service.inferTransportType('Ref Fura')).toBe('auto');
+      expect(service.inferTransportType(null)).toBe('auto');
     });
   });
 });
