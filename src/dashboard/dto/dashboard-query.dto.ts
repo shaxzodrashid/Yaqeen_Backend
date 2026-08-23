@@ -8,9 +8,14 @@ import {
   IsInt,
   Min,
   Max,
+  IsBoolean,
 } from 'class-validator';
-import { Type } from 'class-transformer';
-import { TimeframePeriod, Granularity } from '../dashboard.types';
+import { Type, Transform } from 'class-transformer';
+import {
+  TimeframePeriod,
+  Granularity,
+  TransportType,
+} from '../dashboard.types';
 import { Currency } from '../../currency/currency.types';
 
 export class SalesProgressQueryDto {
@@ -51,10 +56,21 @@ export class SalesProgressQueryDto {
   cargo_type?: string;
 
   @IsOptional()
+  @IsEnum(TransportType, {
+    message: 'transport_type must be one of: auto, railway, air, sea, other',
+  })
+  transport_type?: TransportType;
+
+  @IsOptional()
   @IsEnum(Currency, {
     message: 'currency must be one of: UZS, USD, RUB, RMB, CNY',
   })
   currency?: Currency;
+
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true || value === '1')
+  @IsBoolean()
+  include_expenses?: boolean = true;
 }
 
 export class DashboardSummaryQueryDto {
@@ -83,6 +99,10 @@ export class DashboardSummaryQueryDto {
   cargo_type?: string;
 
   @IsOptional()
+  @IsEnum(TransportType)
+  transport_type?: TransportType;
+
+  @IsOptional()
   @IsEnum(Currency, {
     message: 'currency must be one of: UZS, USD, RUB, RMB, CNY',
   })
@@ -97,3 +117,23 @@ export class TopPerformersQueryDto extends DashboardSummaryQueryDto {
   @Max(50)
   limit?: number = 5;
 }
+
+export class RouteAnalyticsQueryDto extends DashboardSummaryQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  limit?: number = 10;
+}
+
+export class DebtSummaryQueryDto extends DashboardSummaryQueryDto {
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(1)
+  @Max(50)
+  limit?: number = 10;
+}
+
+export class DeliveryEfficiencyQueryDto extends DashboardSummaryQueryDto {}

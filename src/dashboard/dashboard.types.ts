@@ -18,6 +18,14 @@ export enum Granularity {
   YEAR = 'year',
 }
 
+export enum TransportType {
+  AUTO = 'auto',
+  RAILWAY = 'railway',
+  AIR = 'air',
+  SEA = 'sea',
+  OTHER = 'other',
+}
+
 export interface TimeframeMeta {
   period: TimeframePeriod;
   startDate: string; // ISO string
@@ -30,14 +38,19 @@ export interface TimeframeMeta {
 export interface TimeframeSummary {
   totalSales: number;
   totalPurchaseCost: number;
+  totalOperationalExpenses?: number;
+  totalExpenses?: number;
   totalMargin: number;
+  totalNetProfit?: number;
   marginPercentage: number;
   totalOrders: number;
   averageOrderValue: number;
   completedOrders: number;
   pendingOrders: number;
+  inTransitOrders?: number;
   growthRateSales: number | null; // % growth compared to previous period
   growthRateMargin: number | null; // % growth in margin
+  growthRateNetProfit?: number | null; // % growth in net profit
 }
 
 export interface TimeBucketDataPoint {
@@ -48,10 +61,15 @@ export interface TimeBucketDataPoint {
   label: string; // Readable axis label e.g. '14:00', '06 Aug', 'Aug 2026'
   sales: number;
   purchaseCost: number;
+  operationalExpenses?: number;
+  totalExpenses?: number;
   margin: number;
+  netProfit?: number;
   orderCount: number;
   cumulativeSales: number;
+  cumulativeExpenses?: number;
   cumulativeMargin: number;
+  cumulativeNetProfit?: number;
 }
 
 export interface SalesProgressResponse {
@@ -60,15 +78,83 @@ export interface SalesProgressResponse {
   dataPoints: TimeBucketDataPoint[];
 }
 
+export interface PeriodKpiMetric {
+  revenue: number;
+  purchaseCost: number;
+  netProfit: number;
+  marginPercentage: number;
+  revenueGrowthRate: number | null; // % vs previous period
+  netProfitGrowthRate: number | null; // % vs previous period
+  orderCount: number;
+}
+
+export interface DebtorClientItem {
+  clientId: string;
+  clientName: string;
+  companyName?: string;
+  amount: number;
+  orderCount: number;
+}
+
+export interface CreditorCarrierItem {
+  agentName: string;
+  amount: number;
+  orderCount: number;
+}
+
+export interface DebtSummaryKpi {
+  currency?: string;
+  accountsReceivable: number; // Mijozlarning to'lanmagan hisoblari (Debitorlik)
+  accountsPayable: number; // Tashuvchilarga bo'lgan qarzdorliklar (Kreditorlik)
+  netBalance: number; // Debitor - Kreditor balansi (Sof balans)
+  debtorClientCount: number;
+  creditorCarrierCount: number;
+  topDebtorClients?: DebtorClientItem[];
+  topCreditorCarriers?: CreditorCarrierItem[];
+}
+
+export interface StatusBreakdownItem {
+  status: string;
+  label: string;
+  count: number;
+  percentage: number;
+  totalSales: number;
+  totalVolume: number;
+  totalWeight: number;
+}
+
+export interface RouteTransitTimeItem {
+  route: string;
+  averageTransitDays: number;
+  count: number;
+}
+
+export interface DeliveryEfficiencyKpi {
+  averageTransitDays: number;
+  minTransitDays: number;
+  maxTransitDays: number;
+  totalDeliveredCount: number;
+  totalInTransitCount: number;
+  totalActiveCount: number;
+  onTimeDeliveriesCount?: number;
+  delayedDeliveriesCount?: number;
+  onTimeRatePercentage?: number;
+  statusBreakdown?: StatusBreakdownItem[];
+  routeTransitTimes?: RouteTransitTimeItem[];
+}
+
 export interface DashboardSummaryKpi {
   currency?: string;
   totalSales: number;
   totalPurchaseCost: number;
   totalMargin: number;
+  netProfit?: number;
   marginPercentage: number;
   totalOrders: number;
-  completedOrders: number;
+  activeOrders: number;
+  inTransitOrders: number;
   waitingOrders: number;
+  completedOrders: number;
   averageOrderValue: number;
   totalVolume: number;
   totalWeight: number;
@@ -76,6 +162,11 @@ export interface DashboardSummaryKpi {
   ftlOrderCount: number;
   salesGrowthVsPriorPeriod: number | null;
   marginGrowthVsPriorPeriod: number | null;
+  monthly?: PeriodKpiMetric;
+  yearly?: PeriodKpiMetric;
+  debtSummary?: DebtSummaryKpi;
+  deliveryEfficiency?: DeliveryEfficiencyKpi;
+  statusCounts?: Record<string, number>;
 }
 
 export interface CargoDistributionItem {
@@ -85,10 +176,53 @@ export interface CargoDistributionItem {
   percentage: number;
 }
 
+export interface TransportDistributionItem {
+  type: TransportType;
+  name: string; // e.g. 'Avtotransport (Auto / Truck)', 'Temir yo\'l (Railway)'
+  count: number;
+  percentage: number;
+  totalSales: number;
+  totalMargin: number;
+  totalVolume: number;
+  totalWeight: number;
+}
+
 export interface CargoDistributionResponse {
   currency?: string;
+  transportTypeDistribution: TransportDistributionItem[];
   cargoTypeDistribution: CargoDistributionItem[];
   statusDistribution: CargoDistributionItem[];
+}
+
+export interface RouteDistributionItem {
+  route: string; // e.g., 'China – Uzbekistan' or 'Guangzhou – Tashkent'
+  originCountry?: string;
+  originCity?: string;
+  destinationCountry?: string;
+  destinationCity?: string;
+  count: number;
+  percentage: number;
+  totalSales: number;
+  totalMargin: number;
+  totalVolume: number;
+  totalWeight: number;
+}
+
+export interface CountryDistributionItem {
+  countryName: string;
+  countryCode?: string;
+  count: number;
+  percentage: number;
+  totalSales: number;
+  totalVolume: number;
+  totalWeight: number;
+}
+
+export interface RouteAnalyticsResponse {
+  currency?: string;
+  topRoutes: RouteDistributionItem[];
+  originCountries: CountryDistributionItem[];
+  destinationCountries: CountryDistributionItem[];
 }
 
 export interface TopPerformerManager {
@@ -96,8 +230,15 @@ export interface TopPerformerManager {
   employeeName: string;
   departmentName?: string;
   totalSales: number;
+  totalPurchaseCost?: number;
   totalMargin: number;
   orderCount: number;
+  totalVolume?: number;
+  totalWeight?: number;
+  averageOrderValue?: number;
+  completedOrdersCount?: number;
+  activeOrdersCount?: number;
+  conversionRate?: number; // % completed vs total
 }
 
 export interface TopPerformerClient {
@@ -105,8 +246,12 @@ export interface TopPerformerClient {
   clientName: string;
   companyName?: string;
   totalSales: number;
+  totalPurchaseCost?: number;
   totalMargin: number;
   orderCount: number;
+  totalVolume?: number;
+  totalWeight?: number;
+  averageOrderValue?: number;
 }
 
 export interface TopPerformersResponse {

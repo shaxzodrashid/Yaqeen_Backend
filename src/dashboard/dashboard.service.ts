@@ -9,6 +9,7 @@ import { Knex } from 'knex';
 import {
   TimeframePeriod,
   Granularity,
+  TransportType,
   SalesProgressResponse,
   TimeframeMeta,
   TimeframeSummary,
@@ -16,14 +17,28 @@ import {
   DashboardSummaryKpi,
   CargoDistributionResponse,
   CargoDistributionItem,
+  TransportDistributionItem,
   TopPerformersResponse,
   TopPerformerManager,
   TopPerformerClient,
+  RouteAnalyticsResponse,
+  RouteDistributionItem,
+  CountryDistributionItem,
+  DebtSummaryKpi,
+  DebtorClientItem,
+  CreditorCarrierItem,
+  DeliveryEfficiencyKpi,
+  StatusBreakdownItem,
+  RouteTransitTimeItem,
+  PeriodKpiMetric,
 } from './dashboard.types';
 import {
   SalesProgressQueryDto,
   DashboardSummaryQueryDto,
   TopPerformersQueryDto,
+  RouteAnalyticsQueryDto,
+  DebtSummaryQueryDto,
+  DeliveryEfficiencyQueryDto,
 } from './dto/dashboard-query.dto';
 import { CurrencyService } from '../currency/currency.service';
 import { Currency } from '../currency/currency.types';
@@ -42,6 +57,103 @@ export class DashboardService {
     @Inject(KNEX_CONNECTION) private readonly knex: Knex,
     @Optional() private readonly currencyService?: CurrencyService,
   ) {}
+
+  /**
+   * Classify container/cargo type into high-level transport categories
+   */
+  classifyTransportType(
+    containerType?: string | null,
+    cargoType?: string | null,
+    truckOrContainerId?: string | null,
+  ): TransportType {
+    const cType = (containerType || '').toLowerCase().trim();
+    const id = (truckOrContainerId || '').toLowerCase().trim();
+
+    // 1. Air transport check
+    if (
+      cType.includes('air') ||
+      cType.includes('avia') ||
+      cType.includes('plane') ||
+      cType.includes('flight') ||
+      id.includes('air')
+    ) {
+      return TransportType.AIR;
+    }
+
+    // 2. Railway check (standard container codes often used on rail/intermodal)
+    if (
+      cType.includes('rail') ||
+      cType.includes('train') ||
+      cType.includes('poezd') ||
+      cType.includes('temir') ||
+      cType.includes('20gp') ||
+      cType.includes('20hq') ||
+      cType.includes('40gp') ||
+      cType.includes('40hq') ||
+      cType.includes('40hc') ||
+      cType.includes('45hq') ||
+      cType.includes('45hc') ||
+      cType.includes('40 gp') ||
+      cType.includes('40 hc') ||
+      cType.includes('45 hc')
+    ) {
+      return TransportType.RAILWAY;
+    }
+
+    // 3. Sea / Maritime check
+    if (
+      cType.includes('sea') ||
+      cType.includes('ship') ||
+      cType.includes('vessel') ||
+      cType.includes('ocean') ||
+      cType.includes('dengiz') ||
+      cType.includes('marine') ||
+      cType.includes('port')
+    ) {
+      return TransportType.SEA;
+    }
+
+    // 4. Auto / Truck check
+    if (
+      cType.includes('m3') ||
+      cType.includes('cbm') ||
+      cType.includes('fura') ||
+      cType.includes('truck') ||
+      cType.includes('auto') ||
+      cType.includes('avto') ||
+      cType.includes('ref') ||
+      (cargoType &&
+        (cargoType.toUpperCase() === 'FTL' ||
+          cargoType.toUpperCase() === 'LTL'))
+    ) {
+      return TransportType.AUTO;
+    }
+
+    if (cType) {
+      return TransportType.AUTO;
+    }
+
+    return TransportType.OTHER;
+  }
+
+  /**
+   * Get human-readable label for transport type
+   */
+  getTransportTypeName(type: TransportType): string {
+    switch (type) {
+      case TransportType.AUTO:
+        return 'Avtotransport (Auto / Truck)';
+      case TransportType.RAILWAY:
+        return "Temir yo'l (Railway / Train)";
+      case TransportType.AIR:
+        return 'Havo transporti (Air Freight)';
+      case TransportType.SEA:
+        return 'Dengiz transporti (Sea / Maritime)';
+      case TransportType.OTHER:
+      default:
+        return 'Boshqa (Other)';
+    }
+  }
 
   private getCurrencyMultipliers(
     rates?: Record<Currency, any>,
@@ -168,18 +280,31 @@ export class DashboardService {
     const multipliers = this.getCurrencyMultipliers(rates);
 
     // 3. Generate continuous gap-filled time buckets
-    const buckets = this.generateTimeBuckets(
+    const buckets: Array<{
+      bucketStart: Date;
+      bucketEnd: Date;
+      dateKey: string;
+      label: string;
+      sales: number;
+      purchaseCost: number;
+      operationalExpenses: number;
+      margin: number;
+      orderCount: number;
+    }> = this.generateTimeBuckets(
       range.startDate,
       range.endDate,
       range.granularity,
-    );
+    ).map((b) => ({
+      ...b,
+      operationalExpenses: 0,
+    }));
 
-    // 4. Single-pass high-performance aggregation:
-    // Sums net profit (sell_price - purchase_price) for all cargos and slots into buckets
+    // 4. Single-pass high-performance aggregation for cargo registrations
     let totalSalesUzs = 0;
     let totalPurchaseCostUzs = 0;
     let totalMarginUzs = 0;
     let completedOrders = 0;
+    let inTransitOrders = 0;
 
     for (let i = 0; i < currentRecords.length; i++) {
       const r = currentRecords[i];
@@ -200,8 +325,11 @@ export class DashboardService {
       totalPurchaseCostUzs += purchasePriceUzs;
       totalMarginUzs += netProfitUzs;
 
-      if ((r.status || '').toLowerCase() === 'completed') {
+      const st = (r.status || '').toLowerCase();
+      if (st === 'completed' || st === 'arrived' || st === 'delivered') {
         completedOrders++;
+      } else if (st === 'on the way' || st === 'in transit') {
+        inTransitOrders++;
       }
 
       // Fast binary search bucket slotting
@@ -242,22 +370,87 @@ export class DashboardService {
       }
     }
 
+    // 5. Fetch operational expenses if enabled
+    let totalOperationalExpensesUzs = 0;
+    if (query.include_expenses !== false) {
+      try {
+        const expenseRecords = await this.fetchExpenses(
+          range.startDate,
+          range.endDate,
+          query,
+        );
+        for (let i = 0; i < expenseRecords.length; i++) {
+          const exp = expenseRecords[i];
+          const amount = Number(exp.amount) || 0;
+          const curr = (exp.currency as Currency) || Currency.UZS;
+          const expUzs =
+            Math.round(amount * (multipliers[curr] ?? 1) * 100) / 100;
+          totalOperationalExpensesUzs += expUzs;
+
+          const rawExpDate = exp.expense_date || exp.created_at;
+          let expDate: Date;
+          if (typeof rawExpDate === 'string') {
+            if (!rawExpDate.includes('T') && rawExpDate.length === 10) {
+              const [y, m, d] = rawExpDate.split('-').map(Number);
+              expDate = new Date(Date.UTC(y, m - 1, d, 0, 0, 0, 0));
+            } else {
+              expDate = new Date(rawExpDate);
+            }
+          } else if (rawExpDate instanceof Date) {
+            expDate = new Date(
+              Date.UTC(
+                rawExpDate.getUTCFullYear(),
+                rawExpDate.getUTCMonth(),
+                rawExpDate.getUTCDate(),
+                0,
+                0,
+                0,
+                0,
+              ),
+            );
+          } else {
+            expDate = new Date(rawExpDate);
+          }
+
+          const expTime = expDate.getTime();
+          if (!isNaN(expTime)) {
+            const bIdx = this.findBucketIndex(expTime, buckets);
+            if (bIdx !== -1) {
+              buckets[bIdx].operationalExpenses += expUzs;
+            }
+          }
+        }
+      } catch {
+        // Safe fallback if expenses table is not queryable
+      }
+    }
+
     const totalOrders = currentRecords.length;
     const averageOrderValueUzs =
       totalOrders > 0 ? totalMarginUzs / totalOrders : 0;
     const pendingOrders = totalOrders - completedOrders;
     const marginPercentage =
       totalSalesUzs > 0 ? (totalMarginUzs / totalSalesUzs) * 100 : 0;
+    const totalExpensesUzs = totalPurchaseCostUzs + totalOperationalExpensesUzs;
+    const totalNetProfitUzs = totalSalesUzs - totalExpensesUzs;
 
-    // 5. Calculate cumulative trajectory and format data points converted to target currency
+    // 6. Calculate cumulative trajectory and format data points converted to target currency
     let runningSalesUzs = 0;
+    let runningExpensesUzs = 0;
     let runningMarginUzs = 0;
+    let runningNetProfitUzs = 0;
 
     const dataPoints: TimeBucketDataPoint[] = new Array(buckets.length);
     for (let idx = 0; idx < buckets.length; idx++) {
       const bucket = buckets[idx];
+      const bucketTotalExpensesUzs =
+        bucket.purchaseCost + bucket.operationalExpenses;
+      const bucketNetProfitUzs = bucket.sales - bucketTotalExpensesUzs;
+
       runningSalesUzs += bucket.sales;
+      runningExpensesUzs += bucketTotalExpensesUzs;
       runningMarginUzs += bucket.margin;
+      runningNetProfitUzs += bucketNetProfitUzs;
 
       dataPoints[idx] = {
         index: idx,
@@ -275,8 +468,23 @@ export class DashboardService {
           targetCurrency,
           multipliers,
         ),
+        operationalExpenses: this.convertFromUzsFast(
+          bucket.operationalExpenses,
+          targetCurrency,
+          multipliers,
+        ),
+        totalExpenses: this.convertFromUzsFast(
+          bucketTotalExpensesUzs,
+          targetCurrency,
+          multipliers,
+        ),
         margin: this.convertFromUzsFast(
           bucket.margin,
+          targetCurrency,
+          multipliers,
+        ),
+        netProfit: this.convertFromUzsFast(
+          bucketNetProfitUzs,
           targetCurrency,
           multipliers,
         ),
@@ -286,17 +494,28 @@ export class DashboardService {
           targetCurrency,
           multipliers,
         ),
+        cumulativeExpenses: this.convertFromUzsFast(
+          runningExpensesUzs,
+          targetCurrency,
+          multipliers,
+        ),
         cumulativeMargin: this.convertFromUzsFast(
           runningMarginUzs,
+          targetCurrency,
+          multipliers,
+        ),
+        cumulativeNetProfit: this.convertFromUzsFast(
+          runningNetProfitUzs,
           targetCurrency,
           multipliers,
         ),
       };
     }
 
-    // 6. Calculate growth rate against preceding period if available
+    // 7. Calculate growth rate against preceding period if available
     let growthRateSales: number | null = null;
     let growthRateMargin: number | null = null;
+    let growthRateNetProfit: number | null = null;
 
     if (range.prevStartDate && range.prevEndDate) {
       const prevRecords = await this.fetchRegistrations(
@@ -338,6 +557,8 @@ export class DashboardService {
       } else if (totalMarginUzs > 0) {
         growthRateMargin = 100;
       }
+
+      growthRateNetProfit = growthRateMargin;
     }
 
     const meta: TimeframeMeta = {
@@ -359,8 +580,23 @@ export class DashboardService {
       targetCurrency,
       multipliers,
     );
+    const totalOperationalExpenses = this.convertFromUzsFast(
+      totalOperationalExpensesUzs,
+      targetCurrency,
+      multipliers,
+    );
+    const totalExpenses = this.convertFromUzsFast(
+      totalExpensesUzs,
+      targetCurrency,
+      multipliers,
+    );
     const totalMargin = this.convertFromUzsFast(
       totalMarginUzs,
+      targetCurrency,
+      multipliers,
+    );
+    const totalNetProfit = this.convertFromUzsFast(
+      totalNetProfitUzs,
       targetCurrency,
       multipliers,
     );
@@ -373,14 +609,19 @@ export class DashboardService {
     const summary: TimeframeSummary = {
       totalSales,
       totalPurchaseCost,
+      totalOperationalExpenses,
+      totalExpenses,
       totalMargin,
+      totalNetProfit,
       marginPercentage: Math.round(marginPercentage * 100) / 100,
       totalOrders,
       averageOrderValue,
       completedOrders,
       pendingOrders,
+      inTransitOrders,
       growthRateSales,
       growthRateMargin,
+      growthRateNetProfit,
     };
 
     return {
@@ -391,7 +632,7 @@ export class DashboardService {
   }
 
   /**
-   * Executive Dashboard Summary KPI Endpoint
+   * Executive Dashboard Summary KPI Endpoint (Cards & Block Overview)
    */
   async getDashboardSummary(
     query: DashboardSummaryQueryDto,
@@ -410,15 +651,60 @@ export class DashboardService {
     const rates = this.currencyService
       ? await this.currencyService.getLatestRates()
       : undefined;
+    const multipliers = this.getCurrencyMultipliers(rates);
 
     let totalSalesUzs = 0;
     let totalPurchaseCostUzs = 0;
+    let completedOrders = 0;
+    let inTransitOrders = 0;
+    let waitingOrders = 0;
 
-    for (const r of records) {
-      const { sellPriceUzs, purchasePriceUzs } =
-        await this.convertRecordPricesToUzs(r, rates);
-      totalSalesUzs += sellPriceUzs;
-      totalPurchaseCostUzs += purchasePriceUzs;
+    const statusCounts: Record<string, number> = {
+      waiting: 0,
+      station: 0,
+      on_the_way: 0,
+      on_the_border: 0,
+      reload: 0,
+      arrived: 0,
+    };
+
+    for (let i = 0; i < records.length; i++) {
+      const r = records[i];
+      const sellPrice = Number(r.sell_price) || 0;
+      const purchasePrice = Number(r.purchase_price) || 0;
+      const sellCurr = (r.sell_currency as Currency) || Currency.UZS;
+      const purchaseCurr = (r.purchase_currency as Currency) || Currency.UZS;
+
+      const sellUzs = sellPrice * (multipliers[sellCurr] ?? 1);
+      const purchaseUzs = purchasePrice * (multipliers[purchaseCurr] ?? 1);
+
+      totalSalesUzs += sellUzs;
+      totalPurchaseCostUzs += purchaseUzs;
+
+      const rawStatus = (r.status || 'Waiting').toLowerCase();
+      if (
+        rawStatus === 'arrived' ||
+        rawStatus === 'completed' ||
+        rawStatus === 'delivered'
+      ) {
+        completedOrders++;
+        statusCounts.arrived = (statusCounts.arrived || 0) + 1;
+      } else if (rawStatus === 'on the way' || rawStatus === 'in transit') {
+        inTransitOrders++;
+        statusCounts.on_the_way = (statusCounts.on_the_way || 0) + 1;
+      } else if (rawStatus === 'station' || rawStatus === 'at station') {
+        waitingOrders++;
+        statusCounts.station = (statusCounts.station || 0) + 1;
+      } else if (rawStatus === 'on the border' || rawStatus === 'border') {
+        waitingOrders++;
+        statusCounts.on_the_border = (statusCounts.on_the_border || 0) + 1;
+      } else if (rawStatus === 'reload') {
+        waitingOrders++;
+        statusCounts.reload = (statusCounts.reload || 0) + 1;
+      } else {
+        waitingOrders++;
+        statusCounts.waiting = (statusCounts.waiting || 0) + 1;
+      }
     }
 
     const totalMarginUzs = totalSalesUzs - totalPurchaseCostUzs;
@@ -426,10 +712,7 @@ export class DashboardService {
       totalSalesUzs > 0 ? (totalMarginUzs / totalSalesUzs) * 100 : 0;
 
     const totalOrders = records.length;
-    const completedOrders = records.filter(
-      (r) => (r.status || '').toLowerCase() === 'completed',
-    ).length;
-    const waitingOrders = totalOrders - completedOrders;
+    const activeOrders = inTransitOrders + waitingOrders;
     const averageOrderValueUzs =
       totalOrders > 0 ? totalMarginUzs / totalOrders : 0;
 
@@ -461,10 +744,13 @@ export class DashboardService {
       let prevSalesUzs = 0;
       let prevCostUzs = 0;
       for (const r of prevRecords) {
-        const { sellPriceUzs, purchasePriceUzs } =
-          await this.convertRecordPricesToUzs(r, rates);
-        prevSalesUzs += sellPriceUzs;
-        prevCostUzs += purchasePriceUzs;
+        const sellPrice = Number(r.sell_price) || 0;
+        const purchasePrice = Number(r.purchase_price) || 0;
+        const sellCurr = (r.sell_currency as Currency) || Currency.UZS;
+        const purchaseCurr = (r.purchase_currency as Currency) || Currency.UZS;
+
+        prevSalesUzs += sellPrice * (multipliers[sellCurr] ?? 1);
+        prevCostUzs += purchasePrice * (multipliers[purchaseCurr] ?? 1);
       }
       const prevMarginUzs = prevSalesUzs - prevCostUzs;
 
@@ -481,18 +767,34 @@ export class DashboardService {
       }
     }
 
-    const totalSales = await this.convertFromUzs(totalSalesUzs, targetCurrency);
-    const totalPurchaseCost = await this.convertFromUzs(
+    // Concurrently compute Monthly and Yearly KPIs, Debt summary, and Delivery efficiency
+    const [monthlyKpi, yearlyKpi, debtSummary, deliveryEfficiency] =
+      await Promise.all([
+        this.getMonthlyKpi(targetCurrency, rates, multipliers, query, refDate),
+        this.getYearlyKpi(targetCurrency, rates, multipliers, query, refDate),
+        this.computeDebtSummary(records, targetCurrency, multipliers),
+        Promise.resolve(this.computeDeliveryEfficiency(records)),
+      ]);
+
+    const totalSales = this.convertFromUzsFast(
+      totalSalesUzs,
+      targetCurrency,
+      multipliers,
+    );
+    const totalPurchaseCost = this.convertFromUzsFast(
       totalPurchaseCostUzs,
       targetCurrency,
+      multipliers,
     );
-    const totalMargin = await this.convertFromUzs(
+    const totalMargin = this.convertFromUzsFast(
       totalMarginUzs,
       targetCurrency,
+      multipliers,
     );
-    const averageOrderValue = await this.convertFromUzs(
+    const averageOrderValue = this.convertFromUzsFast(
       averageOrderValueUzs,
       targetCurrency,
+      multipliers,
     );
 
     return {
@@ -500,10 +802,13 @@ export class DashboardService {
       totalSales,
       totalPurchaseCost,
       totalMargin,
+      netProfit: totalMargin,
       marginPercentage: Math.round(marginPercentage * 100) / 100,
       totalOrders,
-      completedOrders,
+      activeOrders,
+      inTransitOrders,
       waitingOrders,
+      completedOrders,
       averageOrderValue,
       totalVolume: Math.round(totalVolume * 100) / 100,
       totalWeight: Math.round(totalWeight * 100) / 100,
@@ -511,11 +816,16 @@ export class DashboardService {
       ftlOrderCount,
       salesGrowthVsPriorPeriod,
       marginGrowthVsPriorPeriod,
+      monthly: monthlyKpi,
+      yearly: yearlyKpi,
+      debtSummary,
+      deliveryEfficiency,
+      statusCounts,
     };
   }
 
   /**
-   * Donut/Pie Chart Distribution Endpoint (Cargo Type & Status)
+   * Donut / Pie Chart Distribution Endpoint (Transport Types, Cargo Types & Statuses)
    */
   async getCargoDistribution(
     query: DashboardSummaryQueryDto,
@@ -534,15 +844,23 @@ export class DashboardService {
     const rates = this.currencyService
       ? await this.currencyService.getLatestRates()
       : undefined;
+    const multipliers = this.getCurrencyMultipliers(rates);
 
     const totalCount = records.length || 1;
 
-    // Cargo Type distribution
+    // 1. Transport Type distribution
+    const transportTypeDistribution = this.computeTransportDistribution(
+      records,
+      targetCurrency,
+      multipliers,
+    );
+
+    // 2. Cargo Type distribution (FTL vs LTL)
     const cargoTypeMap = new Map<
       string,
       { count: number; totalSalesUzs: number }
     >();
-    // Status distribution
+    // 3. Status distribution
     const statusMap = new Map<
       string,
       { count: number; totalSalesUzs: number }
@@ -551,7 +869,10 @@ export class DashboardService {
     for (const r of records) {
       const typeKey = (r.cargo_type || 'Unknown').toUpperCase();
       const statusKey = r.status || 'Waiting';
-      const { sellPriceUzs } = await this.convertRecordPricesToUzs(r, rates);
+
+      const sellPrice = Number(r.sell_price) || 0;
+      const sellCurr = (r.sell_currency as Currency) || Currency.UZS;
+      const sellPriceUzs = sellPrice * (multipliers[sellCurr] ?? 1);
 
       const typeCurr = cargoTypeMap.get(typeKey) || {
         count: 0,
@@ -572,9 +893,10 @@ export class DashboardService {
 
     const cargoTypeDistribution: CargoDistributionItem[] = [];
     for (const [category, val] of cargoTypeMap.entries()) {
-      const totalSales = await this.convertFromUzs(
+      const totalSales = this.convertFromUzsFast(
         val.totalSalesUzs,
         targetCurrency,
+        multipliers,
       );
       cargoTypeDistribution.push({
         category,
@@ -586,9 +908,10 @@ export class DashboardService {
 
     const statusDistribution: CargoDistributionItem[] = [];
     for (const [category, val] of statusMap.entries()) {
-      const totalSales = await this.convertFromUzs(
+      const totalSales = this.convertFromUzsFast(
         val.totalSalesUzs,
         targetCurrency,
+        multipliers,
       );
       statusDistribution.push({
         category,
@@ -600,9 +923,41 @@ export class DashboardService {
 
     return {
       currency: targetCurrency,
+      transportTypeDistribution,
       cargoTypeDistribution,
       statusDistribution,
     };
+  }
+
+  /**
+   * Route and Country Intelligence Analytics Endpoint (Pie & Bar Charts)
+   */
+  async getRouteAnalytics(
+    query: RouteAnalyticsQueryDto,
+    refDate: Date = new Date(),
+  ): Promise<RouteAnalyticsResponse> {
+    const period = query.period || TimeframePeriod.ONE_MONTH;
+    const limit = query.limit || 10;
+    const targetCurrency = query.currency || Currency.UZS;
+    const range = await this.resolveDateRange(period, query, refDate);
+
+    const records = await this.fetchRegistrations(
+      range.startDate,
+      range.endDate,
+      query,
+    );
+
+    const rates = this.currencyService
+      ? await this.currencyService.getLatestRates()
+      : undefined;
+    const multipliers = this.getCurrencyMultipliers(rates);
+
+    return this.computeRouteAnalytics(
+      records,
+      targetCurrency,
+      multipliers,
+      limit,
+    );
   }
 
   /**
@@ -626,6 +981,7 @@ export class DashboardService {
     const rates = this.currencyService
       ? await this.currencyService.getLatestRates()
       : undefined;
+    const multipliers = this.getCurrencyMultipliers(rates);
 
     // Group by manager
     const managerMap = new Map<
@@ -637,6 +993,10 @@ export class DashboardService {
         salesUzs: number;
         costUzs: number;
         orderCount: number;
+        volume: number;
+        weight: number;
+        completedOrdersCount: number;
+        activeOrdersCount: number;
       }
     >();
 
@@ -650,12 +1010,25 @@ export class DashboardService {
         salesUzs: number;
         costUzs: number;
         orderCount: number;
+        volume: number;
+        weight: number;
       }
     >();
 
     for (const r of records) {
-      const { sellPriceUzs, purchasePriceUzs } =
-        await this.convertRecordPricesToUzs(r, rates);
+      const sellPrice = Number(r.sell_price) || 0;
+      const purchasePrice = Number(r.purchase_price) || 0;
+      const sellCurr = (r.sell_currency as Currency) || Currency.UZS;
+      const purchaseCurr = (r.purchase_currency as Currency) || Currency.UZS;
+
+      const sellPriceUzs = sellPrice * (multipliers[sellCurr] ?? 1);
+      const purchasePriceUzs = purchasePrice * (multipliers[purchaseCurr] ?? 1);
+      const vol = Number(r.volume || 0);
+      const wt = Number(r.weight || 0);
+
+      const st = (r.status || '').toLowerCase();
+      const isCompleted =
+        st === 'completed' || st === 'arrived' || st === 'delivered';
 
       if (r.employee_id) {
         const emp = managerMap.get(r.employee_id) || {
@@ -665,10 +1038,21 @@ export class DashboardService {
           salesUzs: 0,
           costUzs: 0,
           orderCount: 0,
+          volume: 0,
+          weight: 0,
+          completedOrdersCount: 0,
+          activeOrdersCount: 0,
         };
         emp.salesUzs += sellPriceUzs;
         emp.costUzs += purchasePriceUzs;
         emp.orderCount += 1;
+        emp.volume += vol;
+        emp.weight += wt;
+        if (isCompleted) {
+          emp.completedOrdersCount += 1;
+        } else {
+          emp.activeOrdersCount += 1;
+        }
         managerMap.set(r.employee_id, emp);
       }
 
@@ -680,10 +1064,14 @@ export class DashboardService {
           salesUzs: 0,
           costUzs: 0,
           orderCount: 0,
+          volume: 0,
+          weight: 0,
         };
         cl.salesUzs += sellPriceUzs;
         cl.costUzs += purchasePriceUzs;
         cl.orderCount += 1;
+        cl.volume += vol;
+        cl.weight += wt;
         clientMap.set(r.client_id, cl);
       }
     }
@@ -691,41 +1079,49 @@ export class DashboardService {
     // Enhance manager & client names from DB
     const managerIds = Array.from(managerMap.keys());
     if (managerIds.length > 0) {
-      const employees = await this.knex('employees as e')
-        .leftJoin('departments as d', 'e.department_id', 'd.id')
-        .select(
-          'e.id',
-          'e.first_name',
-          'e.last_name',
-          'd.name as department_name',
-        )
-        .whereIn('e.id', managerIds);
+      try {
+        const employees = await this.knex('employees as e')
+          .leftJoin('departments as d', 'e.department_id', 'd.id')
+          .select(
+            'e.id',
+            'e.first_name',
+            'e.last_name',
+            'd.name as department_name',
+          )
+          .whereIn('e.id', managerIds);
 
-      for (const emp of employees) {
-        const item = managerMap.get(emp.id);
-        if (item) {
-          item.employeeName =
-            `${emp.first_name || ''} ${emp.last_name || ''}`.trim() ||
-            'Unknown Manager';
-          item.departmentName = emp.department_name || undefined;
+        for (const emp of employees) {
+          const item = managerMap.get(emp.id);
+          if (item) {
+            item.employeeName =
+              `${emp.first_name || ''} ${emp.last_name || ''}`.trim() ||
+              'Unknown Manager';
+            item.departmentName = emp.department_name || undefined;
+          }
         }
+      } catch {
+        // Safe fallback
       }
     }
 
     const clientIds = Array.from(clientMap.keys());
     if (clientIds.length > 0) {
-      const clients = await this.knex('clients')
-        .select('id', 'first_name', 'last_name', 'company_name')
-        .whereIn('id', clientIds);
+      try {
+        const clients = await this.knex('clients')
+          .select('id', 'first_name', 'last_name', 'company_name')
+          .whereIn('id', clientIds);
 
-      for (const cl of clients) {
-        const item = clientMap.get(cl.id);
-        if (item) {
-          item.clientName =
-            `${cl.first_name || ''} ${cl.last_name || ''}`.trim() ||
-            'Unknown Client';
-          item.companyName = cl.company_name || undefined;
+        for (const cl of clients) {
+          const item = clientMap.get(cl.id);
+          if (item) {
+            item.clientName =
+              `${cl.first_name || ''} ${cl.last_name || ''}`.trim() ||
+              'Unknown Client';
+            item.companyName = cl.company_name || undefined;
+          }
         }
+      } catch {
+        // Safe fallback
       }
     }
 
@@ -739,35 +1135,80 @@ export class DashboardService {
 
     const topManagers: TopPerformerManager[] = [];
     for (const m of sortedManagers) {
-      const totalSales = await this.convertFromUzs(m.salesUzs, targetCurrency);
-      const totalMargin = await this.convertFromUzs(
+      const totalSales = this.convertFromUzsFast(
+        m.salesUzs,
+        targetCurrency,
+        multipliers,
+      );
+      const totalPurchaseCost = this.convertFromUzsFast(
+        m.costUzs,
+        targetCurrency,
+        multipliers,
+      );
+      const totalMargin = this.convertFromUzsFast(
         m.salesUzs - m.costUzs,
         targetCurrency,
+        multipliers,
       );
+      const averageOrderValue =
+        m.orderCount > 0
+          ? Math.round((totalSales / m.orderCount) * 100) / 100
+          : 0;
+      const conversionRate =
+        m.orderCount > 0
+          ? Math.round((m.completedOrdersCount / m.orderCount) * 10000) / 100
+          : 0;
+
       topManagers.push({
         employeeId: m.employeeId,
         employeeName: m.employeeName,
         departmentName: m.departmentName,
         totalSales,
+        totalPurchaseCost,
         totalMargin,
         orderCount: m.orderCount,
+        totalVolume: Math.round(m.volume * 100) / 100,
+        totalWeight: Math.round(m.weight * 100) / 100,
+        averageOrderValue,
+        completedOrdersCount: m.completedOrdersCount,
+        activeOrdersCount: m.activeOrdersCount,
+        conversionRate,
       });
     }
 
     const topClients: TopPerformerClient[] = [];
     for (const c of sortedClients) {
-      const totalSales = await this.convertFromUzs(c.salesUzs, targetCurrency);
-      const totalMargin = await this.convertFromUzs(
+      const totalSales = this.convertFromUzsFast(
+        c.salesUzs,
+        targetCurrency,
+        multipliers,
+      );
+      const totalPurchaseCost = this.convertFromUzsFast(
+        c.costUzs,
+        targetCurrency,
+        multipliers,
+      );
+      const totalMargin = this.convertFromUzsFast(
         c.salesUzs - c.costUzs,
         targetCurrency,
+        multipliers,
       );
+      const averageOrderValue =
+        c.orderCount > 0
+          ? Math.round((totalSales / c.orderCount) * 100) / 100
+          : 0;
+
       topClients.push({
         clientId: c.clientId,
         clientName: c.clientName,
         companyName: c.companyName,
         totalSales,
+        totalPurchaseCost,
         totalMargin,
         orderCount: c.orderCount,
+        totalVolume: Math.round(c.volume * 100) / 100,
+        totalWeight: Math.round(c.weight * 100) / 100,
+        averageOrderValue,
       });
     }
 
@@ -775,6 +1216,784 @@ export class DashboardService {
       currency: targetCurrency,
       topManagers,
       topClients,
+    };
+  }
+
+  /**
+   * Delivery Efficiency and Transit Duration Analytics Endpoint
+   */
+  async getDeliveryEfficiency(
+    query: DeliveryEfficiencyQueryDto,
+    refDate: Date = new Date(),
+  ): Promise<DeliveryEfficiencyKpi> {
+    const period = query.period || TimeframePeriod.ONE_MONTH;
+    const range = await this.resolveDateRange(period, query, refDate);
+
+    const records = await this.fetchRegistrations(
+      range.startDate,
+      range.endDate,
+      query,
+    );
+
+    return this.computeDeliveryEfficiency(records);
+  }
+
+  /**
+   * Accounts Receivable (Debitor) and Accounts Payable (Kreditor) Balance Summary Endpoint
+   */
+  async getDebtSummary(
+    query: DebtSummaryQueryDto,
+    refDate: Date = new Date(),
+  ): Promise<DebtSummaryKpi> {
+    const period = query.period || TimeframePeriod.ONE_MONTH;
+    const targetCurrency = query.currency || Currency.UZS;
+    const range = await this.resolveDateRange(period, query, refDate);
+
+    const records = await this.fetchRegistrations(
+      range.startDate,
+      range.endDate,
+      query,
+    );
+
+    const rates = this.currencyService
+      ? await this.currencyService.getLatestRates()
+      : undefined;
+    const multipliers = this.getCurrencyMultipliers(rates);
+
+    return this.computeDebtSummary(records, targetCurrency, multipliers);
+  }
+
+  // ==========================================
+  // HELPER SUB-ENGINES & ANALYTICS CALCULATORS
+  // ==========================================
+
+  /**
+   * Monthly KPI block calculator (revenue, net profit, growth vs previous month)
+   */
+  private async getMonthlyKpi(
+    targetCurrency: Currency,
+    rates: any,
+    multipliers: Record<string, number>,
+    query: DashboardSummaryQueryDto,
+    refDate: Date = new Date(),
+  ): Promise<PeriodKpiMetric> {
+    const ref = new Date(refDate);
+    const year = ref.getUTCFullYear();
+    const month = ref.getUTCMonth();
+    const day = ref.getUTCDate();
+
+    const curStart = new Date(Date.UTC(year, month, 1, 0, 0, 0, 0));
+    const curEnd = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
+
+    const prevMonthDays = new Date(Date.UTC(year, month, 0)).getUTCDate();
+    const prevEndDay = Math.min(day, prevMonthDays);
+    const prevStart = new Date(Date.UTC(year, month - 1, 1, 0, 0, 0, 0));
+    const prevEnd = new Date(
+      Date.UTC(year, month - 1, prevEndDay, 23, 59, 59, 999),
+    );
+
+    return this.computePeriodKpi(
+      curStart,
+      curEnd,
+      prevStart,
+      prevEnd,
+      targetCurrency,
+      multipliers,
+      query,
+    );
+  }
+
+  /**
+   * Yearly KPI block calculator (revenue, net profit, growth vs previous year)
+   */
+  private async getYearlyKpi(
+    targetCurrency: Currency,
+    rates: any,
+    multipliers: Record<string, number>,
+    query: DashboardSummaryQueryDto,
+    refDate: Date = new Date(),
+  ): Promise<PeriodKpiMetric> {
+    const ref = new Date(refDate);
+    const year = ref.getUTCFullYear();
+    const month = ref.getUTCMonth();
+    const day = ref.getUTCDate();
+
+    const curStart = new Date(Date.UTC(year, 0, 1, 0, 0, 0, 0));
+    const curEnd = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
+
+    const prevStart = new Date(Date.UTC(year - 1, 0, 1, 0, 0, 0, 0));
+    const prevEnd = new Date(Date.UTC(year - 1, month, day, 23, 59, 59, 999));
+
+    return this.computePeriodKpi(
+      curStart,
+      curEnd,
+      prevStart,
+      prevEnd,
+      targetCurrency,
+      multipliers,
+      query,
+    );
+  }
+
+  private async computePeriodKpi(
+    curStart: Date,
+    curEnd: Date,
+    prevStart: Date,
+    prevEnd: Date,
+    targetCurrency: Currency,
+    multipliers: Record<string, number>,
+    query: DashboardSummaryQueryDto,
+  ): Promise<PeriodKpiMetric> {
+    const [curRecords, prevRecords] = await Promise.all([
+      this.fetchRegistrations(curStart, curEnd, query),
+      this.fetchRegistrations(prevStart, prevEnd, query),
+    ]);
+
+    let curSalesUzs = 0;
+    let curCostUzs = 0;
+    for (let i = 0; i < curRecords.length; i++) {
+      const r = curRecords[i];
+      const sPrice = Number(r.sell_price) || 0;
+      const pPrice = Number(r.purchase_price) || 0;
+      const sCurr = (r.sell_currency as Currency) || Currency.UZS;
+      const pCurr = (r.purchase_currency as Currency) || Currency.UZS;
+      curSalesUzs += sPrice * (multipliers[sCurr] ?? 1);
+      curCostUzs += pPrice * (multipliers[pCurr] ?? 1);
+    }
+
+    let prevSalesUzs = 0;
+    let prevCostUzs = 0;
+    for (let i = 0; i < prevRecords.length; i++) {
+      const r = prevRecords[i];
+      const sPrice = Number(r.sell_price) || 0;
+      const pPrice = Number(r.purchase_price) || 0;
+      const sCurr = (r.sell_currency as Currency) || Currency.UZS;
+      const pCurr = (r.purchase_currency as Currency) || Currency.UZS;
+      prevSalesUzs += sPrice * (multipliers[sCurr] ?? 1);
+      prevCostUzs += pPrice * (multipliers[pCurr] ?? 1);
+    }
+
+    const curMarginUzs = curSalesUzs - curCostUzs;
+    const prevMarginUzs = prevSalesUzs - prevCostUzs;
+
+    let revenueGrowthRate: number | null = null;
+    if (prevSalesUzs > 0) {
+      revenueGrowthRate =
+        Math.round(((curSalesUzs - prevSalesUzs) / prevSalesUzs) * 10000) / 100;
+    } else if (curSalesUzs > 0) {
+      revenueGrowthRate = 100;
+    }
+
+    let netProfitGrowthRate: number | null = null;
+    if (prevMarginUzs > 0) {
+      netProfitGrowthRate =
+        Math.round(((curMarginUzs - prevMarginUzs) / prevMarginUzs) * 10000) /
+        100;
+    } else if (curMarginUzs > 0) {
+      netProfitGrowthRate = 100;
+    }
+
+    const revenue = this.convertFromUzsFast(
+      curSalesUzs,
+      targetCurrency,
+      multipliers,
+    );
+    const purchaseCost = this.convertFromUzsFast(
+      curCostUzs,
+      targetCurrency,
+      multipliers,
+    );
+    const netProfit = this.convertFromUzsFast(
+      curMarginUzs,
+      targetCurrency,
+      multipliers,
+    );
+    const marginPercentage =
+      curSalesUzs > 0
+        ? Math.round((curMarginUzs / curSalesUzs) * 10000) / 100
+        : 0;
+
+    return {
+      revenue,
+      purchaseCost,
+      netProfit,
+      marginPercentage,
+      revenueGrowthRate,
+      netProfitGrowthRate,
+      orderCount: curRecords.length,
+    };
+  }
+
+  /**
+   * Transport Type distribution calculation (Auto, Railway, Air, Sea)
+   */
+  private computeTransportDistribution(
+    records: any[],
+    targetCurrency: Currency,
+    multipliers: Record<string, number>,
+  ): TransportDistributionItem[] {
+    const typeMap = new Map<
+      TransportType,
+      {
+        count: number;
+        salesUzs: number;
+        costUzs: number;
+        volume: number;
+        weight: number;
+      }
+    >();
+
+    for (const t of [
+      TransportType.AUTO,
+      TransportType.RAILWAY,
+      TransportType.AIR,
+      TransportType.SEA,
+      TransportType.OTHER,
+    ]) {
+      typeMap.set(t, {
+        count: 0,
+        salesUzs: 0,
+        costUzs: 0,
+        volume: 0,
+        weight: 0,
+      });
+    }
+
+    const totalCount = records.length || 1;
+
+    for (const r of records) {
+      const tType = this.classifyTransportType(
+        r.container_type,
+        r.cargo_type,
+        r.container_truck_id,
+      );
+      const sPrice = Number(r.sell_price) || 0;
+      const pPrice = Number(r.purchase_price) || 0;
+      const sCurr = (r.sell_currency as Currency) || Currency.UZS;
+      const pCurr = (r.purchase_currency as Currency) || Currency.UZS;
+      const sUzs = sPrice * (multipliers[sCurr] ?? 1);
+      const pUzs = pPrice * (multipliers[pCurr] ?? 1);
+      const vol = Number(r.volume) || 0;
+      const wt = Number(r.weight) || 0;
+
+      const item = typeMap.get(tType)!;
+      item.count += 1;
+      item.salesUzs += sUzs;
+      item.costUzs += pUzs;
+      item.volume += vol;
+      item.weight += wt;
+    }
+
+    const result: TransportDistributionItem[] = [];
+    for (const [tType, val] of typeMap.entries()) {
+      if (
+        val.count > 0 ||
+        tType === TransportType.AUTO ||
+        tType === TransportType.RAILWAY ||
+        tType === TransportType.AIR ||
+        tType === TransportType.SEA
+      ) {
+        result.push({
+          type: tType,
+          name: this.getTransportTypeName(tType),
+          count: val.count,
+          percentage: Math.round((val.count / totalCount) * 10000) / 100,
+          totalSales: this.convertFromUzsFast(
+            val.salesUzs,
+            targetCurrency,
+            multipliers,
+          ),
+          totalMargin: this.convertFromUzsFast(
+            val.salesUzs - val.costUzs,
+            targetCurrency,
+            multipliers,
+          ),
+          totalVolume: Math.round(val.volume * 100) / 100,
+          totalWeight: Math.round(val.weight * 100) / 100,
+        });
+      }
+    }
+
+    return result.sort((a, b) => b.count - a.count);
+  }
+
+  /**
+   * Route & Country intelligence analytics calculator
+   */
+  private computeRouteAnalytics(
+    records: any[],
+    targetCurrency: Currency,
+    multipliers: Record<string, number>,
+    limit: number = 10,
+  ): RouteAnalyticsResponse {
+    const routeMap = new Map<
+      string,
+      {
+        route: string;
+        originCountry?: string;
+        originCity?: string;
+        destinationCountry?: string;
+        destinationCity?: string;
+        count: number;
+        salesUzs: number;
+        costUzs: number;
+        volume: number;
+        weight: number;
+      }
+    >();
+
+    const originCountryMap = new Map<
+      string,
+      {
+        countryName: string;
+        countryCode?: string;
+        count: number;
+        salesUzs: number;
+        volume: number;
+        weight: number;
+      }
+    >();
+
+    const destCountryMap = new Map<
+      string,
+      {
+        countryName: string;
+        countryCode?: string;
+        count: number;
+        salesUzs: number;
+        volume: number;
+        weight: number;
+      }
+    >();
+
+    const totalCount = records.length || 1;
+
+    for (const r of records) {
+      const sPrice = Number(r.sell_price) || 0;
+      const pPrice = Number(r.purchase_price) || 0;
+      const sCurr = (r.sell_currency as Currency) || Currency.UZS;
+      const pCurr = (r.purchase_currency as Currency) || Currency.UZS;
+      const sUzs = sPrice * (multipliers[sCurr] ?? 1);
+      const pUzs = pPrice * (multipliers[pCurr] ?? 1);
+      const vol = Number(r.volume) || 0;
+      const wt = Number(r.weight) || 0;
+
+      const originCountry =
+        r.origin_country || (r.origin_city ? 'China' : 'Xitoy (China)');
+      const destCountry =
+        r.destination_country ||
+        (r.destination_city ? "O'zbekiston" : "O'zbekiston (Uzbekistan)");
+      const originCity = r.origin_city;
+      const destCity = r.destination_city;
+
+      const routeLabel =
+        originCity && destCity
+          ? `${originCity} (${originCountry}) – ${destCity} (${destCountry})`
+          : `${originCountry} – ${destCountry}`;
+
+      const rm = routeMap.get(routeLabel) || {
+        route: routeLabel,
+        originCountry,
+        originCity,
+        destinationCountry: destCountry,
+        destinationCity: destCity,
+        count: 0,
+        salesUzs: 0,
+        costUzs: 0,
+        volume: 0,
+        weight: 0,
+      };
+      rm.count += 1;
+      rm.salesUzs += sUzs;
+      rm.costUzs += pUzs;
+      rm.volume += vol;
+      rm.weight += wt;
+      routeMap.set(routeLabel, rm);
+
+      // Origin country
+      const origKey = originCountry || 'Unknown Origin';
+      const oc = originCountryMap.get(origKey) || {
+        countryName: origKey,
+        countryCode: r.origin_country_code,
+        count: 0,
+        salesUzs: 0,
+        volume: 0,
+        weight: 0,
+      };
+      oc.count += 1;
+      oc.salesUzs += sUzs;
+      oc.volume += vol;
+      oc.weight += wt;
+      originCountryMap.set(origKey, oc);
+
+      // Destination country
+      const destKey = destCountry || 'Unknown Destination';
+      const dc = destCountryMap.get(destKey) || {
+        countryName: destKey,
+        countryCode: r.destination_country_code,
+        count: 0,
+        salesUzs: 0,
+        volume: 0,
+        weight: 0,
+      };
+      dc.count += 1;
+      dc.salesUzs += sUzs;
+      dc.volume += vol;
+      dc.weight += wt;
+      destCountryMap.set(destKey, dc);
+    }
+
+    const topRoutes: RouteDistributionItem[] = Array.from(routeMap.values())
+      .sort((a, b) => b.count - a.count || b.salesUzs - a.salesUzs)
+      .slice(0, limit)
+      .map((r) => ({
+        route: r.route,
+        originCountry: r.originCountry,
+        originCity: r.originCity,
+        destinationCountry: r.destinationCountry,
+        destinationCity: r.destinationCity,
+        count: r.count,
+        percentage: Math.round((r.count / totalCount) * 10000) / 100,
+        totalSales: this.convertFromUzsFast(
+          r.salesUzs,
+          targetCurrency,
+          multipliers,
+        ),
+        totalMargin: this.convertFromUzsFast(
+          r.salesUzs - r.costUzs,
+          targetCurrency,
+          multipliers,
+        ),
+        totalVolume: Math.round(r.volume * 100) / 100,
+        totalWeight: Math.round(r.weight * 100) / 100,
+      }));
+
+    const originCountries: CountryDistributionItem[] = Array.from(
+      originCountryMap.values(),
+    )
+      .sort((a, b) => b.count - a.count)
+      .map((c) => ({
+        countryName: c.countryName,
+        countryCode: c.countryCode,
+        count: c.count,
+        percentage: Math.round((c.count / totalCount) * 10000) / 100,
+        totalSales: this.convertFromUzsFast(
+          c.salesUzs,
+          targetCurrency,
+          multipliers,
+        ),
+        totalVolume: Math.round(c.volume * 100) / 100,
+        totalWeight: Math.round(c.weight * 100) / 100,
+      }));
+
+    const destinationCountries: CountryDistributionItem[] = Array.from(
+      destCountryMap.values(),
+    )
+      .sort((a, b) => b.count - a.count)
+      .map((c) => ({
+        countryName: c.countryName,
+        countryCode: c.countryCode,
+        count: c.count,
+        percentage: Math.round((c.count / totalCount) * 10000) / 100,
+        totalSales: this.convertFromUzsFast(
+          c.salesUzs,
+          targetCurrency,
+          multipliers,
+        ),
+        totalVolume: Math.round(c.volume * 100) / 100,
+        totalWeight: Math.round(c.weight * 100) / 100,
+      }));
+
+    return {
+      currency: targetCurrency,
+      topRoutes,
+      originCountries,
+      destinationCountries,
+    };
+  }
+
+  /**
+   * Debitor (Accounts Receivable) & Kreditor (Accounts Payable) calculator
+   */
+  private async computeDebtSummary(
+    records: any[],
+    targetCurrency: Currency,
+    multipliers: Record<string, number>,
+  ): Promise<DebtSummaryKpi> {
+    const activeRecords = records.filter((r) => {
+      const st = (r.status || '').toLowerCase();
+      return st !== 'arrived' && st !== 'delivered' && st !== 'completed';
+    });
+
+    const targetRecords = activeRecords.length > 0 ? activeRecords : records;
+
+    let totalReceivableUzs = 0;
+    let totalPayableUzs = 0;
+
+    const debtorMap = new Map<
+      string,
+      {
+        clientId: string;
+        clientName: string;
+        companyName?: string;
+        amountUzs: number;
+        orderCount: number;
+      }
+    >();
+    const creditorMap = new Map<
+      string,
+      { agentName: string; amountUzs: number; orderCount: number }
+    >();
+
+    for (const r of targetRecords) {
+      const sellPrice = Number(r.sell_price) || 0;
+      const purchasePrice = Number(r.purchase_price) || 0;
+      const sellCurr = (r.sell_currency as Currency) || Currency.UZS;
+      const purchaseCurr = (r.purchase_currency as Currency) || Currency.UZS;
+
+      const sellUzs = sellPrice * (multipliers[sellCurr] ?? 1);
+      const purchaseUzs = purchasePrice * (multipliers[purchaseCurr] ?? 1);
+
+      totalReceivableUzs += sellUzs;
+      totalPayableUzs += purchaseUzs;
+
+      if (r.client_id) {
+        const d = debtorMap.get(r.client_id) || {
+          clientId: r.client_id,
+          clientName: 'Client',
+          amountUzs: 0,
+          orderCount: 0,
+        };
+        d.amountUzs += sellUzs;
+        d.orderCount += 1;
+        debtorMap.set(r.client_id, d);
+      }
+
+      if (r.agent_name) {
+        const agentKey = r.agent_name.trim();
+        const c = creditorMap.get(agentKey) || {
+          agentName: agentKey,
+          amountUzs: 0,
+          orderCount: 0,
+        };
+        c.amountUzs += purchaseUzs;
+        c.orderCount += 1;
+        creditorMap.set(agentKey, c);
+      }
+    }
+
+    const clientIds = Array.from(debtorMap.keys());
+    if (clientIds.length > 0) {
+      try {
+        const clients = await this.knex('clients')
+          .select('id', 'first_name', 'last_name', 'company_name')
+          .whereIn('id', clientIds);
+        for (const cl of clients) {
+          const item = debtorMap.get(cl.id);
+          if (item) {
+            item.clientName =
+              `${cl.first_name || ''} ${cl.last_name || ''}`.trim() ||
+              cl.company_name ||
+              'Client';
+            item.companyName = cl.company_name || undefined;
+          }
+        }
+      } catch {
+        // Safe fallback
+      }
+    }
+
+    const topDebtorClients: DebtorClientItem[] = Array.from(debtorMap.values())
+      .sort((a, b) => b.amountUzs - a.amountUzs)
+      .slice(0, 5)
+      .map((d) => ({
+        clientId: d.clientId,
+        clientName: d.clientName,
+        companyName: d.companyName,
+        amount: this.convertFromUzsFast(
+          d.amountUzs,
+          targetCurrency,
+          multipliers,
+        ),
+        orderCount: d.orderCount,
+      }));
+
+    const topCreditorCarriers: CreditorCarrierItem[] = Array.from(
+      creditorMap.values(),
+    )
+      .sort((a, b) => b.amountUzs - a.amountUzs)
+      .slice(0, 5)
+      .map((c) => ({
+        agentName: c.agentName,
+        amount: this.convertFromUzsFast(
+          c.amountUzs,
+          targetCurrency,
+          multipliers,
+        ),
+        orderCount: c.orderCount,
+      }));
+
+    const accountsReceivable = this.convertFromUzsFast(
+      totalReceivableUzs,
+      targetCurrency,
+      multipliers,
+    );
+    const accountsPayable = this.convertFromUzsFast(
+      totalPayableUzs,
+      targetCurrency,
+      multipliers,
+    );
+    const netBalance =
+      Math.round((accountsReceivable - accountsPayable) * 100) / 100;
+
+    return {
+      currency: targetCurrency,
+      accountsReceivable,
+      accountsPayable,
+      netBalance,
+      debtorClientCount: debtorMap.size,
+      creditorCarrierCount: creditorMap.size,
+      topDebtorClients,
+      topCreditorCarriers,
+    };
+  }
+
+  /**
+   * Delivery efficiency and transit time calculator
+   */
+  private computeDeliveryEfficiency(records: any[]): DeliveryEfficiencyKpi {
+    const arrivedRecords: any[] = [];
+    const inTransitRecords: any[] = [];
+    const statusCountMap = new Map<
+      string,
+      { count: number; sales: number; volume: number; weight: number }
+    >();
+
+    for (const r of records) {
+      const st = r.status || 'Waiting';
+      const stLower = st.toLowerCase();
+      const sc = statusCountMap.get(st) || {
+        count: 0,
+        sales: 0,
+        volume: 0,
+        weight: 0,
+      };
+      sc.count += 1;
+      sc.sales += Number(r.sell_price) || 0;
+      sc.volume += Number(r.volume) || 0;
+      sc.weight += Number(r.weight) || 0;
+      statusCountMap.set(st, sc);
+
+      if (
+        stLower === 'arrived' ||
+        stLower === 'completed' ||
+        stLower === 'delivered' ||
+        r.arrived_date
+      ) {
+        arrivedRecords.push(r);
+      } else if (stLower === 'on the way' || stLower === 'in transit') {
+        inTransitRecords.push(r);
+      }
+    }
+
+    const transitDaysList: number[] = [];
+    const routeTransitMap = new Map<
+      string,
+      { totalDays: number; count: number }
+    >();
+    let onTimeDeliveriesCount = 0;
+    let delayedDeliveriesCount = 0;
+
+    for (const r of arrivedRecords) {
+      const startRaw = r.loaded_date || r.confirmed_date || r.created_at;
+      const endRaw = r.arrived_date;
+      if (startRaw && endRaw) {
+        const start = new Date(startRaw);
+        const end = new Date(endRaw);
+        if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+          const diffDays = Math.max(
+            0,
+            Math.round(
+              (end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24),
+            ),
+          );
+          transitDaysList.push(diffDays);
+
+          const origin = r.origin_country || r.origin_city || 'Origin';
+          const dest =
+            r.destination_country || r.destination_city || 'Uzbekistan';
+          const routeKey = `${origin} – ${dest}`;
+          const rt = routeTransitMap.get(routeKey) || {
+            totalDays: 0,
+            count: 0,
+          };
+          rt.totalDays += diffDays;
+          rt.count += 1;
+          routeTransitMap.set(routeKey, rt);
+
+          if (diffDays <= 25) {
+            onTimeDeliveriesCount++;
+          } else {
+            delayedDeliveriesCount++;
+          }
+        }
+      }
+    }
+
+    let averageTransitDays = 0;
+    let minTransitDays = 0;
+    let maxTransitDays = 0;
+    if (transitDaysList.length > 0) {
+      const sum = transitDaysList.reduce((a, b) => a + b, 0);
+      averageTransitDays = Math.round((sum / transitDaysList.length) * 10) / 10;
+      minTransitDays = Math.min(...transitDaysList);
+      maxTransitDays = Math.max(...transitDaysList);
+    }
+
+    const totalDeliveredCount = arrivedRecords.length;
+    const totalInTransitCount = inTransitRecords.length;
+    const totalActiveCount = records.length - totalDeliveredCount;
+    const onTimeRatePercentage =
+      transitDaysList.length > 0
+        ? Math.round((onTimeDeliveriesCount / transitDaysList.length) * 10000) /
+          100
+        : 100;
+
+    const totalCount = records.length || 1;
+    const statusBreakdown: StatusBreakdownItem[] = [];
+    for (const [st, val] of statusCountMap.entries()) {
+      statusBreakdown.push({
+        status: st,
+        label: st,
+        count: val.count,
+        percentage: Math.round((val.count / totalCount) * 10000) / 100,
+        totalSales: Math.round(val.sales * 100) / 100,
+        totalVolume: Math.round(val.volume * 100) / 100,
+        totalWeight: Math.round(val.weight * 100) / 100,
+      });
+    }
+
+    const routeTransitTimes: RouteTransitTimeItem[] = [];
+    for (const [route, val] of routeTransitMap.entries()) {
+      routeTransitTimes.push({
+        route,
+        averageTransitDays: Math.round((val.totalDays / val.count) * 10) / 10,
+        count: val.count,
+      });
+    }
+
+    return {
+      averageTransitDays,
+      minTransitDays,
+      maxTransitDays,
+      totalDeliveredCount,
+      totalInTransitCount,
+      totalActiveCount,
+      onTimeDeliveriesCount,
+      delayedDeliveriesCount,
+      onTimeRatePercentage,
+      statusBreakdown,
+      routeTransitTimes,
     };
   }
 
@@ -802,7 +2021,6 @@ export class DashboardService {
 
     const ref = new Date(refDate);
 
-    // Extract UTC components from reference date
     const year = ref.getUTCFullYear();
     const month = ref.getUTCMonth();
     const day = ref.getUTCDate();
@@ -882,7 +2100,6 @@ export class DashboardService {
       }
 
       case TimeframePeriod.MAX: {
-        // Query earliest recorded date from DB
         const minRow = await this.knex('cargo_registrations')
           .min('confirmed_date as min_date')
           .first();
@@ -905,7 +2122,6 @@ export class DashboardService {
         }
         endDate = new Date(Date.UTC(year, month, day, 23, 59, 59, 999));
 
-        // Auto granularity based on span
         const diffDays = Math.ceil(
           (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24),
         );
@@ -945,7 +2161,6 @@ export class DashboardService {
           throw new BadRequestException('start_date cannot be after end_date');
         }
 
-        // Set to full day boundary if time portion was not specified
         if (!query.start_date.includes('T')) {
           startDate = new Date(
             Date.UTC(
@@ -1018,6 +2233,7 @@ export class DashboardService {
       client_id?: string;
       status?: string;
       cargo_type?: string;
+      transport_type?: TransportType;
     },
   ) {
     const startDateStr = start.toISOString().slice(0, 10);
@@ -1038,6 +2254,43 @@ export class DashboardService {
     }
     if (query.cargo_type) {
       dbQuery.where('cargo_type', query.cargo_type);
+    }
+
+    const rows = await dbQuery;
+
+    if (query.transport_type) {
+      return rows.filter(
+        (r) =>
+          this.classifyTransportType(
+            r.container_type,
+            r.cargo_type,
+            r.container_truck_id,
+          ) === query.transport_type,
+      );
+    }
+
+    return rows;
+  }
+
+  /**
+   * Fetch operational expenses for a date range
+   */
+  private async fetchExpenses(
+    start: Date,
+    end: Date,
+    query: {
+      employee_id?: string;
+    },
+  ) {
+    const startDateStr = start.toISOString().slice(0, 10);
+    const endDateStr = end.toISOString().slice(0, 10);
+
+    const dbQuery = this.knex('expenses')
+      .select('*')
+      .whereBetween('expense_date', [startDateStr, endDateStr]);
+
+    if (query.employee_id) {
+      dbQuery.where('employee_id', query.employee_id);
     }
 
     return dbQuery;
@@ -1204,42 +2457,5 @@ export class DashboardService {
     }
 
     return buckets;
-  }
-
-  /**
-   * Matches records into generated buckets
-   */
-  private async populateBucketsWithData(
-    buckets: Array<{
-      bucketStart: Date;
-      bucketEnd: Date;
-      sales: number;
-      purchaseCost: number;
-      margin: number;
-      orderCount: number;
-    }>,
-    records: any[],
-    rates?: Record<Currency, any>,
-  ) {
-    for (const record of records) {
-      const recDate = new Date(record.confirmed_date || record.created_at);
-      if (isNaN(recDate.getTime())) continue;
-
-      const { sellPriceUzs, purchasePriceUzs } =
-        await this.convertRecordPricesToUzs(record, rates);
-      const margin = sellPriceUzs - purchasePriceUzs;
-
-      // Find target bucket
-      const bucket = buckets.find(
-        (b) => recDate >= b.bucketStart && recDate <= b.bucketEnd,
-      );
-
-      if (bucket) {
-        bucket.sales += sellPriceUzs;
-        bucket.purchaseCost += purchasePriceUzs;
-        bucket.margin += margin;
-        bucket.orderCount += 1;
-      }
-    }
   }
 }

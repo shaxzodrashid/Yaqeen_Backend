@@ -1,7 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { DashboardService } from './dashboard.service';
 import { KNEX_CONNECTION } from '../database/database.module';
-import { TimeframePeriod, Granularity } from './dashboard.types';
+import { TimeframePeriod, Granularity, TransportType } from './dashboard.types';
 import { BadRequestException } from '@nestjs/common';
 import { CurrencyService } from '../currency/currency.service';
 import { Currency } from '../currency/currency.types';
@@ -366,6 +366,224 @@ describe('DashboardService', () => {
     });
   });
 
+  describe('classifyTransportType', () => {
+    it('should classify various container types and cargo types accurately', () => {
+      expect(service.classifyTransportType('air-delivery')).toBe(
+        TransportType.AIR,
+      );
+      expect(service.classifyTransportType('Air freight')).toBe(
+        TransportType.AIR,
+      );
+      expect(service.classifyTransportType('40HQ')).toBe(TransportType.RAILWAY);
+      expect(service.classifyTransportType('20GP')).toBe(TransportType.RAILWAY);
+      expect(service.classifyTransportType('40 HC')).toBe(
+        TransportType.RAILWAY,
+      );
+      expect(service.classifyTransportType('96m3')).toBe(TransportType.AUTO);
+      expect(service.classifyTransportType('120 CBM')).toBe(TransportType.AUTO);
+      expect(service.classifyTransportType('Ref Fura')).toBe(
+        TransportType.AUTO,
+      );
+      expect(service.classifyTransportType(null, 'FTL')).toBe(
+        TransportType.AUTO,
+      );
+      expect(service.classifyTransportType(null, 'LTL')).toBe(
+        TransportType.AUTO,
+      );
+      expect(service.classifyTransportType('sea container')).toBe(
+        TransportType.SEA,
+      );
+    });
+
+    it('should return human-readable transport type names', () => {
+      expect(service.getTransportTypeName(TransportType.AUTO)).toContain(
+        'Avtotransport',
+      );
+      expect(service.getTransportTypeName(TransportType.RAILWAY)).toContain(
+        "Temir yo'l",
+      );
+      expect(service.getTransportTypeName(TransportType.AIR)).toContain(
+        'Havo transporti',
+      );
+      expect(service.getTransportTypeName(TransportType.SEA)).toContain(
+        'Dengiz transporti',
+      );
+    });
+  });
+
+  describe('getRouteAnalytics', () => {
+    it('should calculate route analytics, origin countries and destination countries', async () => {
+      const mockRecords = [
+        {
+          id: 'reg-1',
+          sell_price: '5000',
+          purchase_price: '3500',
+          origin_country: 'China',
+          origin_city: 'Guangzhou',
+          destination_country: 'Uzbekistan',
+          destination_city: 'Tashkent',
+          volume: '20',
+          weight: '1000',
+          confirmed_date: '2026-08-01',
+        },
+        {
+          id: 'reg-2',
+          sell_price: '4000',
+          purchase_price: '2800',
+          origin_country: 'Turkey',
+          origin_city: 'Istanbul',
+          destination_country: 'Uzbekistan',
+          destination_city: 'Tashkent',
+          volume: '15',
+          weight: '800',
+          confirmed_date: '2026-08-02',
+        },
+      ];
+
+      const chainable = {
+        select: jest.fn().mockReturnThis(),
+        whereBetween: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        then: jest.fn().mockImplementation((cb) => cb(mockRecords)),
+      };
+      knexMock.mockReturnValue(chainable);
+
+      const res = await service.getRouteAnalytics(
+        { period: TimeframePeriod.ONE_MONTH },
+        mockRefDate,
+      );
+
+      expect(res.topRoutes.length).toBe(2);
+      expect(res.originCountries.length).toBe(2);
+      expect(res.destinationCountries.length).toBe(1);
+      expect(res.topRoutes[0].count).toBe(1);
+      expect(res.topRoutes[0].totalSales).toBeGreaterThan(0);
+    });
+  });
+
+  describe('getDebtSummary', () => {
+    it('should compute accounts receivable, accounts payable and net balance', async () => {
+      const mockRecords = [
+        {
+          id: 'reg-active-1',
+          client_id: 'cl-1',
+          agent_name: 'Carrier A',
+          sell_price: '6000',
+          purchase_price: '4000',
+          status: 'On the way',
+          confirmed_date: '2026-08-01',
+        },
+        {
+          id: 'reg-active-2',
+          client_id: 'cl-2',
+          agent_name: 'Carrier B',
+          sell_price: '3000',
+          purchase_price: '2000',
+          status: 'Waiting',
+          confirmed_date: '2026-08-02',
+        },
+      ];
+
+      const chainable = {
+        select: jest.fn().mockReturnThis(),
+        whereBetween: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        whereIn: jest.fn().mockReturnValue([
+          {
+            id: 'cl-1',
+            first_name: 'Alisher',
+            last_name: 'Navoiy',
+            company_name: 'OOO Logistics',
+          },
+          {
+            id: 'cl-2',
+            first_name: 'Bobur',
+            last_name: 'Zahiriddin',
+            company_name: 'OOO Silk Road',
+          },
+        ]),
+        then: jest.fn().mockImplementation((cb) => cb(mockRecords)),
+      };
+      knexMock.mockReturnValue(chainable);
+
+      const res = await service.getDebtSummary(
+        { period: TimeframePeriod.ONE_MONTH },
+        mockRefDate,
+      );
+
+      expect(res.accountsReceivable).toBe(9000);
+      expect(res.accountsPayable).toBe(6000);
+      expect(res.netBalance).toBe(3000);
+      expect(res.debtorClientCount).toBe(2);
+      expect(res.creditorCarrierCount).toBe(2);
+      expect(res.topDebtorClients?.length).toBe(2);
+      expect(res.topCreditorCarriers?.length).toBe(2);
+    });
+  });
+
+  describe('getDeliveryEfficiency', () => {
+    it('should compute transit days, delivery efficiency and route transit times', async () => {
+      const mockRecords = [
+        {
+          id: 'reg-delivered-1',
+          origin_country: 'China',
+          destination_country: 'Uzbekistan',
+          status: 'Arrived',
+          loaded_date: '2026-07-20',
+          arrived_date: '2026-08-01', // 12 days
+          sell_price: '5000',
+          volume: '20',
+          weight: '1000',
+          confirmed_date: '2026-07-20',
+        },
+        {
+          id: 'reg-delivered-2',
+          origin_country: 'Turkey',
+          destination_country: 'Uzbekistan',
+          status: 'Arrived',
+          loaded_date: '2026-07-25',
+          arrived_date: '2026-08-02', // 8 days
+          sell_price: '4000',
+          volume: '15',
+          weight: '800',
+          confirmed_date: '2026-07-25',
+        },
+        {
+          id: 'reg-in-transit',
+          origin_country: 'China',
+          destination_country: 'Uzbekistan',
+          status: 'On the way',
+          confirmed_date: '2026-08-05',
+          sell_price: '3000',
+          volume: '10',
+          weight: '500',
+        },
+      ];
+
+      const chainable = {
+        select: jest.fn().mockReturnThis(),
+        whereBetween: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        then: jest.fn().mockImplementation((cb) => cb(mockRecords)),
+      };
+      knexMock.mockReturnValue(chainable);
+
+      const res = await service.getDeliveryEfficiency(
+        { period: TimeframePeriod.ONE_MONTH },
+        mockRefDate,
+      );
+
+      expect(res.totalDeliveredCount).toBe(2);
+      expect(res.totalInTransitCount).toBe(1);
+      expect(res.averageTransitDays).toBe(10); // (12 + 8) / 2
+      expect(res.minTransitDays).toBe(8);
+      expect(res.maxTransitDays).toBe(12);
+      expect(res.onTimeRatePercentage).toBe(100);
+      expect(res.statusBreakdown?.length).toBe(2);
+      expect(res.routeTransitTimes?.length).toBe(2);
+    });
+  });
+
   describe('getTopPerformers', () => {
     it('should calculate top performers applying date filter on confirmed_date', async () => {
       const mockRecords = [
@@ -375,6 +593,7 @@ describe('DashboardService', () => {
           sell_price: '50000',
           purchase_price: '30000',
           confirmed_date: '2026-08-01',
+          status: 'Arrived',
         },
       ];
 
@@ -408,6 +627,7 @@ describe('DashboardService', () => {
       expect(result.topManagers[0].employeeId).toBe('emp-1');
       expect(result.topManagers[0].totalSales).toBe(50000);
       expect(result.topManagers[0].totalMargin).toBe(20000);
+      expect(result.topManagers[0].conversionRate).toBe(100);
     });
   });
 });

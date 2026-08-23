@@ -2,9 +2,17 @@
 
 This document provides comprehensive, production-grade documentation for the **Dashboard & Analytics Module** (`/dashboard/*`) in the Yaqeen Backend ERP.
 
-The module provides executive analytical overviews, donut/pie chart data, manager and client leaderboards, and a line graph endpoint with timeframe period filters (`1D`, `5D`, `1M`, `6M`, `YTD`, `1Y`, `5Y`, `MAX`, `CUSTOM`), continuous zero-filled time buckets, running cumulative sales trajectory, and period-over-period growth rates.
+The module powers:
 
-All data aggregations operate exclusively on the **`cargo_registrations`** table in PostgreSQL.
+1. **Asosiy KPI bloklari (Yuqori kassetalar)**:
+   - **Umumiy daromad va sof foyda**: Oylik va yillik tushum, sof foyda va ularning o'tgan davrga nisbatan o'sish foizi (`revenueGrowthRate`, `netProfitGrowthRate`).
+   - **Faol va yakunlangan yuklar**: Yo'lda bo'lgan (`inTransitOrders`), stansiyada/chegarada yuklanayotgan (`waitingOrders`) va yetkazib berilgan (`completedOrders`) yuklar soni hamda to'liq `statusCounts`.
+   - **Qarzdorlik (Debitor / Kreditor)**: Mijozlarning to'lanmagan hisoblari (`accountsReceivable`), tashuvchi/agentlarga qarzdorliklar (`accountsPayable`) va sof balans (`netBalance`).
+2. **Analytics va Grafika bloklari**:
+   - **Yo'nalishlar va transport turlari tahlili (Pie / Donut Chart)**: Avto, Temir yo'l, Havo, Dengiz transportlari ulushi (`/dashboard/cargo-distribution`), hamda Xitoy – O'zbekiston, Turkiya – O'zbekiston va h.k. yo'nalishlar tahlili (`/dashboard/route-analytics`).
+   - **Tushum va xarajatlar dinamikasi (Line Chart)**: Kunlik yoki oylik daromad, xarajatlar va sof foydaning parallel o'sish/tushish grafigi (`/dashboard/sales-progress`).
+   - **Menejerlar va sotuv ko'rsatkichlari (Bar Chart)**: Menejerlarning buyurtmalar soni, daromadi, sof marjasi, yuk hajmi/og'irligi va konversiyasi (`/dashboard/top-performers`).
+   - **Yuk yetkazish vaqti va samaradorlik (Status Tracking)**: O'rtacha yetkazish kunlari, o'z vaqtida yetkazish foizi (`onTimeRatePercentage`) va yo'nalishlar bo'yicha transit muddatlari (`/dashboard/delivery-efficiency`).
 
 ---
 
@@ -19,171 +27,181 @@ Authorization: Bearer <your_access_token>
 ### Guards Applied:
 
 - **`JwtAuthGuard`**: Validates JWT token signature and expiration.
-- **`PermissionsGuard`**: Ensures authenticated user account is active.
+- **`PermissionsGuard`**: Ensures authenticated user account is active and authorized.
 
 ---
 
 ## 2. Endpoints Overview
 
-| Endpoint                            | Method | Description                                                                                                                          |
-| :---------------------------------- | :----- | :----------------------------------------------------------------------------------------------------------------------------------- |
-| **`/dashboard/sales-progress`**     | `GET`  | Sales progress line graph data with period filters, continuous zero-filled time buckets, cumulative trendlines, and growth metrics.  |
-| **`/dashboard/summary`**            | `GET`  | Executive KPI cards summary (Total Revenue, Total Purchase Cost, Net Profit Margin, Order Counts, Volume, Weight, and Growth rates). |
-| **`/dashboard/cargo-distribution`** | `GET`  | Pie/Donut chart distribution metrics (Cargo Type: LTL vs FTL, and Order Statuses).                                                   |
-| **`/dashboard/top-performers`**     | `GET`  | Bar chart leaderboard metrics for Top Sales Managers and Top Clients.                                                                |
+| Endpoint                             | Method | Description                                                                                                               |
+| :----------------------------------- | :----- | :------------------------------------------------------------------------------------------------------------------------ |
+| **`/dashboard/summary`**             | `GET`  | Yuqori KPI kassetalari (Oylik/Yillik daromad, sof foyda, o'sish %, faol/yakunlangan yuklar, debitor/kreditor qarzdorlik). |
+| **`/dashboard/sales-progress`**      | `GET`  | Tushum, xarajat va sof foyda dinamikasi grafigi (Line Chart) bilan period filtrlari, doimiy zero-filled vaqt bucketlari.  |
+| **`/dashboard/cargo-distribution`**  | `GET`  | Transport turlari (Avto, Temir yo'l, Havo, Dengiz), yuk turlari (LTL vs FTL) va statuslar ulushi (Pie/Donut Chart).       |
+| **`/dashboard/route-analytics`**     | `GET`  | Yo'nalishlar va davlatlar kesimidagi hajm va tushum tahlili (Xitoy – O'zbekiston, Turkiya va h.k.).                       |
+| **`/dashboard/top-performers`**      | `GET`  | Menejerlar va eng yirik mijozlar ko'rsatkichlari (Bar Chart leaderboards).                                                |
+| **`/dashboard/delivery-efficiency`** | `GET`  | Yuk yetkazish vaqtlari (o'rtacha transit kunlari, on-time rate %, yo'nalishlar bo'yicha tezlik).                          |
+| **`/dashboard/debt-summary`**        | `GET`  | Debitor (Mijozlar qarzi) va Kreditor (Tashuvchilar oldidagi qarz) balansi va eng katta qarzdorlar ro'yxati.               |
 
 ---
 
-## 3. Data Source & Entity Mapping
+## 3. Timeframe Period Filters & Rules
 
-All analytics metrics are derived from the `cargo_registrations` table:
+All timeframe boundaries are calculated deterministically in UTC:
 
-| Column Name      | Data Type       | Usage in Dashboard Analytics                                                                                |
-| :--------------- | :-------------- | :---------------------------------------------------------------------------------------------------------- |
-| `id`             | `UUID`          | Count of registered cargo orders (`orderCount`).                                                            |
-| `confirmed_date` | `DATE`          | Primary registration date used for date range filtering and time-bucket slotting.                           |
-| `created_at`     | `TIMESTAMP`     | Record creation timestamp.                                                                                  |
-| `sell_price`     | `DECIMAL(14,2)` | Gross revenue / sales amount (`totalSales`).                                                                |
-| `purchase_price` | `DECIMAL(14,2)` | Cost of goods sold / carrier price (`totalPurchaseCost`).                                                   |
-| `status`         | `VARCHAR(50)`   | Status filtering & distribution (`Waiting`, `Station`, `On the way`, `On the border`, `Reload`, `Arrived`). |
-| `cargo_type`     | `VARCHAR(10)`   | Cargo classification (`LTL` vs `FTL`).                                                                      |
-| `volume`         | `DECIMAL(12,4)` | Total volume metric ($m^3$).                                                                                |
-| `weight`         | `DECIMAL(12,4)` | Total weight metric ($kg$).                                                                                 |
-| `employee_id`    | `UUID`          | Sales manager reference for filtering and leaderboards.                                                     |
-| `client_id`      | `UUID`          | Customer client reference for filtering and leaderboards.                                                   |
+| Period Code  | Description      | Range Formula                                            | Default Granularity         |
+| :----------- | :--------------- | :------------------------------------------------------- | :-------------------------- |
+| **`1D`**     | Current Day      | Bugun `00:00:00.000 UTC` dan `23:59:59.999 UTC` gacha    | **`hour`** (24 buckets)     |
+| **`5D`**     | Last 5 Days      | `Bugun - 4 kun` dan Bugun `23:59:59` gacha               | **`day`** (5 buckets)       |
+| **`1M`**     | Last 1 Month     | `Bugun - 30 kun` dan Bugun `23:59:59` gacha              | **`day`** (31 buckets)      |
+| **`6M`**     | Last 6 Months    | `Bugun - 6 oy` dan Bugun `23:59:59` gacha                | **`month`** (6-7 buckets)   |
+| **`YTD`**    | Year To Date     | Joriy yilning `1-Yanvar`idan Bugungacha                  | **`month`** (Jan – Joriy)   |
+| **`1Y`**     | Last 1 Year      | `Bugun - 1 yil` dan Bugun `23:59:59` gacha               | **`month`** (12-13 buckets) |
+| **`5Y`**     | Last 5 Years     | `Bugun - 5 yil` dan Bugun `23:59:59` gacha               | **`year`** (5-6 buckets)    |
+| **`MAX`**    | System Inception | Baza boshidan Bugungacha bo'lgan barcha vaqt             | **Auto-detected**           |
+| **`CUSTOM`** | Custom Range     | Foydalanuvchi tanlagan `start_date` dan `end_date` gacha | **Auto-detected**           |
 
 ---
 
-## 4. Timeframe Period Filters & Rules
+## 4. API Endpoints Reference
 
-The `GET /dashboard/sales-progress` endpoint accepts a `period` parameter. All timeframe boundaries are calculated deterministically using UTC dates.
+### 1. Asosiy KPI bloklari: `GET /dashboard/summary`
 
-| Period Code  | Description      | Range Formula                                           | Default Granularity         | Preceding Range for Growth %          |
-| :----------- | :--------------- | :------------------------------------------------------ | :-------------------------- | :------------------------------------ |
-| **`1D`**     | Current Day      | Today `00:00:00.000 UTC` to `23:59:59.999 UTC`          | **`hour`** (24 buckets)     | Previous calendar day                 |
-| **`5D`**     | Last 5 Days      | `Current Date - 4 Days` (00:00:00) to Today (23:59:59)  | **`day`** (5 buckets)       | 5 days prior to start date            |
-| **`1M`**     | Last 1 Month     | `Current Date - 30 Days` (00:00:00) to Today (23:59:59) | **`day`** (31 buckets)      | 30 days prior to start date           |
-| **`6M`**     | Last 6 Months    | `Current Date - 6 Months` to Today                      | **`month`** (6-7 buckets)   | 6 months prior to start date          |
-| **`YTD`**    | Year To Date     | `Jan 1st` of Current Year to Today                      | **`month`** (Jan – Current) | Jan 1st of previous year to same date |
-| **`1Y`**     | Last 1 Year      | `Current Date - 1 Year` to Today                        | **`month`** (12-13 buckets) | 1 year prior to start date            |
-| **`5Y`**     | Last 5 Years     | `Current Date - 5 Years` to Today                       | **`year`** (5-6 buckets)    | 5 years prior to start date           |
-| **`MAX`**    | System Inception | Earliest DB `confirmed_date` to Today                   | **Auto-detected**           | `null`                                |
-| **`CUSTOM`** | Custom Range     | User-specified `start_date` to `end_date`               | **Auto-detected**           | Equal preceding span                  |
+Executive KPI kassetalarini bitta so'rovda qaytaradi:
 
-### Custom Granularity Auto-Detection Rules:
+#### Query Parametrlari:
 
-When `granularity` is not explicitly provided in request query:
+- `period` (optional, default: `1M`): `1D`, `5D`, `1M`, `6M`, `YTD`, `1Y`, `5Y`, `MAX`, `CUSTOM`
+- `currency` (optional, default: `UZS`): `UZS`, `USD`, `RUB`, `RMB`, `CNY`
+- `employee_id`, `client_id`, `cargo_type`, `transport_type` (`AUTO`, `RAILWAY`, `AIR`, `SEA`)
 
-- Total span $\le 2$ days $\implies$ **`hour`**
-- Total span $3 \le \text{days} \le 60$ $\implies$ **`day`**
-- Total span $61 \le \text{days} \le 730$ $\implies$ **`month`**
-- Total span $> 730$ days $\implies$ **`year`**
+#### Universal Response:
 
----
-
-## 5. Mathematical & Algorithmic Specifications
-
-### 1. Net Margin & Margin Percentage:
-
-$$\text{Margin} = \text{Sales} - \text{Purchase Cost}$$
-$$\text{Margin \%} = \begin{cases} \left(\frac{\text{Margin}}{\text{Sales}}\right) \times 100 & \text{if Sales} > 0 \\ 0 & \text{if Sales} = 0 \end{cases}$$
-
-### 2. Continuous Time-Series Gap Filling:
-
-To ensure UI line graphs (Recharts, ApexCharts, Chart.js) render continuous lines without broken segments, the backend generates an unbroken sequence of time bucket slots from `startDate` to `endDate`. Any bucket without sales in DB is zero-filled:
-
-```typescript
-sales: 0,
-purchaseCost: 0,
-margin: 0,
-orderCount: 0
+```json
+{
+  "currency": "USD",
+  "totalSales": 128500.0,
+  "totalPurchaseCost": 92300.0,
+  "totalMargin": 36200.0,
+  "marginPercentage": 28.17,
+  "totalOrders": 42,
+  "completedOrders": 28,
+  "inTransitOrders": 9,
+  "waitingOrders": 5,
+  "activeOrders": 14,
+  "averageOrderValue": 861.9,
+  "totalVolume": 450.5,
+  "totalWeight": 18200.0,
+  "ltlOrderCount": 18,
+  "ftlOrderCount": 24,
+  "salesGrowthVsPriorPeriod": 16.4,
+  "marginGrowthVsPriorPeriod": 21.8,
+  "statusCounts": {
+    "waiting": 2,
+    "station": 2,
+    "on_the_way": 9,
+    "on_the_border": 1,
+    "reload": 0,
+    "arrived": 28
+  },
+  "monthly": {
+    "revenue": 54200.0,
+    "purchaseCost": 38900.0,
+    "netProfit": 15300.0,
+    "marginPercentage": 28.23,
+    "revenueGrowthRate": 12.5,
+    "netProfitGrowthRate": 18.2,
+    "orderCount": 18
+  },
+  "yearly": {
+    "revenue": 348000.0,
+    "purchaseCost": 252000.0,
+    "netProfit": 96000.0,
+    "marginPercentage": 27.59,
+    "revenueGrowthRate": 34.8,
+    "netProfitGrowthRate": 41.2,
+    "orderCount": 115
+  },
+  "debtSummary": {
+    "currency": "USD",
+    "accountsReceivable": 24500.0,
+    "accountsPayable": 17800.0,
+    "netBalance": 6700.0,
+    "debtorClientCount": 8,
+    "creditorCarrierCount": 5
+  },
+  "deliveryEfficiency": {
+    "averageTransitDays": 11.4,
+    "minTransitDays": 4,
+    "maxTransitDays": 22,
+    "totalDeliveredCount": 28,
+    "totalInTransitCount": 9,
+    "totalActiveCount": 14,
+    "onTimeDeliveriesCount": 26,
+    "delayedDeliveriesCount": 2,
+    "onTimeRatePercentage": 92.86
+  }
+}
 ```
 
-### 3. Running Cumulative Trajectory:
-
-For each time bucket $i \in [0, N-1]$:
-$$\text{cumulativeSales}_i = \sum_{k=0}^{i} \text{sales}_k$$
-$$\text{cumulativeMargin}_i = \sum_{k=0}^{i} \text{margin}_k$$
-
-### 4. Period-over-Period Growth Rate (%):
-
-$$\text{growthRateSales} = \begin{cases} \left(\frac{\text{totalSales}_{\text{current}} - \text{totalSales}_{\text{prev}}}{\text{totalSales}_{\text{prev}}}\right) \times 100 & \text{if } \text{totalSales}_{\text{prev}} > 0 \\ 100 & \text{if } \text{totalSales}_{\text{prev}} = 0 \text{ and } \text{totalSales}_{\text{current}} > 0 \\ \text{null} & \text{otherwise} \end{cases}$$
-
-### 5. Average Pure Income per Order:
-
-$$\text{averageOrderValue} = \begin{cases} \frac{\text{totalMargin}}{\text{totalOrders}} & \text{if } \text{totalOrders} > 0 \\ 0 & \text{otherwise} \end{cases}$$
-
 ---
 
-## 6. API Reference & Universal Schemas
+### 2. Tushum va xarajatlar dinamikasi (Line Chart): `GET /dashboard/sales-progress`
 
-### 1. Sales Progress Line Graph Endpoint
+Parallel o'sish/tushish grafiki uchun uzluksiz vaqt oraliqlari (kunlik, soatlik, oylik):
 
-`GET /api/dashboard/sales-progress`
+#### Query Parametrlari:
 
-#### Query Parameters:
+- `period`, `granularity`, `start_date`, `end_date`, `currency`
+- `include_expenses` (`boolean`, default: `false`): Agar `true` bo'lsa, operatsion xarajatlar (`expenses` jadvalidan) ham parallel qo'shib hisoblanadi.
+- `transport_type` (`AUTO`, `RAILWAY`, `AIR`, `SEA`)
 
-| Parameter     | Type     | Required            | Enum / Format                                                            | Default | Description                          |
-| :------------ | :------- | :------------------ | :----------------------------------------------------------------------- | :------ | :----------------------------------- |
-| `period`      | `string` | No                  | `1D`, `5D`, `1M`, `6M`, `YTD`, `1Y`, `5Y`, `MAX`, `CUSTOM`               | `1M`    | Timeframe period preset.             |
-| `granularity` | `string` | No                  | `hour`, `day`, `week`, `month`, `year`                                   | Auto    | Overrides default time bucket size.  |
-| `start_date`  | `string` | **Yes (if CUSTOM)** | ISO 8601 string (`YYYY-MM-DD`)                                           | None    | Custom start date boundary.          |
-| `end_date`    | `string` | **Yes (if CUSTOM)** | ISO 8601 string (`YYYY-MM-DD`)                                           | None    | Custom end date boundary.            |
-| `employee_id` | `UUID`   | No                  | UUID v4                                                                  | None    | Filter by sales manager employee ID. |
-| `client_id`   | `UUID`   | No                  | UUID v4                                                                  | None    | Filter by client ID.                 |
-| `status`      | `string` | No                  | `Waiting`, `Station`, `On the way`, `On the border`, `Reload`, `Arrived` | None    | Filter by cargo status.              |
-| `cargo_type`  | `string` | No                  | `LTL`, `FTL`                                                             | None    | Filter by cargo type.                |
-
-#### Universal Response (200 OK):
+#### Universal Response:
 
 ```json
 {
   "meta": {
     "period": "1M",
-    "startDate": "2026-07-07T00:00:00.000Z",
-    "endDate": "2026-08-06T23:59:59.999Z",
+    "startDate": "2026-07-24T00:00:00.000Z",
+    "endDate": "2026-08-23T23:59:59.999Z",
     "granularity": "day",
     "totalBuckets": 31,
     "currency": "USD"
   },
   "summary": {
-    "totalSales": 48500.0,
-    "totalPurchaseCost": 32100.0,
-    "totalMargin": 16400.0,
-    "marginPercentage": 33.81,
-    "totalOrders": 14,
-    "averageOrderValue": 1171.43,
-    "completedOrders": 10,
-    "pendingOrders": 4,
-    "growthRateSales": 14.52,
-    "growthRateMargin": 18.35
+    "totalSales": 128500.0,
+    "totalPurchaseCost": 92300.0,
+    "totalOperationalExpenses": 4500.0,
+    "totalExpenses": 96800.0,
+    "totalMargin": 36200.0,
+    "totalNetProfit": 31700.0,
+    "marginPercentage": 28.17,
+    "totalOrders": 42,
+    "averageOrderValue": 861.9,
+    "completedOrders": 28,
+    "pendingOrders": 5,
+    "inTransitOrders": 9,
+    "growthRateSales": 16.4,
+    "growthRateMargin": 21.8,
+    "growthRateNetProfit": 19.5
   },
   "dataPoints": [
     {
       "index": 0,
-      "bucketStart": "2026-07-07T00:00:00.000Z",
-      "bucketEnd": "2026-07-07T23:59:59.999Z",
-      "dateKey": "2026-07-07",
-      "label": "07 Jul",
-      "sales": 0,
-      "purchaseCost": 0,
-      "margin": 0,
-      "orderCount": 0,
-      "cumulativeSales": 0,
-      "cumulativeMargin": 0
-    },
-    {
-      "index": 30,
-      "bucketStart": "2026-08-06T00:00:00.000Z",
-      "bucketEnd": "2026-08-06T23:59:59.999Z",
-      "dateKey": "2026-08-06",
-      "label": "06 Aug",
-      "sales": 5000.0,
-      "purchaseCost": 3500.0,
-      "margin": 1500.0,
+      "bucketStart": "2026-07-24T00:00:00.000Z",
+      "bucketEnd": "2026-07-24T23:59:59.999Z",
+      "dateKey": "2026-07-24",
+      "label": "24 Jul",
+      "sales": 4500.0,
+      "purchaseCost": 3200.0,
+      "operationalExpenses": 150.0,
+      "totalExpenses": 3350.0,
+      "margin": 1300.0,
+      "netProfit": 1150.0,
       "orderCount": 2,
-      "cumulativeSales": 48500.0,
-      "cumulativeMargin": 16400.0
+      "cumulativeSales": 4500.0,
+      "cumulativeMargin": 1300.0,
+      "cumulativeNetProfit": 1150.0
     }
   ]
 }
@@ -191,77 +209,95 @@ $$\text{averageOrderValue} = \begin{cases} \frac{\text{totalMargin}}{\text{total
 
 ---
 
-### 2. Executive Dashboard Summary KPI Cards Endpoint
+### 3. Yo'nalishlar va transport turlari tahlili (Pie/Donut Chart): `GET /dashboard/cargo-distribution`
 
-`GET /api/dashboard/summary`
+Transport turlari ulushi (Avto, Temir yo'l, Havo, Dengiz) va yuk statuslari taqsimoti:
 
-#### Query Parameters:
-
-Supports `currency` (`UZS`, `USD`, `RUB`, `RMB`, `CNY`), `period`, `start_date`, `end_date`, `employee_id`, `client_id`, `cargo_type`.
-
-#### Response (200 OK):
+#### Response:
 
 ```json
 {
   "currency": "USD",
-  "totalSales": 48500.0,
-  "totalPurchaseCost": 32100.0,
-  "totalMargin": 16400.0,
-  "marginPercentage": 33.81,
-  "totalOrders": 14,
-  "completedOrders": 10,
-  "waitingOrders": 4,
-  "averageOrderValue": 1171.43,
-  "totalVolume": 184.5,
-  "totalWeight": 8450.0,
-  "ltlOrderCount": 6,
-  "ftlOrderCount": 8,
-  "salesGrowthVsPriorPeriod": 14.52,
-  "marginGrowthVsPriorPeriod": 18.35
-}
-```
-
----
-
-### 3. Donut / Pie Chart Cargo Distribution Endpoint
-
-`GET /api/dashboard/cargo-distribution`
-
-#### Query Parameters:
-
-Supports `currency` (`UZS`, `USD`, `RUB`, `RMB`, `CNY`), `period`, `start_date`, `end_date`, `employee_id`, `client_id`, `cargo_type`.
-
-#### Response (200 OK):
-
-```json
-{
-  "currency": "USD",
+  "transportTypeDistribution": [
+    {
+      "type": "AUTO",
+      "name": "Avtotransport (Fura / Yuk mashinasi)",
+      "count": 22,
+      "percentage": 52.38,
+      "totalSales": 68000.0,
+      "totalMargin": 19500.0,
+      "totalVolume": 280.0,
+      "totalWeight": 11000.0
+    },
+    {
+      "type": "RAILWAY",
+      "name": "Temir yo'l (Konteyner / Vagon)",
+      "count": 14,
+      "percentage": 33.33,
+      "totalSales": 42500.0,
+      "totalMargin": 12000.0,
+      "totalVolume": 140.0,
+      "totalWeight": 6500.0
+    },
+    {
+      "type": "AIR",
+      "name": "Havo transporti (Avia)",
+      "count": 4,
+      "percentage": 9.52,
+      "totalSales": 14000.0,
+      "totalMargin": 3800.0,
+      "totalVolume": 20.5,
+      "totalWeight": 450.0
+    },
+    {
+      "type": "SEA",
+      "name": "Dengiz transporti (Kema / Port)",
+      "count": 2,
+      "percentage": 4.76,
+      "totalSales": 4000.0,
+      "totalMargin": 900.0,
+      "totalVolume": 10.0,
+      "totalWeight": 250.0
+    }
+  ],
   "cargoTypeDistribution": [
     {
       "category": "FTL",
-      "count": 8,
-      "totalSales": 34000.0,
+      "count": 24,
+      "totalSales": 82000.0,
       "percentage": 57.14
     },
     {
       "category": "LTL",
-      "count": 6,
-      "totalSales": 14500.0,
+      "count": 18,
+      "totalSales": 46500.0,
       "percentage": 42.86
     }
   ],
   "statusDistribution": [
     {
-      "category": "Completed",
-      "count": 10,
-      "totalSales": 38000.0,
-      "percentage": 71.43
+      "category": "Arrived",
+      "count": 28,
+      "totalSales": 89000.0,
+      "percentage": 66.67
+    },
+    {
+      "category": "On the way",
+      "count": 9,
+      "totalSales": 27500.0,
+      "percentage": 21.43
+    },
+    {
+      "category": "Station",
+      "count": 3,
+      "totalSales": 7800.0,
+      "percentage": 7.14
     },
     {
       "category": "Waiting",
-      "count": 4,
-      "totalSales": 10500.0,
-      "percentage": 28.57
+      "count": 2,
+      "totalSales": 4200.0,
+      "percentage": 4.76
     }
   ]
 }
@@ -269,16 +305,85 @@ Supports `currency` (`UZS`, `USD`, `RUB`, `RMB`, `CNY`), `period`, `start_date`,
 
 ---
 
-### 4. Bar Chart Leaderboards Endpoint (Top Managers & Clients)
+### 4. Yo'nalishlar va davlatlar tahlili: `GET /dashboard/route-analytics`
 
-`GET /api/dashboard/top-performers`
+Qaysi davlat/yo'nalishlar bo'yicha yuk tashish hajmi yuqoriligi (Xitoy – O'zbekiston, Turkiya, Yevropa):
 
-#### Query Parameters:
+#### Query Parametrlari:
 
-- `limit`: `number` (default `5`, max `50`).
-- Supports `currency` (`UZS`, `USD`, `RUB`, `RMB`, `CNY`), `period`, `start_date`, `end_date`, `employee_id`, `client_id`, `cargo_type`.
+- `period`, `limit` (default: `10`), `currency`
 
-#### Response (200 OK):
+#### Universal Response:
+
+```json
+{
+  "currency": "USD",
+  "topRoutes": [
+    {
+      "route": "China – O'zbekiston",
+      "originCountry": "China",
+      "originCity": "Guangzhou",
+      "destinationCountry": "O'zbekiston",
+      "destinationCity": "Tashkent",
+      "count": 24,
+      "percentage": 57.14,
+      "totalSales": 76000.0,
+      "totalMargin": 21500.0,
+      "totalVolume": 260.0,
+      "totalWeight": 10500.0
+    },
+    {
+      "route": "Turkey – O'zbekiston",
+      "originCountry": "Turkey",
+      "originCity": "Istanbul",
+      "destinationCountry": "O'zbekiston",
+      "destinationCity": "Tashkent",
+      "count": 12,
+      "percentage": 28.57,
+      "totalSales": 38000.0,
+      "totalMargin": 10800.0,
+      "totalVolume": 130.0,
+      "totalWeight": 5200.0
+    }
+  ],
+  "originCountries": [
+    {
+      "countryName": "China",
+      "count": 24,
+      "percentage": 57.14,
+      "totalSales": 76000.0,
+      "totalVolume": 260.0,
+      "totalWeight": 10500.0
+    },
+    {
+      "countryName": "Turkey",
+      "count": 12,
+      "percentage": 28.57,
+      "totalSales": 38000.0,
+      "totalVolume": 130.0,
+      "totalWeight": 5200.0
+    }
+  ],
+  "destinationCountries": [
+    {
+      "countryName": "O'zbekiston",
+      "count": 42,
+      "percentage": 100.0,
+      "totalSales": 128500.0,
+      "totalVolume": 450.5,
+      "totalWeight": 18200.0
+    }
+  ]
+}
+```
+
+---
+
+### 5. Menejerlar va sotuv ko'rsatkichlari (Bar Chart): `GET /dashboard/top-performers`
+
+Har bir sotuv/logistika menejerining bajargan buyurtmalari hajmi, keltirgan foydasi va konversiyasi:
+
+#### Universal Response:
 
 ```json
 {
@@ -287,20 +392,31 @@ Supports `currency` (`UZS`, `USD`, `RUB`, `RMB`, `CNY`), `period`, `start_date`,
     {
       "employeeId": "e4a215b4-7b1b-4d92-93cb-33d31b0142fa",
       "employeeName": "Ali Valiyev",
-      "departmentName": "Sales Department",
-      "totalSales": 25000.0,
-      "totalMargin": 8500.0,
-      "orderCount": 7
+      "departmentName": "Sotuv Bo'limi",
+      "totalSales": 64000.0,
+      "totalPurchaseCost": 46000.0,
+      "totalMargin": 18000.0,
+      "orderCount": 20,
+      "totalVolume": 210.5,
+      "totalWeight": 8500.0,
+      "averageOrderValue": 3200.0,
+      "completedOrdersCount": 15,
+      "activeOrdersCount": 5,
+      "conversionRate": 75.0
     }
   ],
   "topClients": [
     {
       "clientId": "c1f8832a-5e2b-4c12-881b-9f93120d5102",
       "clientName": "OOO Global Express",
-      "companyName": "Global Logistics LLC",
-      "totalSales": 18000.0,
-      "totalMargin": 6200.0,
-      "orderCount": 5
+      "companyName": "Global Express LLC",
+      "totalSales": 34000.0,
+      "totalPurchaseCost": 24000.0,
+      "totalMargin": 10000.0,
+      "orderCount": 11,
+      "totalVolume": 120.0,
+      "totalWeight": 4800.0,
+      "averageOrderValue": 3090.91
     }
   ]
 }
@@ -308,74 +424,89 @@ Supports `currency` (`UZS`, `USD`, `RUB`, `RMB`, `CNY`), `period`, `start_date`,
 
 ---
 
-## 7. Error Handling & Validation Rules
+### 6. Yuk yetkazish vaqti va samaradorlik: `GET /dashboard/delivery-efficiency`
 
-| HTTP Status        | Exception Type          | Cause                                                             | Sample Error Response                                                                          |
-| :----------------- | :---------------------- | :---------------------------------------------------------------- | :--------------------------------------------------------------------------------------------- |
-| `400 Bad Request`  | `BadRequestException`   | Invalid `period` or missing `start_date`/`end_date` for `CUSTOM`. | `{"statusCode": 400, "message": "start_date and end_date are required when period is CUSTOM"}` |
-| `400 Bad Request`  | `BadRequestException`   | `start_date` occurs after `end_date`.                             | `{"statusCode": 400, "message": "start_date cannot be after end_date"}`                        |
-| `401 Unauthorized` | `UnauthorizedException` | Missing or invalid Bearer token.                                  | `{"statusCode": 401, "message": "Unauthorized"}`                                               |
+Yuk yetkazish vaqti, on-time rate foizi va yo'nalishlar bo'yicha o'rtacha kunlar:
+
+#### Universal Response:
+
+```json
+{
+  "averageTransitDays": 11.4,
+  "minTransitDays": 4,
+  "maxTransitDays": 22,
+  "totalDeliveredCount": 28,
+  "totalInTransitCount": 9,
+  "totalActiveCount": 14,
+  "onTimeDeliveriesCount": 26,
+  "delayedDeliveriesCount": 2,
+  "onTimeRatePercentage": 92.86,
+  "statusBreakdown": [
+    {
+      "status": "Arrived",
+      "label": "Arrived",
+      "count": 28,
+      "percentage": 66.67,
+      "totalSales": 89000.0,
+      "totalVolume": 290.0,
+      "totalWeight": 12000.0
+    },
+    {
+      "status": "On the way",
+      "label": "On the way",
+      "count": 9,
+      "percentage": 21.43,
+      "totalSales": 27500.0,
+      "totalVolume": 100.0,
+      "totalWeight": 4200.0
+    }
+  ],
+  "routeTransitTimes": [
+    {
+      "route": "China – O'zbekiston",
+      "averageTransitDays": 12.8,
+      "count": 18
+    },
+    {
+      "route": "Turkey – O'zbekiston",
+      "averageTransitDays": 8.5,
+      "count": 10
+    }
+  ]
+}
+```
 
 ---
 
-## 8. Frontend Chart Integration Example (React + Recharts)
+### 7. Qarzdorlik (Debitor / Kreditor) balansi: `GET /dashboard/debt-summary`
 
-```tsx
-import React, { useEffect, useState } from 'react';
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  CartesianGrid,
-  ResponsiveContainer,
-} from 'recharts';
+Mijozlarning to'lanmagan hisoblari va tashuvchilarga bo'lgan qarzdorliklar balansi:
 
-export const SalesProgressChart = ({ period = '1M' }) => {
-  const [data, setData] = useState([]);
-  const [summary, setSummary] = useState(null);
+#### Universal Response:
 
-  useEffect(() => {
-    fetch(`/api/dashboard/sales-progress?period=${period}`, {
-      headers: { Authorization: `Bearer ${localStorage.getItem('token')}` },
-    })
-      .then((res) => res.json())
-      .then((res) => {
-        setData(res.dataPoints);
-        setSummary(res.summary);
-      });
-  }, [period]);
-
-  return (
-    <div>
-      <h3>
-        Sales Progress (
-        {summary?.growthRateSales ? `+${summary.growthRateSales}%` : ''})
-      </h3>
-      <ResponsiveContainer width="100%" height={350}>
-        <LineChart data={data}>
-          <CartesianGrid strokeDasharray="3 3" />
-          <XAxis dataKey="label" />
-          <YAxis />
-          <Tooltip formatter={(value) => `$${value.toLocaleString()}`} />
-          <Line
-            type="monotone"
-            dataKey="sales"
-            stroke="#2563eb"
-            name="Sales Revenue"
-            strokeWidth={2}
-          />
-          <Line
-            type="monotone"
-            dataKey="cumulativeSales"
-            stroke="#10b981"
-            name="Cumulative Sales"
-            strokeDasharray="5 5"
-          />
-        </LineChart>
-      </ResponsiveContainer>
-    </div>
-  );
-};
+```json
+{
+  "currency": "USD",
+  "accountsReceivable": 24500.0,
+  "accountsPayable": 17800.0,
+  "netBalance": 6700.0,
+  "debtorClientCount": 8,
+  "creditorCarrierCount": 5,
+  "topDebtorClients": [
+    {
+      "clientId": "c1f8832a-5e2b-4c12-881b-9f93120d5102",
+      "clientName": "OOO Global Express",
+      "companyName": "Global Express LLC",
+      "amount": 12000.0,
+      "orderCount": 4
+    }
+  ],
+  "topCreditorCarriers": [
+    {
+      "agentName": "Silk Road Logistics",
+      "amount": 9500.0,
+      "orderCount": 3
+    }
+  ]
+}
 ```

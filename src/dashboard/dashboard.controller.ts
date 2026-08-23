@@ -6,12 +6,18 @@ import {
   SalesProgressQueryDto,
   DashboardSummaryQueryDto,
   TopPerformersQueryDto,
+  RouteAnalyticsQueryDto,
+  DebtSummaryQueryDto,
+  DeliveryEfficiencyQueryDto,
 } from './dto/dashboard-query.dto';
 import {
   SalesProgressResponse,
   DashboardSummaryKpi,
   CargoDistributionResponse,
   TopPerformersResponse,
+  RouteAnalyticsResponse,
+  DebtSummaryKpi,
+  DeliveryEfficiencyKpi,
 } from './dashboard.types';
 
 @Controller('dashboard')
@@ -20,19 +26,8 @@ export class DashboardController {
   constructor(private readonly dashboardService: DashboardService) {}
 
   /**
-   * GET /dashboard/sales-progress
-   * Sales progress line graph endpoint with period filters (1D, 5D, 1M, 6M, YTD, 1Y, 5Y, MAX, CUSTOM)
-   */
-  @Get('sales-progress')
-  async getSalesProgress(
-    @Query() query: SalesProgressQueryDto,
-  ): Promise<SalesProgressResponse> {
-    return this.dashboardService.getSalesProgress(query);
-  }
-
-  /**
    * GET /dashboard/summary
-   * Executive Dashboard Summary KPI cards
+   * Executive Dashboard Summary KPI cards (Revenue, Profit, Growth rates, Active/Completed cargos, Debts, Delivery efficiency)
    */
   @Get('summary')
   async getDashboardSummary(
@@ -42,8 +37,19 @@ export class DashboardController {
   }
 
   /**
+   * GET /dashboard/sales-progress
+   * Dynamic Line Chart endpoint for Revenue vs Costs/Expenses with period filters (1D, 5D, 1M, 6M, YTD, 1Y, 5Y, MAX, CUSTOM)
+   */
+  @Get('sales-progress')
+  async getSalesProgress(
+    @Query() query: SalesProgressQueryDto,
+  ): Promise<SalesProgressResponse> {
+    return this.dashboardService.getSalesProgress(query);
+  }
+
+  /**
    * GET /dashboard/cargo-distribution
-   * Donut/Pie Chart distribution data (Cargo Type & Status)
+   * Donut/Pie Chart distribution data (Transport Types: Auto, Railway, Air, Sea; Cargo Types; Order Statuses)
    */
   @Get('cargo-distribution')
   async getCargoDistribution(
@@ -53,13 +59,46 @@ export class DashboardController {
   }
 
   /**
+   * GET /dashboard/route-analytics
+   * Route and Country-level intelligence (Top routes: China-Uzbekistan, Turkey-Uzbekistan, etc.; Country volume & sales shares)
+   */
+  @Get('route-analytics')
+  async getRouteAnalytics(
+    @Query() query: RouteAnalyticsQueryDto,
+  ): Promise<RouteAnalyticsResponse> {
+    return this.dashboardService.getRouteAnalytics(query);
+  }
+
+  /**
    * GET /dashboard/top-performers
-   * Bar Chart Leaderboards (Top Managers & Top Clients)
+   * Bar Chart Leaderboards (Top Sales/Logistics Managers & Top Clients with volumes, revenues, and profits)
    */
   @Get('top-performers')
   async getTopPerformers(
     @Query() query: TopPerformersQueryDto,
   ): Promise<TopPerformersResponse> {
     return this.dashboardService.getTopPerformers(query);
+  }
+
+  /**
+   * GET /dashboard/delivery-efficiency
+   * Status Tracking, Shipment Flow & Delivery Duration / Efficiency Analytics
+   */
+  @Get('delivery-efficiency')
+  async getDeliveryEfficiency(
+    @Query() query: DeliveryEfficiencyQueryDto,
+  ): Promise<DeliveryEfficiencyKpi> {
+    return this.dashboardService.getDeliveryEfficiency(query);
+  }
+
+  /**
+   * GET /dashboard/debt-summary
+   * Debitor (Accounts Receivable) & Kreditor (Accounts Payable) Balance Summary
+   */
+  @Get('debt-summary')
+  async getDebtSummary(
+    @Query() query: DebtSummaryQueryDto,
+  ): Promise<DebtSummaryKpi> {
+    return this.dashboardService.getDebtSummary(query);
   }
 }
