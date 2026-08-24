@@ -59,6 +59,7 @@ erDiagram
 | `consolidation_code`                  | `VARCHAR(50)`   | `NOT NULL`, `UNIQUE`, Indexed                         | Auto-generated code (e.g., `CNS-202608-0001`) or custom code                     |
 | `container_truck_id`                  | `VARCHAR(100)`  | `NOT NULL`, Indexed                                   | Vehicle plate or container number (e.g. `01A777AA`, `TRK-9021`)                  |
 | `container_type`                      | `VARCHAR(50)`   | `NULLABLE`                                            | Body/Container type (e.g. `86m3`, `120m3`, `40HQ`, `Tent`)                       |
+| `transport_types`                     | `TEXT[]`        | `NOT NULL`, Default: `ARRAY['auto']::text[]`, GIN     | Dedicated multimodal transport types (`auto`, `railway`, `air`, `sea`, `other`)  |
 | `max_volume_capacity`                 | `DECIMAL(12,4)` | `NULLABLE`                                            | Maximum volume capacity in $m^3$                                                 |
 | `max_weight_capacity`                 | `DECIMAL(12,4)` | `NULLABLE`                                            | Maximum weight capacity in $kg$                                                  |
 | `carrier_name`                        | `VARCHAR(255)`  | `NULLABLE`                                            | Transportation company or driver full name                                       |
@@ -159,6 +160,7 @@ Returns a paginated list of all consolidations, complete with their capacity uti
 - `limit` (optional number, default: 10)
 - `offset` (optional number)
 - `status` (optional string): Filter by status (`Waiting`, `Station`, `On the way`, `On the border`, `Reload`, `Arrived`)
+- `transport_types` (optional array/string): Filter by one or more transport modalities via comma-separated string or array (`?transport_types=railway,auto`)
 - `search` (optional string): Multi-field search (code, truck plate, carrier, origin, destination)
 - `origin_place` (optional string)
 - `destination_place` (optional string)
@@ -192,6 +194,7 @@ Returns a paginated list of all consolidations, complete with their capacity uti
       "consolidation_code": "CNS-202608-0001",
       "container_truck_id": "01A777AA",
       "container_type": "86m3",
+      "transport_types": ["auto"],
       "status": "Waiting",
       "carrier_name": "Baytur Turkish",
       "carrier_phone": "+998901234567",
@@ -375,6 +378,7 @@ Retrieves full operational and financial details of a specific consolidation (id
   "consolidation_code": "CNS-202608-0001", // Optional. Auto-generated if omitted.
   "container_truck_id": "01A777AA", // Required. Truck plate or container #
   "container_type": "86m3", // Optional
+  "transport_types": ["auto"], // Optional array: ["auto", "railway", "air", "sea", "other"]
   "max_volume_capacity": 86.0, // Optional. Max volume in m³
   "max_weight_capacity": 22000.0, // Optional. Max weight in kg
   "carrier_name": "Baytur Turkish", // Optional. Carrier or driver name
@@ -403,6 +407,7 @@ Retrieves full operational and financial details of a specific consolidation (id
   "consolidation_code": "CNS-202608-0001",
   "container_truck_id": "01A777AA",
   "container_type": "86m3",
+  "transport_types": ["auto"],
   "status": "Loading",
   "carrier_name": "Baytur Turkish",
   "carrier_phone": "+998901234567",
@@ -524,8 +529,10 @@ Supports cascading status/date updates to all child cargos.
 {
   "status": "Arrived",
   "arrived_date": "2026-08-30",
+  "transport_types": ["railway", "auto"],
   "sync_status_to_cargos": true, // Automatically updates status = 'Arrived' on all attached cargos
-  "sync_dates_to_cargos": true // Automatically updates arrived_date = '2026-08-30' on all attached cargos
+  "sync_dates_to_cargos": true, // Automatically updates arrived_date = '2026-08-30' on all attached cargos
+  "sync_transport_types_to_cargos": true // Automatically syncs transport_types to all attached cargos
 }
 ```
 
@@ -533,7 +540,7 @@ Supports cascading status/date updates to all child cargos.
 
 ### 5.4. Batch Assign Cargos (`POST /api/cargo-consolidations/:id/assign-cargos`)
 
-Assigns existing cargo registrations into this consolidation truck. Automatically sets `consolidation_id`, `container_truck_id`, and `container_type` on all specified cargo rows.
+Assigns existing cargo registrations into this consolidation truck. Automatically sets `consolidation_id`, `container_truck_id`, `container_type`, and inherits `transport_types` on all specified cargo rows.
 
 ```json
 {

@@ -73,7 +73,8 @@ Executive KPI kassetalarini bitta so'rovda qaytaradi:
 
 - `period` (optional, default: `1M`): `1D`, `5D`, `1M`, `6M`, `YTD`, `1Y`, `5Y`, `MAX`, `CUSTOM`
 - `currency` (optional, default: `UZS`): `UZS`, `USD`, `RUB`, `RMB`, `CNY`
-- `employee_id`, `client_id`, `cargo_type`, `transport_type` (`AUTO`, `RAILWAY`, `AIR`, `SEA`)
+- `employee_id`, `client_id`, `cargo_type`
+- `transport_type` (single enum: `AUTO`, `RAILWAY`, `AIR`, `SEA`, `OTHER`) or `transport_types` (multimodal array / comma-separated string: `railway,auto`)
 
 #### Universal Response:
 
@@ -154,7 +155,7 @@ Parallel o'sish/tushish grafiki uchun uzluksiz vaqt oraliqlari (kunlik, soatlik,
 
 - `period`, `granularity`, `start_date`, `end_date`, `currency`
 - `include_expenses` (`boolean`, default: `false`): Agar `true` bo'lsa, operatsion xarajatlar (`expenses` jadvalidan) ham parallel qo'shib hisoblanadi.
-- `transport_type` (`AUTO`, `RAILWAY`, `AIR`, `SEA`)
+- `transport_type` (single enum: `AUTO`, `RAILWAY`, `AIR`, `SEA`, `OTHER`) or `transport_types` (multimodal array / comma-separated string: `railway,auto`)
 
 #### Universal Response:
 

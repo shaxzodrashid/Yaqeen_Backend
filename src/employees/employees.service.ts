@@ -84,6 +84,7 @@ export interface DepartmentRow {
   id: string;
   name: string;
   display_name: string;
+  employee_count?: number;
   created_at?: Date | string;
   updated_at?: Date | string;
 }
@@ -713,9 +714,19 @@ export class EmployeesService implements OnModuleInit {
 
   async findAllDepartments(): Promise<DepartmentRow[]> {
     const departments = (await this.knex('departments')
-      .select('*')
-      .orderBy('display_name', 'asc')) as unknown as DepartmentRow[];
-    return departments;
+      .leftJoin('employees', 'employees.department_id', 'departments.id')
+      .select('departments.*')
+      .count('employees.id as employee_count')
+      .groupBy('departments.id')
+      .orderBy('display_name', 'asc')) as unknown as (DepartmentRow & {
+      employee_count?: string | number;
+    })[];
+
+    // PostgreSQL COUNT() is returned as bigint (string), normalize to number
+    return departments.map((dept) => ({
+      ...dept,
+      employee_count: parseInt(String(dept.employee_count ?? 0), 10),
+    }));
   }
 
   async findDepartmentById(id: string): Promise<DepartmentRow> {

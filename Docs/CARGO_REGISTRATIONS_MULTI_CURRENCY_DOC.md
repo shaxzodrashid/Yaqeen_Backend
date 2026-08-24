@@ -69,6 +69,7 @@ The `cargo_registrations` table includes the following columns for currency date
 | `sell_usd_rate` | `decimal(14,4)` | YES | Rate of 1 USD in UZS snapshot at `sell_date` |
 | `sell_custom_rate` | `decimal(14,4)` | YES | Optional custom rate override provided in payload |
 | `usd_rmb_rate` | `decimal(14,4)` | YES | Custom USD to RMB cross-rate (required if currency is RMB) |
+| `transport_types` | `text[]` | NO | Array of transport modalities (`auto`, `railway`, `air`, `sea`, `other`). Default: `ARRAY['auto']::text[]` |
 | `origin_city` | `varchar(255)` | YES | Origin departure city (e.g. `Yiwu`, `Guangzhou`, `Istanbul`) |
 | `origin_country` | `varchar(100)` | YES | Origin country name (e.g. `China`, `Turkey`) |
 | `origin_country_code` | `varchar(10)` | YES | 2-letter ISO country code (`CN`, `TR`) |
@@ -99,6 +100,7 @@ Registers a new cargo transaction.
 {
   "cargo_type": "FTL",
   "container_truck_id": "TRK-6447",
+  "transport_types": ["railway", "auto"],
   "agent_name": "SilkRoad Express",
   "cargo": "General Goods",
   "confirmed_date": "2026-07-20",
@@ -123,7 +125,8 @@ Registers a new cargo transaction.
 }
 ```
 
-**Optional Payload Rate & Route Fields**:
+**Optional Payload Rate, Route & Transport Fields**:
+- `transport_types` (`string[]`, e.g. `["railway", "auto"]`): Dedicated multimodal transport types array (`auto`, `railway`, `air`, `sea`, `other`). If omitted, auto-inferred from container type or defaults to `["auto"]`.
 - `purchase_date` (string, `YYYY-MM-DD`): If omitted, uses `confirmed_date` or current date.
 - `sell_date` (string, `YYYY-MM-DD`): If omitted, uses current date.
 - `purchase_exchange_rate` (number): Optional custom exchange rate override for purchase price.
@@ -142,6 +145,7 @@ Registers a new cargo transaction.
   "volume": null,
   "weight": null,
   "container_type": null,
+  "transport_types": ["railway", "auto"],
   "container_truck_id": "TRK-6447",
   "agent_name": "SilkRoad Express",
   "cargo": "General Goods",
@@ -237,6 +241,7 @@ Retrieves a paginated list of cargo registrations with search, multi-timestamp f
 - `status` (optional): Filter by cargo status (`Waiting`, `Station`, `On the way`, `On the border`, `Reload`, `Arrived`).
 - `cargo_type` (optional): Filter by cargo type (`LTL` | `FTL`).
 - `container_type` (optional): Filter by container type.
+- `transport_types` (optional): Filter by one or more transport modalities via comma-separated string or array (e.g. `?transport_types=railway,auto`). Performs GIN-indexed array overlap search.
 - `client_id` (optional, UUID): Filter by client UUID.
 - `employee_id` (optional, UUID): Filter by assigned employee UUID.
 - `origin_city` (optional): Filter by origin departure city (case-insensitive).

@@ -164,7 +164,7 @@ When an employee's status (`is_active`) is set to `false` via `PUT /employees/:i
 
 ### 4.1. List All Departments
 
-Retrieve a list of all company departments, ordered alphabetically by display name.
+Retrieve a list of all company departments, ordered alphabetically by display name. Each department includes an `employee_count` field indicating exactly how many employees are assigned to it (including inactive employees). Departments without any staff return `employee_count: 0`.
 
 - **Route:** `/departments`
 - **Method:** `GET`
@@ -179,6 +179,7 @@ Retrieve a list of all company departments, ordered alphabetically by display na
     "id": "07d223ca-4167-47f7-a929-61d47a3628a7",
     "name": "sales",
     "display_name": "Sales",
+    "employee_count": 12,
     "created_at": "2026-07-19T12:20:42.232Z",
     "updated_at": "2026-07-19T12:20:42.232Z"
   },
@@ -186,11 +187,25 @@ Retrieve a list of all company departments, ordered alphabetically by display na
     "id": "f5e3fbdf-ae9f-4a23-8834-b51ce5499441",
     "name": "sborniy",
     "display_name": "Sborniy",
+    "employee_count": 0,
     "created_at": "2026-07-19T12:20:42.220Z",
     "updated_at": "2026-07-19T12:20:42.220Z"
   }
 ]
 ```
+
+#### Response Fields
+
+| Field            | Type     | Description                                                                                                  |
+| :--------------- | :------- | :----------------------------------------------------------------------------------------------------------- |
+| `id`             | `string` | Department UUID (`departments.id`).                                                                          |
+| `name`           | `string` | Unique machine name (e.g. `sales`).                                                                          |
+| `display_name`   | `string` | Human-readable label used for ordering.                                                                      |
+| `employee_count` | `number` | Number of employees assigned to the department (`employees.department_id = departments.id`). `0` when empty. |
+| `created_at`     | `string` | ISO timestamp of record creation.                                                                            |
+| `updated_at`     | `string` | ISO timestamp of last update.                                                                                |
+
+> **Note:** `employee_count` counts **all** assigned employee records, regardless of their `is_active` status.
 
 ---
 
