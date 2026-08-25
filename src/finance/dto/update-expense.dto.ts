@@ -15,7 +15,7 @@ export class UpdateExpenseDto {
   @IsOptional()
   @IsEnum(ExpenseCategory, {
     message:
-      'category must be one of: tax, utility, rent, salary_payout, cleaner, other',
+      'category must be one of: tax, utility, rent, salary_payout, cleaner, kpi, food, other',
   })
   category?: ExpenseCategory;
 

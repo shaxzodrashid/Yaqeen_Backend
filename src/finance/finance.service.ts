@@ -317,6 +317,16 @@ export class FinanceService {
         description: 'Cleaning services, office supplies',
       },
       {
+        category: ExpenseCategory.KPI,
+        label: 'KPI & Bonuses (KPI/Mukofot)',
+        description: 'Employee KPI payouts, performance bonuses, incentives',
+      },
+      {
+        category: ExpenseCategory.FOOD,
+        label: 'Food & Meals (Pitanie/Oziq-ovqat)',
+        description: 'Staff meals, office tea/coffee, snacks and food expenses',
+      },
+      {
         category: ExpenseCategory.OTHER,
         label: 'Other Expenses (Prochiy)',
         description: 'Miscellaneous operational expenses',
@@ -933,6 +943,8 @@ export class FinanceService {
       rent: { total: 0, count: 0 },
       salary_payout: { total: 0, count: 0 },
       cleaner: { total: 0, count: 0 },
+      kpi: { total: 0, count: 0 },
+      food: { total: 0, count: 0 },
       other: { total: 0, count: 0 },
     };
 
@@ -1037,6 +1049,16 @@ export class FinanceService {
         category: ExpenseCategory.CLEANER,
         label: 'Cleaning (Uborshchitsa)',
         description: 'Office cleaning services, sanitation supplies',
+      },
+      {
+        category: ExpenseCategory.KPI,
+        label: 'KPI & Bonuses (KPI/Mukofot)',
+        description: 'Employee KPI payouts, performance bonuses, incentives',
+      },
+      {
+        category: ExpenseCategory.FOOD,
+        label: 'Food & Meals (Pitanie/Oziq-ovqat)',
+        description: 'Staff meals, office tea/coffee, snacks and food expenses',
       },
       {
         category: ExpenseCategory.OTHER,

@@ -54,16 +54,18 @@ The module provides end-to-end management for operational expenses, department-b
 
 ## 3. Expense Categories
 
-The system categorizes operational costs into 6 predefined business expense categories:
+The system categorizes operational costs into 8 predefined business expense categories:
 
-| Category Key    | Display Label             | Description                                     |
-| :-------------- | :------------------------ | :---------------------------------------------- |
-| `tax`           | Taxes (Nalog)             | Government taxes, official fees, legal payments |
-| `utility`       | Utilities (Svet/Kommunal) | Electricity, internet, water, office utilities  |
-| `rent`          | Rent (Arenda)             | Office space rent, warehouse space rent         |
-| `salary_payout` | Salary Payouts (Maosh)    | Manual cash or card salary payouts              |
-| `cleaner`       | Cleaning (Uborshchitsa)   | Office cleaning services, sanitation supplies   |
-| `other`         | Other Expenses (Prochiy)  | Miscellaneous unclassified operational costs    |
+| Category Key    | Display Label                     | Description                                           |
+| :-------------- | :-------------------------------- | :---------------------------------------------------- |
+| `tax`           | Taxes (Nalog)                     | Government taxes, official fees, legal payments       |
+| `utility`       | Utilities (Svet/Kommunal)         | Electricity, internet, water, office utilities        |
+| `rent`          | Rent (Arenda)                     | Office space rent, warehouse space rent               |
+| `salary_payout` | Salary Payouts (Maosh)            | Manual cash or card salary payouts                    |
+| `cleaner`       | Cleaning (Uborshchitsa)           | Office cleaning services, sanitation supplies         |
+| `kpi`           | KPI & Bonuses (KPI/Mukofot)       | Employee KPI payouts, performance bonuses, incentives |
+| `food`          | Food & Meals (Pitanie/Oziq-ovqat) | Staff meals, office tea/coffee, snacks, food supplies |
+| `other`         | Other Expenses (Prochiy)          | Miscellaneous unclassified operational costs          |
 
 ---
 
@@ -73,7 +75,7 @@ The system categorizes operational costs into 6 predefined business expense cate
 
 #### `GET /api/v1/finance/summary`
 
-Calculates complete financial breakdown, gross/net profit, SEO cut, financial engine flow diagram, 6-category operational expense distribution, KPI bonuses burden, and month-over-month (MoM) comparative growth.
+Calculates complete financial breakdown, gross/net profit, SEO cut, financial engine flow diagram, 8-category operational expense distribution, KPI bonuses burden, and month-over-month (MoM) comparative growth.
 
 > [!IMPORTANT]
 > **Decoupled Purchase & Sell Date Financial Accounting**:
@@ -200,12 +202,28 @@ Calculates complete financial breakdown, gross/net profit, SEO cut, financial en
       "count": 1
     },
     {
+      "category": "kpi",
+      "label": "KPI & Bonuses (KPI/Mukofot)",
+      "description": "Employee KPI payouts, performance bonuses, incentives",
+      "amount": 50.0,
+      "percentage": 4.17,
+      "count": 1
+    },
+    {
+      "category": "food",
+      "label": "Food & Meals (Pitanie/Oziq-ovqat)",
+      "description": "Staff meals, office tea/coffee, snacks, food supplies",
+      "amount": 50.0,
+      "percentage": 4.17,
+      "count": 1
+    },
+    {
       "category": "other",
       "label": "Other Expenses (Prochiy)",
       "description": "Miscellaneous unclassified operational costs",
-      "amount": 100.0,
-      "percentage": 8.33,
-      "count": 1
+      "amount": 0.0,
+      "percentage": 0.0,
+      "count": 0
     }
   ],
   "expense_breakdown": {
@@ -214,7 +232,9 @@ Calculates complete financial breakdown, gross/net profit, SEO cut, financial en
     "rent": 500.0,
     "salary_payout": 0.0,
     "cleaner": 100.0,
-    "other": 100.0
+    "kpi": 50.0,
+    "food": 50.0,
+    "other": 0.0
   },
   "comparison": {
     "previous_period": {
@@ -248,7 +268,7 @@ Calculates complete financial breakdown, gross/net profit, SEO cut, financial en
 Creates a new expense record.
 
 > [!IMPORTANT]
-> When `category` is set to `salary_payout` (Salary Payouts / Maosh), the `employee_id` field is **MANDATORY** and must belong to an existing employee record. For other categories (`tax`, `utility`, `rent`, `cleaner`, `other`), `employee_id` is optional.
+> When `category` is set to `salary_payout` (Salary Payouts / Maosh), the `employee_id` field is **MANDATORY** and must belong to an existing employee record. For other categories (`tax`, `utility`, `rent`, `cleaner`, `kpi`, `food`, `other`), `employee_id` is optional.
 
 **Request Body (Salary Payout Expense)**:
 
@@ -317,7 +337,7 @@ Lists expenses with filtering, search, pagination, and total sum calculation.
 
 **Query Parameters**:
 
-- `category` (optional): Filter by category (`tax`, `utility`, `rent`, `salary_payout`, `cleaner`, `other`)
+- `category` (optional): Filter by category (`tax`, `utility`, `rent`, `salary_payout`, `cleaner`, `kpi`, `food`, `other`)
 - `employee_id` (optional): Filter by specific employee UUID
 - `start_date` (optional): Filter by `expense_date >= start_date`
 - `end_date` (optional): Filter by `expense_date <= end_date`
@@ -358,7 +378,7 @@ Lists expenses with filtering, search, pagination, and total sum calculation.
 
 #### `GET /api/v1/finance/expenses/categories`
 
-Returns summary breakdown for all 6 expense categories for a specified period.
+Returns summary breakdown for all 8 expense categories for a specified period.
 
 **Query Parameters**:
 
@@ -385,6 +405,48 @@ Returns summary breakdown for all 6 expense categories for a specified period.
       "category": "utility",
       "label": "Utilities (Svet/Kommunal)",
       "description": "Electricity, internet, water, office utilities",
+      "total_amount": 0,
+      "expense_count": 0
+    },
+    {
+      "category": "rent",
+      "label": "Rent (Arenda)",
+      "description": "Office space rent, warehouse rent",
+      "total_amount": 0,
+      "expense_count": 0
+    },
+    {
+      "category": "salary_payout",
+      "label": "Salary Payouts (Maosh)",
+      "description": "Manual cash or card salary payouts to staff",
+      "total_amount": 0,
+      "expense_count": 0
+    },
+    {
+      "category": "cleaner",
+      "label": "Cleaning (Uborshchitsa)",
+      "description": "Cleaning services, office supplies",
+      "total_amount": 0,
+      "expense_count": 0
+    },
+    {
+      "category": "kpi",
+      "label": "KPI & Bonuses (KPI/Mukofot)",
+      "description": "Employee KPI payouts, performance bonuses, incentives",
+      "total_amount": 0,
+      "expense_count": 0
+    },
+    {
+      "category": "food",
+      "label": "Food & Meals (Pitanie/Oziq-ovqat)",
+      "description": "Staff meals, office tea/coffee, snacks and food expenses",
+      "total_amount": 0,
+      "expense_count": 0
+    },
+    {
+      "category": "other",
+      "label": "Other Expenses (Prochiy)",
+      "description": "Miscellaneous operational expenses",
       "total_amount": 0,
       "expense_count": 0
     }

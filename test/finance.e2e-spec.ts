@@ -153,6 +153,38 @@ describe('Finance & Expenses API (e2e)', () => {
       createdExpenseId = res.body.id;
     });
 
+    it('POST /api/v1/finance/expenses - creates KPI and food expenses', async () => {
+      const kpiRes = await request(app.getHttpServer())
+        .post('/api/v1/finance/expenses')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          category: 'kpi',
+          amount: 500,
+          currency: 'USD',
+          description: 'Sales quarterly KPI bonus',
+          expense_date: '2026-07-20',
+        })
+        .expect(201);
+
+      expect(kpiRes.body.category).toBe('kpi');
+      expect(kpiRes.body.amount).toBe(500);
+
+      const foodRes = await request(app.getHttpServer())
+        .post('/api/v1/finance/expenses')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          category: 'food',
+          amount: 150000,
+          currency: 'UZS',
+          description: 'Office tea and lunch supplies',
+          expense_date: '2026-07-21',
+        })
+        .expect(201);
+
+      expect(foodRes.body.category).toBe('food');
+      expect(foodRes.body.amount).toBe(150000);
+    });
+
     it('GET /api/v1/finance/expenses - lists expenses with pagination and sum', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/finance/expenses')
@@ -167,7 +199,7 @@ describe('Finance & Expenses API (e2e)', () => {
       expect(res.body.total_sum).toBeGreaterThanOrEqual(350.5);
     });
 
-    it('GET /api/v1/finance/expenses/categories - returns category breakdown', async () => {
+    it('GET /api/v1/finance/expenses/categories - returns category breakdown with 8 categories', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/finance/expenses/categories')
         .set('Authorization', `Bearer ${authToken}`)
@@ -177,10 +209,20 @@ describe('Finance & Expenses API (e2e)', () => {
       expect(res.body).toHaveProperty('categories');
       expect(res.body).toHaveProperty('grand_total');
       expect(Array.isArray(res.body.categories)).toBe(true);
+      expect(res.body.categories.length).toBe(8);
 
       const taxCat = res.body.categories.find((c: any) => c.category === 'tax');
       expect(taxCat).toBeDefined();
       expect(taxCat.total_amount).toBeGreaterThanOrEqual(350.5);
+
+      const kpiCat = res.body.categories.find((c: any) => c.category === 'kpi');
+      expect(kpiCat).toBeDefined();
+
+      const foodCat = res.body.categories.find(
+        (c: any) => c.category === 'food',
+      );
+      expect(foodCat).toBeDefined();
+      expect(foodCat.total_amount).toBeGreaterThanOrEqual(150000);
     });
 
     it('GET /api/v1/finance/expenses/:id - gets single expense details', async () => {

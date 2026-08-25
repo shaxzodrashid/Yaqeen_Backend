@@ -36,11 +36,11 @@ describe('FinanceService', () => {
         },
       ]),
       first: jest.fn(),
-      count: jest.fn().mockResolvedValue([{ total: '1' }]),
+      count: jest.fn().mockReturnThis(),
       sum: jest.fn().mockReturnThis(),
       join: jest.fn().mockReturnThis(),
       clone: jest.fn().mockReturnThis(),
-      then: jest.fn((resolve) => resolve([])),
+      then: jest.fn((resolve) => resolve([{ total: '1' }])),
     };
 
     mockKnex = jest.fn().mockReturnValue(mockQueryBuilder);
@@ -143,6 +143,56 @@ describe('FinanceService', () => {
         'a0000000-0000-0000-0000-000000000001',
       );
     });
+
+    it('should insert and return KPI and FOOD expenses successfully', async () => {
+      mockQueryBuilder.returning
+        .mockResolvedValueOnce([
+          {
+            id: 'exp-kpi',
+            category: ExpenseCategory.KPI,
+            amount: 750,
+            currency: Currency.USD,
+            description: 'Top performer quarterly KPI bonus',
+            expense_date: '2026-08-15',
+            created_at: new Date(),
+            updated_at: new Date(),
+          },
+        ])
+        .mockResolvedValueOnce([
+          {
+            id: 'exp-food',
+            category: ExpenseCategory.FOOD,
+            amount: 120,
+            currency: Currency.UZS,
+            description: 'Team lunch and refreshments',
+            expense_date: '2026-08-16',
+            created_at: new Date(),
+            updated_at: new Date(),
+          },
+        ]);
+
+      const kpiResult = await service.createExpense({
+        category: ExpenseCategory.KPI,
+        amount: 750,
+        currency: Currency.USD,
+        description: 'Top performer quarterly KPI bonus',
+        expense_date: '2026-08-15',
+      });
+      expect(kpiResult.category).toEqual(ExpenseCategory.KPI);
+      expect(kpiResult.amount).toEqual(750);
+      expect(kpiResult.currency).toEqual(Currency.USD);
+
+      const foodResult = await service.createExpense({
+        category: ExpenseCategory.FOOD,
+        amount: 120,
+        currency: Currency.UZS,
+        description: 'Team lunch and refreshments',
+        expense_date: '2026-08-16',
+      });
+      expect(foodResult.category).toEqual(ExpenseCategory.FOOD);
+      expect(foodResult.amount).toEqual(120);
+      expect(foodResult.currency).toEqual(Currency.UZS);
+    });
   });
 
   describe('findExpenseById', () => {
@@ -227,6 +277,36 @@ describe('FinanceService', () => {
       await expect(service.deleteExpense('exp-99')).rejects.toThrow(
         NotFoundException,
       );
+    });
+  });
+
+  describe('getExpenseCategories', () => {
+    it('should return all 8 expense categories breakdown with grand total', async () => {
+      mockQueryBuilder.then.mockImplementationOnce((resolve: any) =>
+        resolve([
+          { category: 'kpi', total: '400.00', currency: 'UZS', count: '2' },
+          { category: 'food', total: '150.00', currency: 'UZS', count: '3' },
+          { category: 'rent', total: '500.00', currency: 'UZS', count: '1' },
+        ]),
+      );
+
+      const result = await service.getExpenseCategories('2026-08');
+      expect(result.categories.length).toEqual(8);
+      expect(result.grand_total).toEqual(1050);
+
+      const kpiCat = result.categories.find(
+        (c) => c.category === ExpenseCategory.KPI,
+      );
+      expect(kpiCat).toBeDefined();
+      expect(kpiCat?.total_amount).toEqual(400);
+      expect(kpiCat?.expense_count).toEqual(2);
+
+      const foodCat = result.categories.find(
+        (c) => c.category === ExpenseCategory.FOOD,
+      );
+      expect(foodCat).toBeDefined();
+      expect(foodCat?.total_amount).toEqual(150);
+      expect(foodCat?.expense_count).toEqual(3);
     });
   });
 
@@ -340,11 +420,13 @@ describe('FinanceService', () => {
       expect(result.flow_diagram.net_profit).toEqual(1900);
 
       // Expense distribution check
-      expect(result.expense_distribution.length).toEqual(6);
+      expect(result.expense_distribution.length).toEqual(8);
       const rentCat = result.expense_distribution.find(
         (c: any) => c.category === 'rent',
       );
       expect(rentCat?.amount).toEqual(500);
+      expect(result.expense_breakdown).toHaveProperty('kpi');
+      expect(result.expense_breakdown).toHaveProperty('food');
     });
 
     it('should correctly decouple cargo registration purchase_date (July) and sell_date (August)', async () => {

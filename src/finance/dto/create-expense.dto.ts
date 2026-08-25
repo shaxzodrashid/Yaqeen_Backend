@@ -16,13 +16,15 @@ export enum ExpenseCategory {
   RENT = 'rent',
   SALARY_PAYOUT = 'salary_payout',
   CLEANER = 'cleaner',
+  KPI = 'kpi',
+  FOOD = 'food',
   OTHER = 'other',
 }
 
 export class CreateExpenseDto {
   @IsEnum(ExpenseCategory, {
     message:
-      'category must be one of: tax, utility, rent, salary_payout, cleaner, other',
+      'category must be one of: tax, utility, rent, salary_payout, cleaner, kpi, food, other',
   })
   category: ExpenseCategory;
 
