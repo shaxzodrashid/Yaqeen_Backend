@@ -80,6 +80,8 @@ The `cargo_registrations` table includes the following columns for currency date
 | `destination_country_code` | `varchar(10)` | YES | 2-letter ISO country code (`UZ`) |
 | `destination_geoname_id` | `integer` | YES | Global GeoNames ID for destination |
 | `destination_lat` / `destination_lng` | `decimal(10,7)` | YES | Destination geographic coordinates |
+| `load_code` | `varchar(100)` | YES | Custom string identifier for LTL cargo (detail view only) |
+| `is_turnkey` | `boolean` | NO | Turnkey cargo delivery service flag (default: false, detail view only) |
 
 ---
 

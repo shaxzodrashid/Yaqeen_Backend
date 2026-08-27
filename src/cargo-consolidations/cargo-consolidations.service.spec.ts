@@ -824,4 +824,118 @@ describe('CargoConsolidationsService', () => {
       expect(service.inferTransportType(null)).toBe('auto');
     });
   });
+
+  describe('consolidation date fields and cargo detail isolation', () => {
+    it('should store load_date, border_arrival_date, tashkent_arrival_date on createConsolidation', async () => {
+      const user = { id: 'user-uuid-1', role: 'CEO' };
+      let insertedPayload: any = null;
+
+      knexMock.mockImplementation((tableName: string) => {
+        if (tableName === 'cargo_consolidations') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            orderBy: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'cons-uuid-1',
+              consolidation_code: 'CNS-202608-0001',
+              container_truck_id: 'TRK-100',
+              load_date: '2026-08-25',
+              border_arrival_date: '2026-08-28',
+              tashkent_arrival_date: '2026-09-02',
+            }),
+            insert: jest.fn((payload) => {
+              insertedPayload = payload;
+              return {
+                returning: jest.fn().mockResolvedValue(['cons-uuid-1']),
+              };
+            }),
+          };
+        }
+        if (tableName === 'cargo_registrations as cr') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            orderBy: jest.fn().mockResolvedValue([
+              {
+                id: 'cargo-1',
+                cargo_type: 'LTL',
+                cargo: 'Fabrics',
+                volume: 5,
+                weight: 1000,
+                load_code: 'LTL-777',
+                is_turnkey: true,
+                sell_price: 1500,
+                sell_currency: 'USD',
+                purchase_price: 1000,
+                purchase_currency: 'USD',
+              },
+            ]),
+          };
+        }
+        return {};
+      });
+
+      const res = await service.createConsolidation(user, {
+        container_truck_id: 'TRK-100',
+        load_date: '2026-08-25',
+        border_arrival_date: '2026-08-28',
+        tashkent_arrival_date: '2026-09-02',
+      });
+
+      expect(insertedPayload).toBeDefined();
+      expect(insertedPayload.load_date).toBe('2026-08-25');
+      expect(insertedPayload.border_arrival_date).toBe('2026-08-28');
+      expect(insertedPayload.tashkent_arrival_date).toBe('2026-09-02');
+
+      expect(res.load_date).toBe('2026-08-25');
+      expect(res.border_arrival_date).toBe('2026-08-28');
+      expect(res.tashkent_arrival_date).toBe('2026-09-02');
+      expect(res.cargos[0].load_code).toBe('LTL-777');
+      expect(res.cargos[0].is_turnkey).toBe(true);
+    });
+
+    it('should update load_date, border_arrival_date, tashkent_arrival_date on updateConsolidation', async () => {
+      const user = { id: 'user-uuid-1', role: 'CEO' };
+      let updatedPayload: any = null;
+
+      knexMock.mockImplementation((tableName: string) => {
+        if (tableName === 'cargo_consolidations') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            whereNot: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'cons-uuid-1',
+              consolidation_code: 'CNS-202608-0001',
+              container_truck_id: 'TRK-100',
+            }),
+            update: jest.fn((payload) => {
+              updatedPayload = payload;
+              return Promise.resolve(1);
+            }),
+          };
+        }
+        if (tableName === 'cargo_registrations as cr') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            orderBy: jest.fn().mockResolvedValue([]),
+          };
+        }
+        return {};
+      });
+
+      await service.updateConsolidation('cons-uuid-1', user, {
+        load_date: '2026-08-26',
+        border_arrival_date: '2026-08-29',
+        tashkent_arrival_date: '2026-09-03',
+      });
+
+      expect(updatedPayload).toBeDefined();
+      expect(updatedPayload.load_date).toBe('2026-08-26');
+      expect(updatedPayload.border_arrival_date).toBe('2026-08-29');
+      expect(updatedPayload.tashkent_arrival_date).toBe('2026-09-03');
+    });
+  });
 });

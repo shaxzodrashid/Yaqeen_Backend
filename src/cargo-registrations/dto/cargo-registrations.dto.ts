@@ -86,6 +86,14 @@ export class CreateCargoRegistrationDto {
 
   @IsOptional()
   @IsString()
+  load_code?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_turnkey?: boolean;
+
+  @IsOptional()
+  @IsString()
   container_type?: string;
 
   @IsOptional()
@@ -297,6 +305,14 @@ export class UpdateCargoRegistrationDto {
   @IsNumber()
   @Min(0.0001)
   weight?: number;
+
+  @IsOptional()
+  @IsString()
+  load_code?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  is_turnkey?: boolean;
 
   @IsOptional()
   @IsString()

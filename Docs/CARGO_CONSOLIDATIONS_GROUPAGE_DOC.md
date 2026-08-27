@@ -74,8 +74,10 @@ erDiagram
 | `destination_country_code`            | `VARCHAR(10)`   | `NULLABLE`                                            | Destination 2-letter ISO country code (`UZ`)                                     |
 | `destination_geoname_id`              | `INTEGER`       | `NULLABLE`, Indexed                                   | Destination global GeoNames ID                                                   |
 | `destination_lat` / `destination_lng` | `DECIMAL(10,7)` | `NULLABLE`                                            | Destination geographic coordinates                                               |
-| `loaded_date`                         | `DATE`          | `NULLABLE`                                            | Loading completion date (`YYYY-MM-DD`)                                           |
+| `load_date` / `loaded_date`           | `DATE`          | `NULLABLE`                                            | Loading completion date (`YYYY-MM-DD`, detail view)                              |
 | `departure_date`                      | `DATE`          | `NULLABLE`, Indexed                                   | Truck departure date (`YYYY-MM-DD`)                                              |
+| `border_arrival_date`                 | `DATE`          | `NULLABLE`                                            | Border arrival date (`YYYY-MM-DD`, detail view)                                  |
+| `tashkent_arrival_date`               | `DATE`          | `NULLABLE`                                            | Tashkent destination arrival date (`YYYY-MM-DD`, detail view)                    |
 | `estimated_arrival_date`              | `DATE`          | `NULLABLE`                                            | Expected arrival date (`YYYY-MM-DD`)                                             |
 | `arrived_date`                        | `DATE`          | `NULLABLE`, Indexed                                   | Actual arrival date (`YYYY-MM-DD`)                                               |
 | `total_carrier_cost`                  | `DECIMAL(14,2)` | `NOT NULL`, Default: `0.00`                           | Full carrier cost paid for the whole truck/container                             |
@@ -88,8 +90,9 @@ erDiagram
 
 ### `cargo_registrations` Alteration
 
-- Added `consolidation_id UUID NULLABLE REFERENCES cargo_consolidations(id) ON DELETE SET NULL`
-- Indexed on `consolidation_id`
+- Added `consolidation_id UUID NULLABLE REFERENCES cargo_consolidations(id) ON DELETE SET NULL` (Indexed on `consolidation_id`)
+- Added `load_code VARCHAR(100) NULLABLE` (Custom string for LTL cargo, detail view only)
+- Added `is_turnkey BOOLEAN NOT NULL DEFAULT FALSE` (Turnkey cargo flag, detail view only)
 
 ---
 

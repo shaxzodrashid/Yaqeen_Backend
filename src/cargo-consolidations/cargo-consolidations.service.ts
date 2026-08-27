@@ -109,7 +109,7 @@ export class CargoConsolidationsService {
   /**
    * Helper to format an individual cargo registration attached to a consolidation.
    */
-  private formatCargoItem(r: any) {
+  private formatCargoItem(r: any, isDetail: boolean = false) {
     const vol =
       r.volume !== null && r.volume !== undefined ? Number(r.volume) : null;
     const wt =
@@ -158,6 +158,12 @@ export class CargoConsolidationsService {
       cargo: r.cargo,
       volume: vol,
       weight: wt,
+      ...(isDetail
+        ? {
+            load_code: r.cargo_type === 'LTL' ? r.load_code || null : null,
+            is_turnkey: Boolean(r.is_turnkey),
+          }
+        : {}),
       container_type: r.container_type || null,
       transport_types:
         r.transport_types ||
@@ -300,6 +306,8 @@ export class CargoConsolidationsService {
       ];
     }
 
+    const loadDate = dto.load_date || dto.loaded_date || null;
+
     const [inserted] = await this.knex('cargo_consolidations')
       .insert({
         consolidation_code: consolidationCode,
@@ -320,7 +328,10 @@ export class CargoConsolidationsService {
         destination_place: dto.destination_place
           ? dto.destination_place.trim()
           : null,
-        loaded_date: dto.loaded_date || null,
+        load_date: loadDate,
+        loaded_date: loadDate,
+        border_arrival_date: dto.border_arrival_date || null,
+        tashkent_arrival_date: dto.tashkent_arrival_date || null,
         departure_date: dto.departure_date || null,
         estimated_arrival_date: dto.estimated_arrival_date || null,
         arrived_date: dto.arrived_date || null,
@@ -911,7 +922,7 @@ export class CargoConsolidationsService {
       totalVolume += vol;
       totalWeight += wt;
 
-      const cargoItem = this.formatCargoItem(r);
+      const cargoItem = this.formatCargoItem(r, true);
       totalSellUsd += cargoItem.sell_price.amount_usd;
       totalPurchaseUsd += cargoItem.purchase_price.amount_usd;
 
@@ -988,8 +999,19 @@ export class CargoConsolidationsService {
       carrier_phone: consolidation.carrier_phone,
       origin_place: consolidation.origin_place,
       destination_place: consolidation.destination_place,
-      loaded_date: this.formatDateStr(consolidation.loaded_date),
+      load_date: this.formatDateStr(
+        consolidation.load_date || consolidation.loaded_date,
+      ),
+      loaded_date: this.formatDateStr(
+        consolidation.load_date || consolidation.loaded_date,
+      ),
       departure_date: this.formatDateStr(consolidation.departure_date),
+      border_arrival_date: this.formatDateStr(
+        consolidation.border_arrival_date,
+      ),
+      tashkent_arrival_date: this.formatDateStr(
+        consolidation.tashkent_arrival_date,
+      ),
       estimated_arrival_date: this.formatDateStr(
         consolidation.estimated_arrival_date,
       ),
@@ -1094,10 +1116,19 @@ export class CargoConsolidationsService {
       updatePayload.destination_place = dto.destination_place
         ? dto.destination_place.trim()
         : null;
-    if (dto.loaded_date !== undefined)
+    if (dto.load_date !== undefined) {
+      updatePayload.load_date = dto.load_date || null;
+      updatePayload.loaded_date = dto.load_date || null;
+    } else if (dto.loaded_date !== undefined) {
       updatePayload.loaded_date = dto.loaded_date || null;
+      updatePayload.load_date = dto.loaded_date || null;
+    }
     if (dto.departure_date !== undefined)
       updatePayload.departure_date = dto.departure_date || null;
+    if (dto.border_arrival_date !== undefined)
+      updatePayload.border_arrival_date = dto.border_arrival_date || null;
+    if (dto.tashkent_arrival_date !== undefined)
+      updatePayload.tashkent_arrival_date = dto.tashkent_arrival_date || null;
     if (dto.estimated_arrival_date !== undefined)
       updatePayload.estimated_arrival_date = dto.estimated_arrival_date || null;
     if (dto.arrived_date !== undefined)
@@ -1127,8 +1158,8 @@ export class CargoConsolidationsService {
       cargoUpdates.transport_types = dto.transport_types;
     }
     if (dto.sync_dates_to_cargos) {
-      if (dto.loaded_date !== undefined)
-        cargoUpdates.loaded_date = dto.loaded_date || null;
+      if (dto.load_date !== undefined || dto.loaded_date !== undefined)
+        cargoUpdates.loaded_date = dto.load_date || dto.loaded_date || null;
       if (dto.arrived_date !== undefined)
         cargoUpdates.arrived_date = dto.arrived_date || null;
     }

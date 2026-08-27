@@ -653,6 +653,10 @@ export class CargoRegistrationsService {
           destination_place: nc.destination_place
             ? nc.destination_place.trim()
             : destPlace.city || null,
+          load_date: nc.load_date || nc.loaded_date || null,
+          loaded_date: nc.load_date || nc.loaded_date || null,
+          border_arrival_date: nc.border_arrival_date || null,
+          tashkent_arrival_date: nc.tashkent_arrival_date || null,
           departure_date: nc.departure_date || null,
           status: nc.status || 'Waiting',
           description: nc.description || null,
@@ -757,6 +761,12 @@ export class CargoRegistrationsService {
         cargo_type: dto.cargo_type,
         volume: dto.cargo_type === 'LTL' ? dto.volume : null,
         weight: dto.cargo_type === 'LTL' ? dto.weight : null,
+        load_code:
+          dto.cargo_type === 'LTL' && dto.load_code
+            ? dto.load_code.trim()
+            : null,
+        is_turnkey:
+          dto.is_turnkey !== undefined ? Boolean(dto.is_turnkey) : false,
         container_type:
           dto.cargo_type === 'FTL' && finalContainerType
             ? finalContainerType
@@ -929,13 +939,19 @@ export class CargoRegistrationsService {
     if (effectiveCargoType === 'LTL') {
       if (dto.volume !== undefined) updatePayload.volume = dto.volume;
       if (dto.weight !== undefined) updatePayload.weight = dto.weight;
+      if (dto.load_code !== undefined)
+        updatePayload.load_code = dto.load_code ? dto.load_code.trim() : null;
       updatePayload.container_type = null;
     } else {
       if (dto.container_type !== undefined)
         updatePayload.container_type = dto.container_type.trim();
       updatePayload.volume = null;
       updatePayload.weight = null;
+      updatePayload.load_code = null;
     }
+
+    if (dto.is_turnkey !== undefined)
+      updatePayload.is_turnkey = Boolean(dto.is_turnkey);
 
     if (dto.transport_types !== undefined)
       updatePayload.transport_types = dto.transport_types;
@@ -2125,6 +2141,8 @@ export class CargoRegistrationsService {
       cargo_type: row.cargo_type,
       volume: row.volume ? Number(row.volume) : null,
       weight: row.weight ? Number(row.weight) : null,
+      load_code: row.cargo_type === 'LTL' ? row.load_code || null : null,
+      is_turnkey: Boolean(row.is_turnkey),
       container_type: row.container_type,
       transport_types:
         row.transport_types ||

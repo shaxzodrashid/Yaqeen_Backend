@@ -97,6 +97,13 @@ export class CreateCargoConsolidationDto {
   @IsOptional()
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'load_date must be in YYYY-MM-DD format',
+  })
+  load_date?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
     message: 'loaded_date must be in YYYY-MM-DD format',
   })
   loaded_date?: string;
@@ -107,6 +114,20 @@ export class CreateCargoConsolidationDto {
     message: 'departure_date must be in YYYY-MM-DD format',
   })
   departure_date?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'border_arrival_date must be in YYYY-MM-DD format',
+  })
+  border_arrival_date?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/, {
+    message: 'tashkent_arrival_date must be in YYYY-MM-DD format',
+  })
+  tashkent_arrival_date?: string;
 
   @IsOptional()
   @IsString()
@@ -209,12 +230,27 @@ export class UpdateCargoConsolidationDto {
   @IsOptional()
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  load_date?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
   loaded_date?: string;
 
   @IsOptional()
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
   departure_date?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  border_arrival_date?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  tashkent_arrival_date?: string;
 
   @IsOptional()
   @IsString()
@@ -421,7 +457,27 @@ export class CreateConsolidationInlineDto {
   @IsOptional()
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  load_date?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  loaded_date?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
   departure_date?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  border_arrival_date?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  tashkent_arrival_date?: string;
 
   @IsOptional()
   @IsString()
