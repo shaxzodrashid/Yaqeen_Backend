@@ -1379,22 +1379,21 @@ describe('CargoRegistrationsService', () => {
   });
 
   describe('Consolidation linkage in Cargo Registrations', () => {
-    it('should link existing consolidation_id and inherit container_truck_id', async () => {
+    it('should link existing consolidation_id and inherit container_truck_id, carrier_name as agent_name, route, dates, status, and purchase_price = 0', async () => {
       const user = { id: 'user-uuid-1', role: 'CEO' };
       const dto: CreateCargoRegistrationDto = {
         cargo_type: 'LTL',
         volume: 5.5,
         weight: 800,
         consolidation_id: 'cons-uuid-1',
-        agent_name: 'Test Agent',
         cargo: 'Auto Parts',
-        purchase_price: 500,
-        purchase_currency: 'USD',
         sell_price: 800,
         sell_currency: 'USD',
         client_id: 'client-uuid-1',
         employee_id: 'emp-uuid-1',
       };
+
+      let insertedPayload: any = null;
 
       knexMock.mockImplementation((tableName: string) => {
         if (tableName === 'users as u') {
@@ -1436,13 +1435,25 @@ describe('CargoRegistrationsService', () => {
               id: 'cons-uuid-1',
               container_truck_id: 'TRK-9090',
               container_type: '86m3',
+              carrier_name: 'Silk Road Freight',
+              transport_types: ['auto'],
+              origin_place: 'Yiwu',
+              destination_place: 'Tashkent',
+              load_date: '2026-08-25',
+              arrived_date: '2026-09-02',
+              status: 'In Transit',
+              carrier_cost_currency: 'USD',
+              carrier_cost_usd_rate: 1.0,
             }),
           };
         }
         if (tableName === 'cargo_registrations') {
           return {
-            insert: jest.fn().mockReturnValue({
-              returning: jest.fn().mockResolvedValue([{ id: 'cargo-reg-1' }]),
+            insert: jest.fn((payload) => {
+              insertedPayload = payload;
+              return {
+                returning: jest.fn().mockResolvedValue([{ id: 'cargo-reg-1' }]),
+              };
             }),
           };
         }
@@ -1459,14 +1470,14 @@ describe('CargoRegistrationsService', () => {
               container_truck_id: 'TRK-9090',
               consolidation_id: 'cons-uuid-1',
               consolidation_code: 'CNS-202608-0001',
-              consolidation_status: 'Waiting',
-              agent_name: 'Test Agent',
+              consolidation_status: 'In Transit',
+              agent_name: 'Silk Road Freight',
               cargo: 'Auto Parts',
-              purchase_price: 500,
+              purchase_price: 0,
               purchase_currency: 'USD',
               sell_price: 800,
               sell_currency: 'USD',
-              status: 'Waiting',
+              status: 'In Transit',
               client_id: 'client-uuid-1',
               employee_id: 'emp-uuid-1',
             }),
@@ -1478,11 +1489,68 @@ describe('CargoRegistrationsService', () => {
       const res = await service.createCargoRegistration(user, dto);
       expect(res).toBeDefined();
       expect(res.consolidation_id).toBe('cons-uuid-1');
-      expect(res.consolidation).toBeDefined();
-      expect(res.consolidation.consolidation_code).toBe('CNS-202608-0001');
+      expect(insertedPayload).toBeDefined();
+      expect(insertedPayload.container_truck_id).toBe('TRK-9090');
+      expect(insertedPayload.agent_name).toBe('Silk Road Freight');
+      expect(insertedPayload.origin_city).toBe('Yiwu');
+      expect(insertedPayload.destination_city).toBe('Tashkent');
+      expect(insertedPayload.loaded_date).toBe('2026-08-25');
+      expect(insertedPayload.arrived_date).toBe('2026-09-02');
+      expect(insertedPayload.status).toBe('In Transit');
+      expect(insertedPayload.purchase_price).toBe(0);
+      expect(insertedPayload.purchase_currency).toBe('USD');
     });
 
-    it('should create new consolidation inline when new_consolidation is provided', async () => {
+    it('should throw BadRequestException if LTL cargo is created without consolidation_id or new_consolidation', async () => {
+      const user = { id: 'user-uuid-1', role: 'CEO' };
+      const dto: CreateCargoRegistrationDto = {
+        cargo_type: 'LTL',
+        volume: 5.5,
+        weight: 800,
+        cargo: 'Auto Parts',
+        sell_price: 800,
+        sell_currency: 'USD',
+        client_id: 'client-uuid-1',
+        employee_id: 'emp-uuid-1',
+      };
+
+      knexMock.mockImplementation((tableName: string) => {
+        if (tableName === 'users as u') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ role: 'CEO' }),
+          };
+        }
+        if (tableName === 'users') {
+          return {
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ employee_id: 'emp-uuid-1' }),
+          };
+        }
+        if (tableName === 'employees') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ id: 'emp-uuid-1' }),
+          };
+        }
+        if (tableName === 'clients') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ id: 'client-uuid-1' }),
+          };
+        }
+        return {};
+      });
+
+      await expect(service.createCargoRegistration(user, dto)).rejects.toThrow(
+        BadRequestException,
+      );
+    });
+
+    it('should create new consolidation inline when new_consolidation is provided and inherit its fields', async () => {
       const user = { id: 'user-uuid-1', role: 'CEO' };
       const dto: CreateCargoRegistrationDto = {
         cargo_type: 'LTL',
@@ -1493,19 +1561,29 @@ describe('CargoRegistrationsService', () => {
           container_type: '120m3',
           max_volume_capacity: 120,
           carrier_name: 'Silk Road Express',
+          origin_place: 'Guangzhou',
+          destination_place: 'Tashkent',
+          load_date: '2026-08-28',
+          arrived_date: '2026-09-05',
+          status: 'In Transit',
+          total_carrier_cost: 4500,
+          carrier_cost_currency: 'USD',
         },
-        agent_name: 'Test Agent',
         cargo: 'Electronics',
-        purchase_price: 1000,
-        purchase_currency: 'USD',
         sell_price: 1600,
         sell_currency: 'USD',
         client_id: 'client-uuid-1',
         employee_id: 'emp-uuid-1',
       };
 
-      const consInsertMock = jest.fn().mockReturnValue({
-        returning: jest.fn().mockResolvedValue([{ id: 'new-cons-uuid' }]),
+      let insertedConsPayload: any = null;
+      let insertedCargoPayload: any = null;
+
+      const consInsertMock = jest.fn((payload) => {
+        insertedConsPayload = payload;
+        return {
+          returning: jest.fn().mockResolvedValue([{ id: 'new-cons-uuid' }]),
+        };
       });
 
       knexMock.mockImplementation((tableName: string) => {
@@ -1546,8 +1624,11 @@ describe('CargoRegistrationsService', () => {
         }
         if (tableName === 'cargo_registrations') {
           return {
-            insert: jest.fn().mockReturnValue({
-              returning: jest.fn().mockResolvedValue([{ id: 'cargo-reg-2' }]),
+            insert: jest.fn((payload) => {
+              insertedCargoPayload = payload;
+              return {
+                returning: jest.fn().mockResolvedValue([{ id: 'cargo-reg-2' }]),
+              };
             }),
           };
         }
@@ -1564,7 +1645,7 @@ describe('CargoRegistrationsService', () => {
               container_truck_id: '01B888BB',
               consolidation_id: 'new-cons-uuid',
               consolidation_code: 'CNS-202608-0001',
-              purchase_price: 1000,
+              purchase_price: 0,
               purchase_currency: 'USD',
               sell_price: 1600,
               sell_currency: 'USD',
@@ -1576,8 +1657,202 @@ describe('CargoRegistrationsService', () => {
 
       const res = await service.createCargoRegistration(user, dto);
       expect(consInsertMock).toHaveBeenCalled();
+      expect(insertedConsPayload).toBeDefined();
+      expect(insertedConsPayload.container_truck_id).toBe('01B888BB');
       expect(res).toBeDefined();
       expect(res.consolidation_id).toBe('new-cons-uuid');
+      expect(insertedCargoPayload.container_truck_id).toBe('01B888BB');
+      expect(insertedCargoPayload.agent_name).toBe('Silk Road Express');
+      expect(insertedCargoPayload.origin_city).toBe('Guangzhou');
+      expect(insertedCargoPayload.destination_city).toBe('Tashkent');
+      expect(insertedCargoPayload.loaded_date).toBe('2026-08-28');
+      expect(insertedCargoPayload.arrived_date).toBe('2026-09-05');
+      expect(insertedCargoPayload.status).toBe('In Transit');
+      expect(insertedCargoPayload.purchase_price).toBe(0);
+      expect(insertedCargoPayload.purchase_currency).toBe('USD');
+    });
+
+    it('should throw BadRequestException if FTL cargo is missing required FTL fields', async () => {
+      const user = { id: 'user-uuid-1', role: 'CEO' };
+      const dtoMissingTruck: CreateCargoRegistrationDto = {
+        cargo_type: 'FTL',
+        container_type: '40HQ',
+        cargo: 'Textiles',
+        purchase_price: 2000,
+        purchase_currency: 'USD',
+        sell_price: 3000,
+        sell_currency: 'USD',
+        client_id: 'client-uuid-1',
+        employee_id: 'emp-uuid-1',
+      };
+
+      knexMock.mockImplementation((tableName: string) => {
+        if (tableName === 'users as u') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ role: 'CEO' }),
+          };
+        }
+        if (tableName === 'users') {
+          return {
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ employee_id: 'emp-uuid-1' }),
+          };
+        }
+        if (tableName === 'employees') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ id: 'emp-uuid-1' }),
+          };
+        }
+        if (tableName === 'clients') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ id: 'client-uuid-1' }),
+          };
+        }
+        return {};
+      });
+
+      await expect(
+        service.createCargoRegistration(user, dtoMissingTruck),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should update LTL cargo when reassigning consolidation_id and sync new consolidation fields', async () => {
+      const user = { id: 'user-uuid-1', role: 'CEO' };
+      let updatedPayload: any = null;
+
+      knexMock.mockImplementation((tableName: string) => {
+        if (tableName === 'users as u') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ role: 'CEO' }),
+          };
+        }
+        if (tableName === 'users') {
+          return {
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ employee_id: 'emp-uuid-1' }),
+          };
+        }
+        if (tableName === 'cargo_consolidations') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'cons-new-99',
+              container_truck_id: 'TRK-9999',
+              carrier_name: 'Carrier Apex',
+              transport_types: ['auto'],
+              origin_place: 'Shanghai',
+              destination_place: 'Samarkand',
+              load_date: '2026-09-01',
+              arrived_date: '2026-09-10',
+              status: 'In Transit',
+              carrier_cost_currency: 'USD',
+              carrier_cost_usd_rate: 1.0,
+            }),
+          };
+        }
+        if (tableName === 'cargo_registrations') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'cargo-1',
+              cargo_type: 'LTL',
+              volume: 10,
+              weight: 500,
+              consolidation_id: 'cons-old-1',
+              purchase_price: 0,
+              purchase_currency: 'USD',
+              sell_price: 2000,
+              sell_currency: 'USD',
+              employee_id: 'emp-uuid-1',
+            }),
+            update: jest.fn((payload) => {
+              updatedPayload = payload;
+              return Promise.resolve(1);
+            }),
+          };
+        }
+        if (tableName === 'cargo_registrations as cr') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'cargo-1',
+              cargo_type: 'LTL',
+              consolidation_id: 'cons-new-99',
+            }),
+          };
+        }
+        return {};
+      });
+
+      await service.updateCargoRegistration('cargo-1', user, {
+        consolidation_id: 'cons-new-99',
+      });
+
+      expect(updatedPayload).toBeDefined();
+      expect(updatedPayload.consolidation_id).toBe('cons-new-99');
+      expect(updatedPayload.container_truck_id).toBe('TRK-9999');
+      expect(updatedPayload.agent_name).toBe('Carrier Apex');
+      expect(updatedPayload.origin_city).toBe('Shanghai');
+      expect(updatedPayload.destination_city).toBe('Samarkand');
+      expect(updatedPayload.loaded_date).toBe('2026-09-01');
+      expect(updatedPayload.arrived_date).toBe('2026-09-10');
+      expect(updatedPayload.status).toBe('In Transit');
+      expect(updatedPayload.purchase_price).toBe(0);
+      expect(updatedPayload.purchase_currency).toBe('USD');
+    });
+
+    it('should throw BadRequestException if updating LTL cargo with null consolidation_id', async () => {
+      const user = { id: 'user-uuid-1', role: 'CEO' };
+
+      knexMock.mockImplementation((tableName: string) => {
+        if (tableName === 'users as u') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ role: 'CEO' }),
+          };
+        }
+        if (tableName === 'users') {
+          return {
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ employee_id: 'emp-uuid-1' }),
+          };
+        }
+        if (tableName === 'cargo_registrations') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'cargo-1',
+              cargo_type: 'LTL',
+              volume: 10,
+              weight: 500,
+              consolidation_id: 'cons-old-1',
+              employee_id: 'emp-uuid-1',
+            }),
+          };
+        }
+        return {};
+      });
+
+      await expect(
+        service.updateCargoRegistration('cargo-1', user, {
+          consolidation_id: null,
+        }),
+      ).rejects.toThrow(BadRequestException);
     });
 
     it('should prevent duplicate registration when prevent_duplicate is true', async () => {
@@ -1770,6 +2045,17 @@ describe('CargoRegistrationsService', () => {
             first: jest.fn().mockResolvedValue({ id: 'client-uuid-1' }),
           };
         }
+        if (tableName === 'cargo_consolidations') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'cons-uuid-1',
+              container_truck_id: 'TRK-001',
+              carrier_name: 'Agent X',
+              status: 'Waiting',
+            }),
+          };
+        }
         if (tableName === 'cargo_registrations') {
           return {
             insert: jest.fn((payload) => {
@@ -1786,7 +2072,8 @@ describe('CargoRegistrationsService', () => {
               weight: 500,
               load_code: 'LC-9988',
               is_turnkey: true,
-              purchase_price: 1000,
+              consolidation_id: 'cons-uuid-1',
+              purchase_price: 0,
               purchase_currency: 'USD',
               sell_price: 1500,
               sell_currency: 'USD',
@@ -1807,7 +2094,8 @@ describe('CargoRegistrationsService', () => {
               weight: 500,
               load_code: 'LC-9988',
               is_turnkey: true,
-              purchase_price: 1000,
+              consolidation_id: 'cons-uuid-1',
+              purchase_price: 0,
               purchase_currency: 'USD',
               sell_price: 1500,
               sell_currency: 'USD',
@@ -1825,11 +2113,8 @@ describe('CargoRegistrationsService', () => {
         weight: 500,
         load_code: 'LC-9988',
         is_turnkey: true,
-        container_truck_id: 'TRK-001',
-        agent_name: 'Agent X',
+        consolidation_id: 'cons-uuid-1',
         cargo: 'Textiles',
-        purchase_price: 1000,
-        purchase_currency: 'USD',
         sell_price: 1500,
         sell_currency: 'USD',
         client_id: 'client-uuid-1',

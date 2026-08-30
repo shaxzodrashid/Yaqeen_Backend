@@ -121,9 +121,9 @@ export class CreateCargoRegistrationDto {
   })
   container_truck_id?: string;
 
+  @IsOptional()
   @IsString()
-  @IsNotEmpty({ message: 'agent_name is required' })
-  agent_name: string;
+  agent_name?: string;
 
   @IsString()
   @IsNotEmpty({ message: 'cargo is required' })
@@ -150,16 +150,18 @@ export class CreateCargoRegistrationDto {
   })
   arrived_date?: string;
 
+  @IsOptional()
   @Type(() => Number)
   @IsNumber({}, { message: 'purchase_price must be a number' })
   @Min(0, { message: 'purchase_price cannot be negative' })
-  purchase_price: number;
+  purchase_price?: number;
 
+  @IsOptional()
   @IsString()
   @IsIn(ALLOWED_CURRENCIES, {
     message: 'purchase_currency must be UZS, RUB, USD, or RMB',
   })
-  purchase_currency: CargoCurrency;
+  purchase_currency?: CargoCurrency;
 
   @IsOptional()
   @IsString()

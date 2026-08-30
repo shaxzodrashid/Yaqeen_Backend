@@ -231,7 +231,7 @@ describe('EmployeesService', () => {
       expect((emp as any).address).toBeUndefined();
       expect((emp as any).department_id).toBeUndefined();
       expect((emp as any).fixed_salary).toBeUndefined();
-      expect(emp.currency).toBeUndefined();
+      expect((emp as any).currency).toBeUndefined();
     });
 
     it('should calculate plans completions with Net Yield (sell - purchase) exactly as cargo-kpi/plans', async () => {

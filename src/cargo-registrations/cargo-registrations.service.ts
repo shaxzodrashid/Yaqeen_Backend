@@ -184,6 +184,12 @@ export class CargoRegistrationsService {
     volume?: number | null;
     weight?: number | null;
     container_type?: string | null;
+    container_truck_id?: string | null;
+    agent_name?: string | null;
+    purchase_price?: number | null;
+    purchase_currency?: string | null;
+    consolidation_id?: string | null;
+    new_consolidation?: unknown;
   }) {
     if (data.cargo_type === 'LTL') {
       if (
@@ -208,6 +214,13 @@ export class CargoRegistrationsService {
           location: 'weight_required_for_ltl',
         });
       }
+      if (!data.consolidation_id && !data.new_consolidation) {
+        throw new BadRequestException({
+          message:
+            'consolidation_id or new_consolidation is required for LTL cargo',
+          location: 'consolidation_required_for_ltl',
+        });
+      }
     } else if (data.cargo_type === 'FTL') {
       if (!data.container_type || !data.container_type.trim()) {
         throw new BadRequestException({
@@ -223,6 +236,38 @@ export class CargoRegistrationsService {
         throw new BadRequestException({
           message: `Invalid container type "${data.container_type}". Allowed types: ${ALLOWED_CONTAINER_TYPES.join(', ')}`,
           location: 'invalid_container_type',
+        });
+      }
+
+      if (!data.container_truck_id || !data.container_truck_id.trim()) {
+        throw new BadRequestException({
+          message: 'Container / Truck ID is required for FTL cargo',
+          location: 'container_truck_id_required',
+        });
+      }
+
+      if (!data.agent_name || !data.agent_name.trim()) {
+        throw new BadRequestException({
+          message: 'Agent / Carrier name is required for FTL cargo',
+          location: 'agent_name_required',
+        });
+      }
+
+      if (
+        data.purchase_price === undefined ||
+        data.purchase_price === null ||
+        Number(data.purchase_price) < 0
+      ) {
+        throw new BadRequestException({
+          message: 'Purchase price is required for FTL cargo',
+          location: 'purchase_price_required',
+        });
+      }
+
+      if (!data.purchase_currency) {
+        throw new BadRequestException({
+          message: 'Purchase currency is required for FTL cargo',
+          location: 'purchase_currency_required',
         });
       }
     }
@@ -255,12 +300,14 @@ export class CargoRegistrationsService {
    * Validate RMB rate condition.
    */
   private validateRmbRateRule(data: {
-    purchase_currency: string;
+    cargo_type: 'LTL' | 'FTL';
+    purchase_currency?: string | null;
     sell_currency: string;
     usd_rmb_rate?: number | null;
   }) {
     const isRmbInvolved =
-      data.purchase_currency === 'RMB' || data.sell_currency === 'RMB';
+      (data.cargo_type === 'FTL' && data.purchase_currency === 'RMB') ||
+      data.sell_currency === 'RMB';
 
     if (isRmbInvolved) {
       if (
@@ -512,78 +559,384 @@ export class CargoRegistrationsService {
       volume: dto.volume,
       weight: dto.weight,
       container_type: dto.container_type,
+      container_truck_id: dto.container_truck_id,
+      agent_name: dto.agent_name,
+      purchase_price: dto.purchase_price,
+      purchase_currency: dto.purchase_currency,
+      consolidation_id: dto.consolidation_id,
+      new_consolidation: dto.new_consolidation,
     });
 
     // Validate RMB rate rule
     this.validateRmbRateRule({
+      cargo_type: dto.cargo_type,
       purchase_currency: dto.purchase_currency,
       sell_currency: dto.sell_currency,
       usd_rmb_rate: dto.usd_rmb_rate,
     });
 
-    // Resolve & normalize origin and destination city locations via LocationsService
-    let originPlace = {
-      city: dto.origin_city ? dto.origin_city.trim() : null,
-      country: dto.origin_country ? dto.origin_country.trim() : null,
-      country_code: dto.origin_country_code
-        ? dto.origin_country_code.trim().toUpperCase()
-        : null,
-      geoname_id: dto.origin_geoname_id || null,
-      lat: dto.origin_lat || null,
-      lng: dto.origin_lng || null,
+    let finalConsolidationId: string | null = null;
+    let finalContainerTruckId = '';
+    let finalContainerType: string | null = null;
+    let finalAgentName = '';
+    let finalTransportTypes: string[] = ['auto'];
+    let finalOriginPlace = {
+      city: null as string | null,
+      country: null as string | null,
+      country_code: null as string | null,
+      geoname_id: null as number | null,
+      lat: null as number | null,
+      lng: null as number | null,
     };
-
-    let destPlace = {
-      city: dto.destination_city ? dto.destination_city.trim() : null,
-      country: dto.destination_country ? dto.destination_country.trim() : null,
-      country_code: dto.destination_country_code
-        ? dto.destination_country_code.trim().toUpperCase()
-        : null,
-      geoname_id: dto.destination_geoname_id || null,
-      lat: dto.destination_lat || null,
-      lng: dto.destination_lng || null,
+    let finalDestPlace = {
+      city: null as string | null,
+      country: null as string | null,
+      country_code: null as string | null,
+      geoname_id: null as number | null,
+      lat: null as number | null,
+      lng: null as number | null,
     };
+    let finalLoadedDate: string | null = null;
+    let finalArrivedDate: string | null = null;
+    let finalStatus = 'Waiting';
+    let finalPurchasePrice = 0;
+    let finalPurchaseCurrency = 'USD';
+    let finalPurchaseDate: string | null = null;
+    let finalPurchaseUsdRate = 1.0;
+    let finalPurchaseCustomRate: number | null = null;
 
-    if (this.locationsService) {
-      if (dto.origin_city || dto.origin_geoname_id) {
-        originPlace = await this.locationsService.normalizeAndResolvePlace({
-          city: dto.origin_city,
-          country: dto.origin_country,
-          country_code: dto.origin_country_code,
-          geoname_id: dto.origin_geoname_id,
-          lat: dto.origin_lat,
-          lng: dto.origin_lng,
-        });
+    if (dto.cargo_type === 'LTL') {
+      if (dto.new_consolidation) {
+        const nc = dto.new_consolidation;
+        const now = new Date();
+        const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
+        const prefix = `CNS-${yearMonth}-`;
+        const latest = await this.knex('cargo_consolidations')
+          .where('consolidation_code', 'like', `${prefix}%`)
+          .orderBy('consolidation_code', 'desc')
+          .first();
+        let seq = 1;
+        if (latest && latest.consolidation_code) {
+          const parts = latest.consolidation_code.split('-');
+          const lastSeq = parseInt(parts[parts.length - 1], 10);
+          if (!isNaN(lastSeq)) seq = lastSeq + 1;
+        }
+        const code = `${prefix}${String(seq).padStart(4, '0')}`;
+
+        let consTransportTypes: string[] = ['auto'];
+        if (nc.transport_types && nc.transport_types.length > 0) {
+          consTransportTypes = nc.transport_types;
+        } else if (nc.container_type) {
+          consTransportTypes = [
+            this.inferTransportType(
+              nc.container_type,
+              null,
+              nc.container_truck_id,
+            ),
+          ];
+        }
+
+        let ncOrigin = {
+          city: nc.origin_place ? nc.origin_place.trim() : null,
+          country: nc.origin_country ? nc.origin_country.trim() : null,
+          country_code: nc.origin_country_code
+            ? nc.origin_country_code.trim().toUpperCase()
+            : null,
+          geoname_id: nc.origin_geoname_id || null,
+          lat: nc.origin_lat || null,
+          lng: nc.origin_lng || null,
+        };
+
+        let ncDest = {
+          city: nc.destination_place ? nc.destination_place.trim() : null,
+          country: nc.destination_country
+            ? nc.destination_country.trim()
+            : null,
+          country_code: nc.destination_country_code
+            ? nc.destination_country_code.trim().toUpperCase()
+            : null,
+          geoname_id: nc.destination_geoname_id || null,
+          lat: nc.destination_lat || null,
+          lng: nc.destination_lng || null,
+        };
+
+        if (this.locationsService) {
+          if (nc.origin_place || nc.origin_geoname_id) {
+            ncOrigin = await this.locationsService.normalizeAndResolvePlace({
+              city: nc.origin_place,
+              country: nc.origin_country,
+              country_code: nc.origin_country_code,
+              geoname_id: nc.origin_geoname_id,
+              lat: nc.origin_lat,
+              lng: nc.origin_lng,
+            });
+          }
+          if (nc.destination_place || nc.destination_geoname_id) {
+            ncDest = await this.locationsService.normalizeAndResolvePlace({
+              city: nc.destination_place,
+              country: nc.destination_country,
+              country_code: nc.destination_country_code,
+              geoname_id: nc.destination_geoname_id,
+              lat: nc.destination_lat,
+              lng: nc.destination_lng,
+            });
+          }
+        }
+
+        const costCurrency = nc.carrier_cost_currency || 'USD';
+        let costUsdRate = 1.0;
+        const departureDate =
+          nc.departure_date || this.formatDateStr(dto.confirmed_date);
+        if (costCurrency !== 'USD') {
+          const rates =
+            await this.currencyService.getRatesForDate(departureDate);
+          if (costCurrency === 'UZS') {
+            costUsdRate = rates['USD']
+              ? rates['USD'].rate / (rates['USD'].nominal || 1)
+              : 12850;
+          } else if (costCurrency === 'RUB') {
+            const rubObj = rates['RUB'] || { rate: 145, nominal: 1 };
+            costUsdRate = rubObj.rate / (rubObj.nominal || 1);
+          } else if (costCurrency === 'RMB' || costCurrency === 'CNY') {
+            const rmbObj = rates['RMB'] ||
+              rates['CNY'] || { rate: 1815, nominal: 1 };
+            costUsdRate = rmbObj.rate / (rmbObj.nominal || 1);
+          }
+        }
+
+        const loadDate = nc.load_date || nc.loaded_date || null;
+
+        const [newConsInserted] = await this.knex('cargo_consolidations')
+          .insert({
+            consolidation_code: code,
+            container_truck_id: nc.container_truck_id.trim(),
+            container_type: nc.container_type ? nc.container_type.trim() : null,
+            transport_types: consTransportTypes,
+            max_volume_capacity:
+              nc.max_volume_capacity !== undefined
+                ? nc.max_volume_capacity
+                : null,
+            max_weight_capacity:
+              nc.max_weight_capacity !== undefined
+                ? nc.max_weight_capacity
+                : null,
+            carrier_name: nc.carrier_name ? nc.carrier_name.trim() : null,
+            carrier_phone: nc.carrier_phone ? nc.carrier_phone.trim() : null,
+            origin_place: ncOrigin.city,
+            origin_country: ncOrigin.country,
+            origin_country_code: ncOrigin.country_code,
+            origin_geoname_id: ncOrigin.geoname_id,
+            origin_lat: ncOrigin.lat,
+            origin_lng: ncOrigin.lng,
+            destination_place: ncDest.city,
+            destination_country: ncDest.country,
+            destination_country_code: ncDest.country_code,
+            destination_geoname_id: ncDest.geoname_id,
+            destination_lat: ncDest.lat,
+            destination_lng: ncDest.lng,
+            load_date: loadDate,
+            loaded_date: loadDate,
+            departure_date: nc.departure_date || null,
+            border_arrival_date: nc.border_arrival_date || null,
+            tashkent_arrival_date: nc.tashkent_arrival_date || null,
+            estimated_arrival_date: nc.estimated_arrival_date || null,
+            arrived_date: nc.arrived_date || null,
+            total_carrier_cost:
+              nc.total_carrier_cost !== undefined
+                ? nc.total_carrier_cost
+                : nc.agent || 0,
+            agent:
+              nc.agent !== undefined ? nc.agent : nc.total_carrier_cost || 0,
+            agent_currency: nc.agent_currency || costCurrency,
+            china_warehouse: nc.china_warehouse || 0,
+            china_warehouse_currency: nc.china_warehouse_currency || 'USD',
+            company_service: nc.company_service || 0,
+            company_service_currency: nc.company_service_currency || 'USD',
+            customs_clearance_of_goods: nc.customs_clearance_of_goods || 0,
+            customs_clearance_of_goods_currency:
+              nc.customs_clearance_of_goods_currency || 'USD',
+            cct: nc.cct || 0,
+            cct_currency: nc.cct_currency || 'USD',
+            carrier_cost_currency: costCurrency,
+            carrier_cost_usd_rate: costUsdRate,
+            status: nc.status || 'Waiting',
+            description: nc.description || null,
+            created_by_user_id: user?.id || null,
+          })
+          .returning('id');
+
+        finalConsolidationId =
+          typeof newConsInserted === 'object'
+            ? newConsInserted.id
+            : newConsInserted;
+        finalContainerTruckId = nc.container_truck_id.trim();
+        finalAgentName = nc.carrier_name
+          ? nc.carrier_name.trim()
+          : nc.container_truck_id.trim();
+        finalTransportTypes = consTransportTypes;
+        finalOriginPlace = ncOrigin;
+        finalDestPlace = ncDest;
+        finalLoadedDate = this.formatDateStr(loadDate);
+        finalArrivedDate = this.formatDateStr(nc.arrived_date);
+        finalStatus = nc.status || 'Waiting';
+        finalPurchasePrice = 0;
+        finalPurchaseCurrency = costCurrency;
+        finalPurchaseDate = this.formatDateStr(
+          nc.load_date || nc.departure_date || dto.confirmed_date,
+        );
+        finalPurchaseUsdRate = costUsdRate;
+      } else if (dto.consolidation_id) {
+        const consolidation = await this.knex('cargo_consolidations')
+          .where('id', dto.consolidation_id)
+          .first();
+        if (!consolidation) {
+          throw new NotFoundException({
+            message: 'Selected cargo consolidation truck not found',
+            location: 'consolidation_not_found',
+          });
+        }
+        finalConsolidationId = consolidation.id;
+        finalContainerTruckId = consolidation.container_truck_id;
+        finalAgentName =
+          consolidation.carrier_name || consolidation.container_truck_id;
+        finalTransportTypes =
+          consolidation.transport_types &&
+          consolidation.transport_types.length > 0
+            ? consolidation.transport_types
+            : [
+                this.inferTransportType(
+                  consolidation.container_type,
+                  null,
+                  consolidation.container_truck_id,
+                ),
+              ];
+        finalOriginPlace = {
+          city: consolidation.origin_place || null,
+          country: consolidation.origin_country || null,
+          country_code: consolidation.origin_country_code || null,
+          geoname_id: consolidation.origin_geoname_id || null,
+          lat: consolidation.origin_lat || null,
+          lng: consolidation.origin_lng || null,
+        };
+        finalDestPlace = {
+          city: consolidation.destination_place || null,
+          country: consolidation.destination_country || null,
+          country_code: consolidation.destination_country_code || null,
+          geoname_id: consolidation.destination_geoname_id || null,
+          lat: consolidation.destination_lat || null,
+          lng: consolidation.destination_lng || null,
+        };
+        finalLoadedDate = this.formatDateStr(
+          consolidation.load_date || consolidation.loaded_date,
+        );
+        finalArrivedDate = this.formatDateStr(consolidation.arrived_date);
+        finalStatus = consolidation.status || 'Waiting';
+        finalPurchasePrice = 0;
+        finalPurchaseCurrency = consolidation.carrier_cost_currency || 'USD';
+        finalPurchaseDate = this.formatDateStr(
+          consolidation.load_date ||
+            consolidation.departure_date ||
+            dto.confirmed_date,
+        );
+        finalPurchaseUsdRate = Number(
+          consolidation.carrier_cost_usd_rate || 1.0,
+        );
       }
-      if (dto.destination_city || dto.destination_geoname_id) {
-        destPlace = await this.locationsService.normalizeAndResolvePlace({
-          city: dto.destination_city,
-          country: dto.destination_country,
-          country_code: dto.destination_country_code,
-          geoname_id: dto.destination_geoname_id,
-          lat: dto.destination_lat,
-          lng: dto.destination_lng,
-        });
+    } else {
+      // FTL flow
+      finalContainerTruckId = dto.container_truck_id!.trim();
+      finalContainerType = dto.container_type!.trim();
+      finalAgentName = dto.agent_name!.trim();
+      finalStatus = dto.status || 'Waiting';
+      finalLoadedDate = dto.loaded_date
+        ? this.formatDateStr(dto.loaded_date)
+        : null;
+      finalArrivedDate = dto.arrived_date
+        ? this.formatDateStr(dto.arrived_date)
+        : null;
+      finalPurchasePrice = dto.purchase_price!;
+      finalPurchaseCurrency = dto.purchase_currency!;
+      finalPurchaseDate = this.formatDateStr(
+        dto.purchase_date || dto.confirmed_date,
+      );
+      finalPurchaseCustomRate = dto.purchase_exchange_rate || null;
+
+      if (dto.transport_types && dto.transport_types.length > 0) {
+        finalTransportTypes = dto.transport_types;
+      } else {
+        finalTransportTypes = [
+          this.inferTransportType(
+            finalContainerType,
+            dto.cargo_type,
+            finalContainerTruckId,
+          ),
+        ];
       }
+
+      // Resolve Origin & Destination for FTL
+      let originPlace = {
+        city: dto.origin_city ? dto.origin_city.trim() : null,
+        country: dto.origin_country ? dto.origin_country.trim() : null,
+        country_code: dto.origin_country_code
+          ? dto.origin_country_code.trim().toUpperCase()
+          : null,
+        geoname_id: dto.origin_geoname_id || null,
+        lat: dto.origin_lat || null,
+        lng: dto.origin_lng || null,
+      };
+
+      let destPlace = {
+        city: dto.destination_city ? dto.destination_city.trim() : null,
+        country: dto.destination_country
+          ? dto.destination_country.trim()
+          : null,
+        country_code: dto.destination_country_code
+          ? dto.destination_country_code.trim().toUpperCase()
+          : null,
+        geoname_id: dto.destination_geoname_id || null,
+        lat: dto.destination_lat || null,
+        lng: dto.destination_lng || null,
+      };
+
+      if (this.locationsService) {
+        if (dto.origin_city || dto.origin_geoname_id) {
+          originPlace = await this.locationsService.normalizeAndResolvePlace({
+            city: dto.origin_city,
+            country: dto.origin_country,
+            country_code: dto.origin_country_code,
+            geoname_id: dto.origin_geoname_id,
+            lat: dto.origin_lat,
+            lng: dto.origin_lng,
+          });
+        }
+        if (dto.destination_city || dto.destination_geoname_id) {
+          destPlace = await this.locationsService.normalizeAndResolvePlace({
+            city: dto.destination_city,
+            country: dto.destination_country,
+            country_code: dto.destination_country_code,
+            geoname_id: dto.destination_geoname_id,
+            lat: dto.destination_lat,
+            lng: dto.destination_lng,
+          });
+        }
+      }
+      finalOriginPlace = originPlace;
+      finalDestPlace = destPlace;
+
+      const purchaseRates =
+        await this.currencyService.getRatesForDate(finalPurchaseDate);
+      const purchaseRes = this.convertPriceToUsdAndUzs(
+        finalPurchasePrice,
+        finalPurchaseCurrency,
+        purchaseRates,
+        dto.usd_rmb_rate,
+        finalPurchaseCustomRate,
+      );
+      finalPurchaseUsdRate = purchaseRes.usd_rate_used;
     }
 
-    const purchaseDate = this.formatDateStr(
-      dto.purchase_date || dto.confirmed_date,
-    );
     const sellDate = this.formatDateStr(dto.sell_date);
-
-    const purchaseRates =
-      await this.currencyService.getRatesForDate(purchaseDate);
     const sellRates = await this.currencyService.getRatesForDate(sellDate);
-
-    const purchaseRes = this.convertPriceToUsdAndUzs(
-      dto.purchase_price,
-      dto.purchase_currency,
-      purchaseRates,
-      dto.usd_rmb_rate,
-      dto.purchase_exchange_rate,
-    );
-
     const sellRes = this.convertPriceToUsdAndUzs(
       dto.sell_price,
       dto.sell_currency,
@@ -591,111 +944,6 @@ export class CargoRegistrationsService {
       dto.usd_rmb_rate,
       dto.sell_exchange_rate,
     );
-
-    // Handle Consolidation logic (Search or Create Dropdown support)
-    let finalConsolidationId: string | null = null;
-    let finalContainerTruckId = dto.container_truck_id
-      ? dto.container_truck_id.trim()
-      : '';
-    let finalContainerType = dto.container_type
-      ? dto.container_type.trim()
-      : null;
-
-    if (dto.new_consolidation) {
-      const nc = dto.new_consolidation;
-      const now = new Date();
-      const yearMonth = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}`;
-      const prefix = `CNS-${yearMonth}-`;
-      const latest = await this.knex('cargo_consolidations')
-        .where('consolidation_code', 'like', `${prefix}%`)
-        .orderBy('consolidation_code', 'desc')
-        .first();
-      let seq = 1;
-      if (latest && latest.consolidation_code) {
-        const parts = latest.consolidation_code.split('-');
-        const lastSeq = parseInt(parts[parts.length - 1], 10);
-        if (!isNaN(lastSeq)) seq = lastSeq + 1;
-      }
-      const code = `${prefix}${String(seq).padStart(4, '0')}`;
-
-      let consTransportTypes: string[] = ['auto'];
-      if (nc.transport_types && nc.transport_types.length > 0) {
-        consTransportTypes = nc.transport_types;
-      } else if (nc.container_type) {
-        consTransportTypes = [
-          this.inferTransportType(
-            nc.container_type,
-            null,
-            nc.container_truck_id,
-          ),
-        ];
-      }
-
-      const [newConsInserted] = await this.knex('cargo_consolidations')
-        .insert({
-          consolidation_code: code,
-          container_truck_id: nc.container_truck_id.trim(),
-          container_type: nc.container_type ? nc.container_type.trim() : null,
-          transport_types: consTransportTypes,
-          max_volume_capacity:
-            nc.max_volume_capacity !== undefined
-              ? nc.max_volume_capacity
-              : null,
-          max_weight_capacity:
-            nc.max_weight_capacity !== undefined
-              ? nc.max_weight_capacity
-              : null,
-          carrier_name: nc.carrier_name ? nc.carrier_name.trim() : null,
-          carrier_phone: nc.carrier_phone ? nc.carrier_phone.trim() : null,
-          origin_place: nc.origin_place
-            ? nc.origin_place.trim()
-            : originPlace.city || null,
-          destination_place: nc.destination_place
-            ? nc.destination_place.trim()
-            : destPlace.city || null,
-          load_date: nc.load_date || nc.loaded_date || null,
-          loaded_date: nc.load_date || nc.loaded_date || null,
-          border_arrival_date: nc.border_arrival_date || null,
-          tashkent_arrival_date: nc.tashkent_arrival_date || null,
-          departure_date: nc.departure_date || null,
-          status: nc.status || 'Waiting',
-          description: nc.description || null,
-          created_by_user_id: user?.id || null,
-        })
-        .returning('id');
-
-      finalConsolidationId =
-        typeof newConsInserted === 'object'
-          ? newConsInserted.id
-          : newConsInserted;
-      finalContainerTruckId = nc.container_truck_id.trim();
-      if (nc.container_type) finalContainerType = nc.container_type.trim();
-    } else if (dto.consolidation_id) {
-      const consolidation = await this.knex('cargo_consolidations')
-        .where('id', dto.consolidation_id)
-        .first();
-      if (!consolidation) {
-        throw new NotFoundException({
-          message: 'Selected cargo consolidation truck not found',
-          location: 'consolidation_not_found',
-        });
-      }
-      finalConsolidationId = consolidation.id;
-      if (!finalContainerTruckId) {
-        finalContainerTruckId = consolidation.container_truck_id;
-      }
-      if (!finalContainerType && consolidation.container_type) {
-        finalContainerType = consolidation.container_type;
-      }
-    }
-
-    if (!finalContainerTruckId) {
-      throw new BadRequestException({
-        message:
-          'container_truck_id, consolidation_id, or new_consolidation is required',
-        location: 'container_truck_id_required',
-      });
-    }
 
     // Duplicate Prevention: Check if duplicate prevention is requested or enabled
     if (dto.prevent_duplicate) {
@@ -705,12 +953,12 @@ export class CargoRegistrationsService {
         consolidation_id: finalConsolidationId || undefined,
         cargo: dto.cargo,
         cargo_type: dto.cargo_type,
-        origin_city: originPlace.city || undefined,
-        origin_geoname_id: originPlace.geoname_id || undefined,
-        destination_city: destPlace.city || undefined,
-        destination_geoname_id: destPlace.geoname_id || undefined,
+        origin_city: finalOriginPlace.city || undefined,
+        origin_geoname_id: finalOriginPlace.geoname_id || undefined,
+        destination_city: finalDestPlace.city || undefined,
+        destination_geoname_id: finalDestPlace.geoname_id || undefined,
         confirmed_date: dto.confirmed_date,
-        purchase_price: dto.purchase_price,
+        purchase_price: finalPurchasePrice,
       });
 
       if (dupCheck.is_duplicate) {
@@ -722,38 +970,6 @@ export class CargoRegistrationsService {
           existing_cargo_id: dupCheck.existing_cargo_id,
         });
       }
-    }
-
-    let finalTransportTypes: string[] = ['auto'];
-    if (dto.transport_types && dto.transport_types.length > 0) {
-      finalTransportTypes = dto.transport_types;
-    } else if (finalConsolidationId) {
-      const parentCons = await this.knex('cargo_consolidations')
-        .where('id', finalConsolidationId)
-        .first();
-      if (
-        parentCons &&
-        Array.isArray(parentCons.transport_types) &&
-        parentCons.transport_types.length > 0
-      ) {
-        finalTransportTypes = parentCons.transport_types;
-      } else {
-        finalTransportTypes = [
-          this.inferTransportType(
-            finalContainerType,
-            dto.cargo_type,
-            finalContainerTruckId,
-          ),
-        ];
-      }
-    } else {
-      finalTransportTypes = [
-        this.inferTransportType(
-          finalContainerType,
-          dto.cargo_type,
-          finalContainerTruckId,
-        ),
-      ];
     }
 
     const [inserted] = await this.knex('cargo_registrations')
@@ -770,39 +986,39 @@ export class CargoRegistrationsService {
         container_type:
           dto.cargo_type === 'FTL' && finalContainerType
             ? finalContainerType
-            : finalContainerType || null,
+            : null,
         transport_types: finalTransportTypes,
         container_truck_id: finalContainerTruckId,
         consolidation_id: finalConsolidationId,
-        agent_name: dto.agent_name.trim(),
+        agent_name: finalAgentName,
         cargo: dto.cargo.trim(),
-        origin_city: originPlace.city,
-        origin_country: originPlace.country,
-        origin_country_code: originPlace.country_code,
-        origin_geoname_id: originPlace.geoname_id,
-        origin_lat: originPlace.lat,
-        origin_lng: originPlace.lng,
-        destination_city: destPlace.city,
-        destination_country: destPlace.country,
-        destination_country_code: destPlace.country_code,
-        destination_geoname_id: destPlace.geoname_id,
-        destination_lat: destPlace.lat,
-        destination_lng: destPlace.lng,
+        origin_city: finalOriginPlace.city,
+        origin_country: finalOriginPlace.country,
+        origin_country_code: finalOriginPlace.country_code,
+        origin_geoname_id: finalOriginPlace.geoname_id,
+        origin_lat: finalOriginPlace.lat,
+        origin_lng: finalOriginPlace.lng,
+        destination_city: finalDestPlace.city,
+        destination_country: finalDestPlace.country,
+        destination_country_code: finalDestPlace.country_code,
+        destination_geoname_id: finalDestPlace.geoname_id,
+        destination_lat: finalDestPlace.lat,
+        destination_lng: finalDestPlace.lng,
         confirmed_date: dto.confirmed_date || null,
-        loaded_date: dto.loaded_date || null,
-        arrived_date: dto.arrived_date || null,
-        purchase_price: dto.purchase_price,
-        purchase_currency: dto.purchase_currency,
-        purchase_date: purchaseDate,
-        purchase_usd_rate: purchaseRes.usd_rate_used,
-        purchase_custom_rate: dto.purchase_exchange_rate || null,
+        loaded_date: finalLoadedDate,
+        arrived_date: finalArrivedDate,
+        purchase_price: finalPurchasePrice,
+        purchase_currency: finalPurchaseCurrency,
+        purchase_date: finalPurchaseDate,
+        purchase_usd_rate: finalPurchaseUsdRate,
+        purchase_custom_rate: finalPurchaseCustomRate,
         sell_price: dto.sell_price,
         sell_currency: dto.sell_currency,
         sell_date: sellDate,
         sell_usd_rate: sellRes.usd_rate_used,
         sell_custom_rate: dto.sell_exchange_rate || null,
         usd_rmb_rate: dto.usd_rmb_rate || null,
-        status: dto.status || 'Waiting',
+        status: finalStatus,
         description: dto.description || null,
         client_id: dto.client_id,
         employee_id: finalEmployeeId,
@@ -883,6 +1099,24 @@ export class CargoRegistrationsService {
       volume: effectiveVolume,
       weight: effectiveWeight,
       container_type: effectiveContainerType,
+      container_truck_id:
+        dto.container_truck_id !== undefined
+          ? dto.container_truck_id
+          : existing.container_truck_id,
+      agent_name:
+        dto.agent_name !== undefined ? dto.agent_name : existing.agent_name,
+      purchase_price:
+        dto.purchase_price !== undefined
+          ? dto.purchase_price
+          : existing.purchase_price,
+      purchase_currency:
+        dto.purchase_currency !== undefined
+          ? dto.purchase_currency
+          : existing.purchase_currency,
+      consolidation_id:
+        dto.consolidation_id !== undefined
+          ? dto.consolidation_id
+          : existing.consolidation_id,
     });
 
     const effectivePurchaseCurrency =
@@ -892,6 +1126,7 @@ export class CargoRegistrationsService {
       dto.usd_rmb_rate !== undefined ? dto.usd_rmb_rate : existing.usd_rmb_rate;
 
     this.validateRmbRateRule({
+      cargo_type: effectiveCargoType,
       purchase_currency: effectivePurchaseCurrency,
       sell_currency: effectiveSellCurrency,
       usd_rmb_rate: effectiveUsdRmbRate,
@@ -1211,10 +1446,14 @@ export class CargoRegistrationsService {
       }
     }
 
-    if (dto.consolidation_id !== undefined) {
-      if (dto.consolidation_id === null || dto.consolidation_id === '') {
-        updatePayload.consolidation_id = null;
-      } else {
+    if (effectiveCargoType === 'LTL') {
+      if (dto.consolidation_id !== undefined) {
+        if (dto.consolidation_id === null || dto.consolidation_id === '') {
+          throw new BadRequestException({
+            message: 'consolidation_id is required for LTL cargo',
+            location: 'consolidation_required_for_ltl',
+          });
+        }
         const consExists = await this.knex('cargo_consolidations')
           .where('id', dto.consolidation_id)
           .first();
@@ -1225,11 +1464,73 @@ export class CargoRegistrationsService {
           });
         }
         updatePayload.consolidation_id = dto.consolidation_id;
-        if (dto.container_truck_id === undefined) {
-          updatePayload.container_truck_id = consExists.container_truck_id;
-        }
-        if (dto.container_type === undefined && consExists.container_type) {
-          updatePayload.container_type = consExists.container_type;
+        updatePayload.container_truck_id = consExists.container_truck_id;
+        updatePayload.agent_name =
+          consExists.carrier_name || consExists.container_truck_id;
+        updatePayload.transport_types =
+          consExists.transport_types && consExists.transport_types.length > 0
+            ? consExists.transport_types
+            : [
+                this.inferTransportType(
+                  consExists.container_type,
+                  null,
+                  consExists.container_truck_id,
+                ),
+              ];
+        updatePayload.origin_city = consExists.origin_place || null;
+        updatePayload.origin_country = consExists.origin_country || null;
+        updatePayload.origin_country_code =
+          consExists.origin_country_code || null;
+        updatePayload.origin_geoname_id = consExists.origin_geoname_id || null;
+        updatePayload.origin_lat = consExists.origin_lat || null;
+        updatePayload.origin_lng = consExists.origin_lng || null;
+        updatePayload.destination_city = consExists.destination_place || null;
+        updatePayload.destination_country =
+          consExists.destination_country || null;
+        updatePayload.destination_country_code =
+          consExists.destination_country_code || null;
+        updatePayload.destination_geoname_id =
+          consExists.destination_geoname_id || null;
+        updatePayload.destination_lat = consExists.destination_lat || null;
+        updatePayload.destination_lng = consExists.destination_lng || null;
+        updatePayload.loaded_date = this.formatDateStr(
+          consExists.load_date || consExists.loaded_date,
+        );
+        updatePayload.arrived_date = this.formatDateStr(
+          consExists.arrived_date,
+        );
+        updatePayload.status = consExists.status || 'Waiting';
+        updatePayload.purchase_price = 0;
+        updatePayload.purchase_currency =
+          consExists.carrier_cost_currency || 'USD';
+        updatePayload.purchase_usd_rate = Number(
+          consExists.carrier_cost_usd_rate || 1.0,
+        );
+      } else if (existing.consolidation_id) {
+        // Keep purchase_price = 0 for LTL cargo tied to consolidation
+        updatePayload.purchase_price = 0;
+      }
+    } else {
+      if (dto.consolidation_id !== undefined) {
+        if (dto.consolidation_id === null || dto.consolidation_id === '') {
+          updatePayload.consolidation_id = null;
+        } else {
+          const consExists = await this.knex('cargo_consolidations')
+            .where('id', dto.consolidation_id)
+            .first();
+          if (!consExists) {
+            throw new NotFoundException({
+              message: 'Cargo consolidation not found',
+              location: 'consolidation_not_found',
+            });
+          }
+          updatePayload.consolidation_id = dto.consolidation_id;
+          if (dto.container_truck_id === undefined) {
+            updatePayload.container_truck_id = consExists.container_truck_id;
+          }
+          if (dto.container_type === undefined && consExists.container_type) {
+            updatePayload.container_type = consExists.container_type;
+          }
         }
       }
     }

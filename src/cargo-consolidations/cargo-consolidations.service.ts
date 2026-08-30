@@ -107,6 +107,120 @@ export class CargoConsolidationsService {
   }
 
   /**
+   * Helper to convert an expense amount in any currency to USD equivalent.
+   */
+  private convertExpenseToUsd(
+    amount: number,
+    currency?: string,
+    defaultRate?: number,
+  ): number {
+    if (!amount || amount <= 0) return 0;
+    const curr = (currency || 'USD').toUpperCase();
+    if (curr === 'USD') return amount;
+    if (curr === 'UZS') {
+      const rate = defaultRate && defaultRate > 0 ? defaultRate : 12850;
+      return rate > 0 ? amount / rate : 0;
+    }
+    if (curr === 'RUB') {
+      return (amount * 145.0) / 12850.0;
+    }
+    if (curr === 'RMB' || curr === 'CNY') {
+      return (amount * 1815.0) / 12850.0;
+    }
+    return amount;
+  }
+
+  /**
+   * Helper to compute and breakdown consolidation expenses (outcomes) in native currency and USD.
+   * Outcomes are: agent, china_warehouse, company_service, customs_clearance_of_goods, and cct.
+   */
+  computeConsolidationExpenses(r: any): {
+    agent: number;
+    agent_currency: string;
+    agent_usd: number;
+    china_warehouse: number;
+    china_warehouse_currency: string;
+    china_warehouse_usd: number;
+    company_service: number;
+    company_service_currency: string;
+    company_service_usd: number;
+    customs_clearance_of_goods: number;
+    customs_clearance_of_goods_currency: string;
+    customs_clearance_of_goods_usd: number;
+    cct: number;
+    cct_currency: string;
+    cct_usd: number;
+    total: number;
+    total_usd: number;
+  } {
+    const agent = Number(
+      r.agent !== null && r.agent !== undefined
+        ? r.agent
+        : r.total_carrier_cost || 0,
+    );
+    const agentCurrency = r.agent_currency || r.carrier_cost_currency || 'USD';
+    const agentUsd = this.convertExpenseToUsd(
+      agent,
+      agentCurrency,
+      Number(r.carrier_cost_usd_rate),
+    );
+
+    const chinaWarehouse = Number(r.china_warehouse || 0);
+    const chinaWarehouseCurrency = r.china_warehouse_currency || 'USD';
+    const chinaWarehouseUsd = this.convertExpenseToUsd(
+      chinaWarehouse,
+      chinaWarehouseCurrency,
+    );
+
+    const companyService = Number(r.company_service || 0);
+    const companyServiceCurrency = r.company_service_currency || 'USD';
+    const companyServiceUsd = this.convertExpenseToUsd(
+      companyService,
+      companyServiceCurrency,
+    );
+
+    const customsClearance = Number(r.customs_clearance_of_goods || 0);
+    const customsClearanceCurrency =
+      r.customs_clearance_of_goods_currency || 'USD';
+    const customsClearanceUsd = this.convertExpenseToUsd(
+      customsClearance,
+      customsClearanceCurrency,
+    );
+
+    const cct = Number(r.cct || 0);
+    const cctCurrency = r.cct_currency || 'USD';
+    const cctUsd = this.convertExpenseToUsd(cct, cctCurrency);
+
+    const totalUsd =
+      agentUsd +
+      chinaWarehouseUsd +
+      companyServiceUsd +
+      customsClearanceUsd +
+      cctUsd;
+
+    return {
+      agent: Math.round(agent * 100) / 100,
+      agent_currency: agentCurrency,
+      agent_usd: Math.round(agentUsd * 100) / 100,
+      china_warehouse: Math.round(chinaWarehouse * 100) / 100,
+      china_warehouse_currency: chinaWarehouseCurrency,
+      china_warehouse_usd: Math.round(chinaWarehouseUsd * 100) / 100,
+      company_service: Math.round(companyService * 100) / 100,
+      company_service_currency: companyServiceCurrency,
+      company_service_usd: Math.round(companyServiceUsd * 100) / 100,
+      customs_clearance_of_goods: Math.round(customsClearance * 100) / 100,
+      customs_clearance_of_goods_currency: customsClearanceCurrency,
+      customs_clearance_of_goods_usd:
+        Math.round(customsClearanceUsd * 100) / 100,
+      cct: Math.round(cct * 100) / 100,
+      cct_currency: cctCurrency,
+      cct_usd: Math.round(cctUsd * 100) / 100,
+      total: Math.round(totalUsd * 100) / 100,
+      total_usd: Math.round(totalUsd * 100) / 100,
+    };
+  }
+
+  /**
    * Helper to format an individual cargo registration attached to a consolidation.
    */
   private formatCargoItem(r: any, isDetail: boolean = false) {
@@ -308,6 +422,19 @@ export class CargoConsolidationsService {
 
     const loadDate = dto.load_date || dto.loaded_date || null;
 
+    const agentCost =
+      dto.agent !== undefined
+        ? dto.agent
+        : dto.total_carrier_cost !== undefined
+          ? dto.total_carrier_cost
+          : 0;
+    const chinaWarehouseCost = dto.china_warehouse || 0;
+    const companyServiceCost = dto.company_service || 0;
+    const customsClearanceCost = dto.customs_clearance_of_goods || 0;
+    const cctCost = dto.cct || 0;
+    const totalCarrierCost =
+      dto.total_carrier_cost !== undefined ? dto.total_carrier_cost : agentCost;
+
     const [inserted] = await this.knex('cargo_consolidations')
       .insert({
         consolidation_code: consolidationCode,
@@ -335,7 +462,18 @@ export class CargoConsolidationsService {
         departure_date: dto.departure_date || null,
         estimated_arrival_date: dto.estimated_arrival_date || null,
         arrived_date: dto.arrived_date || null,
-        total_carrier_cost: dto.total_carrier_cost || 0,
+        total_carrier_cost: totalCarrierCost,
+        agent: agentCost,
+        agent_currency: dto.agent_currency || carrierCurrency,
+        china_warehouse: chinaWarehouseCost,
+        china_warehouse_currency: dto.china_warehouse_currency || 'USD',
+        company_service: companyServiceCost,
+        company_service_currency: dto.company_service_currency || 'USD',
+        customs_clearance_of_goods: customsClearanceCost,
+        customs_clearance_of_goods_currency:
+          dto.customs_clearance_of_goods_currency || 'USD',
+        cct: cctCost,
+        cct_currency: dto.cct_currency || 'USD',
         carrier_cost_currency: carrierCurrency,
         carrier_cost_usd_rate: carrierCostUsdRate,
         status: dto.status || 'Waiting',
@@ -358,10 +496,20 @@ export class CargoConsolidationsService {
         .update({
           consolidation_id: consolidationId,
           container_truck_id: dto.container_truck_id.trim(),
+          agent_name: dto.carrier_name
+            ? dto.carrier_name.trim()
+            : dto.container_truck_id.trim(),
           transport_types: consTransportTypes,
-          ...(dto.container_type
-            ? { container_type: dto.container_type.trim() }
-            : {}),
+          origin_city: dto.origin_place ? dto.origin_place.trim() : null,
+          destination_city: dto.destination_place
+            ? dto.destination_place.trim()
+            : null,
+          loaded_date: loadDate,
+          arrived_date: dto.arrived_date || null,
+          status: dto.status || 'Waiting',
+          purchase_price: 0,
+          purchase_currency: carrierCurrency,
+          purchase_usd_rate: carrierCostUsdRate,
         });
     }
 
@@ -436,12 +584,43 @@ export class CargoConsolidationsService {
         'cc.status',
         'cc.max_volume_capacity',
         this.knex.raw(`
-          CASE
-            WHEN cc.carrier_cost_currency = 'UZS' AND cc.carrier_cost_usd_rate > 0 THEN COALESCE(cc.total_carrier_cost, 0) / cc.carrier_cost_usd_rate
-            WHEN cc.carrier_cost_currency = 'RUB' AND cc.carrier_cost_usd_rate > 0 THEN (COALESCE(cc.total_carrier_cost, 0) * 145.0) / 12850.0
-            WHEN cc.carrier_cost_currency IN ('RMB', 'CNY') AND cc.carrier_cost_usd_rate > 0 THEN (COALESCE(cc.total_carrier_cost, 0) * 1815.0) / 12850.0
-            ELSE COALESCE(cc.total_carrier_cost, 0)
-          END as carrier_cost_usd
+          (
+            CASE
+              WHEN COALESCE(cc.agent_currency, cc.carrier_cost_currency, 'USD') = 'UZS' AND cc.carrier_cost_usd_rate > 0 THEN COALESCE(cc.agent, CASE WHEN cc.total_carrier_cost > 0 THEN cc.total_carrier_cost ELSE 0 END) / cc.carrier_cost_usd_rate
+              WHEN COALESCE(cc.agent_currency, cc.carrier_cost_currency, 'USD') = 'UZS' THEN COALESCE(cc.agent, CASE WHEN cc.total_carrier_cost > 0 THEN cc.total_carrier_cost ELSE 0 END) / 12850.0
+              WHEN COALESCE(cc.agent_currency, cc.carrier_cost_currency, 'USD') = 'RUB' THEN (COALESCE(cc.agent, CASE WHEN cc.total_carrier_cost > 0 THEN cc.total_carrier_cost ELSE 0 END) * 145.0) / 12850.0
+              WHEN COALESCE(cc.agent_currency, cc.carrier_cost_currency, 'USD') IN ('RMB', 'CNY') THEN (COALESCE(cc.agent, CASE WHEN cc.total_carrier_cost > 0 THEN cc.total_carrier_cost ELSE 0 END) * 1815.0) / 12850.0
+              ELSE COALESCE(cc.agent, CASE WHEN cc.total_carrier_cost > 0 THEN cc.total_carrier_cost ELSE 0 END)
+            END
+            +
+            CASE
+              WHEN COALESCE(cc.china_warehouse_currency, 'USD') = 'UZS' THEN COALESCE(cc.china_warehouse, 0) / 12850.0
+              WHEN COALESCE(cc.china_warehouse_currency, 'USD') = 'RUB' THEN (COALESCE(cc.china_warehouse, 0) * 145.0) / 12850.0
+              WHEN COALESCE(cc.china_warehouse_currency, 'USD') IN ('RMB', 'CNY') THEN (COALESCE(cc.china_warehouse, 0) * 1815.0) / 12850.0
+              ELSE COALESCE(cc.china_warehouse, 0)
+            END
+            +
+            CASE
+              WHEN COALESCE(cc.company_service_currency, 'USD') = 'UZS' THEN COALESCE(cc.company_service, 0) / 12850.0
+              WHEN COALESCE(cc.company_service_currency, 'USD') = 'RUB' THEN (COALESCE(cc.company_service, 0) * 145.0) / 12850.0
+              WHEN COALESCE(cc.company_service_currency, 'USD') IN ('RMB', 'CNY') THEN (COALESCE(cc.company_service, 0) * 1815.0) / 12850.0
+              ELSE COALESCE(cc.company_service, 0)
+            END
+            +
+            CASE
+              WHEN COALESCE(cc.customs_clearance_of_goods_currency, 'USD') = 'UZS' THEN COALESCE(cc.customs_clearance_of_goods, 0) / 12850.0
+              WHEN COALESCE(cc.customs_clearance_of_goods_currency, 'USD') = 'RUB' THEN (COALESCE(cc.customs_clearance_of_goods, 0) * 145.0) / 12850.0
+              WHEN COALESCE(cc.customs_clearance_of_goods_currency, 'USD') IN ('RMB', 'CNY') THEN (COALESCE(cc.customs_clearance_of_goods, 0) * 1815.0) / 12850.0
+              ELSE COALESCE(cc.customs_clearance_of_goods, 0)
+            END
+            +
+            CASE
+              WHEN COALESCE(cc.cct_currency, 'USD') = 'UZS' THEN COALESCE(cc.cct, 0) / 12850.0
+              WHEN COALESCE(cc.cct_currency, 'USD') = 'RUB' THEN (COALESCE(cc.cct, 0) * 145.0) / 12850.0
+              WHEN COALESCE(cc.cct_currency, 'USD') IN ('RMB', 'CNY') THEN (COALESCE(cc.cct, 0) * 1815.0) / 12850.0
+              ELSE COALESCE(cc.cct, 0)
+            END
+          ) as total_expenses_usd
         `),
         this.knex.raw(`
           COALESCE(SUM(
@@ -477,7 +656,7 @@ export class CargoConsolidationsService {
         "COALESCE(SUM(CASE WHEN COALESCE(t.status, 'Waiting') NOT IN ('Arrived') THEN 1 ELSE 0 END), 0) as total_active",
       ),
       this.knex.raw(
-        'COALESCE(SUM(t.total_cargos_sell_usd - t.total_cargos_purchase_usd - t.carrier_cost_usd), 0) as total_net_margin_usd',
+        'COALESCE(SUM(t.total_cargos_sell_usd - t.total_expenses_usd), 0) as total_net_margin_usd',
       ),
       this.knex.raw(
         'COALESCE(SUM(t.max_volume_capacity), 0) as volume_capacity_total',
@@ -548,6 +727,16 @@ export class CargoConsolidationsService {
           'cc.estimated_arrival_date',
           'cc.arrived_date',
           'cc.total_carrier_cost',
+          'cc.agent',
+          'cc.agent_currency',
+          'cc.china_warehouse',
+          'cc.china_warehouse_currency',
+          'cc.company_service',
+          'cc.company_service_currency',
+          'cc.customs_clearance_of_goods',
+          'cc.customs_clearance_of_goods_currency',
+          'cc.cct',
+          'cc.cct_currency',
           'cc.carrier_cost_currency',
           'cc.carrier_cost_usd_rate',
           'cc.status',
@@ -653,32 +842,12 @@ export class CargoConsolidationsService {
           ? Math.round(Math.max(0, maxWeight - assignedWeight) * 10000) / 10000
           : null;
 
+      const exp = this.computeConsolidationExpenses(r);
       const cargosSellUsd =
         Math.round(Number(r.total_cargos_sell_usd || 0) * 100) / 100;
-      const cargosPurchaseUsd =
-        Math.round(Number(r.total_cargos_purchase_usd || 0) * 100) / 100;
-
-      // Carrier cost USD equivalent
-      let carrierCostUsd = Number(r.total_carrier_cost || 0);
-      if (r.carrier_cost_currency === 'UZS' && r.carrier_cost_usd_rate > 0) {
-        carrierCostUsd = carrierCostUsd / r.carrier_cost_usd_rate;
-      } else if (
-        r.carrier_cost_currency === 'RUB' &&
-        r.carrier_cost_usd_rate > 0
-      ) {
-        carrierCostUsd = (carrierCostUsd * 145.0) / 12850.0;
-      } else if (
-        (r.carrier_cost_currency === 'RMB' ||
-          r.carrier_cost_currency === 'CNY') &&
-        r.carrier_cost_usd_rate > 0
-      ) {
-        carrierCostUsd = (carrierCostUsd * 1815.0) / 12850.0;
-      }
-      carrierCostUsd = Math.round(carrierCostUsd * 100) / 100;
-
-      const netMarginUsd =
-        Math.round((cargosSellUsd - cargosPurchaseUsd - carrierCostUsd) * 100) /
-        100;
+      const incomeUsd = cargosSellUsd;
+      const outcomeUsd = exp.total_usd;
+      const netMarginUsd = Math.round((incomeUsd - outcomeUsd) * 100) / 100;
 
       const assignedCargos = cargosByConsolidation.get(r.id) || [];
 
@@ -707,6 +876,45 @@ export class CargoConsolidationsService {
         departure_date: this.formatDateStr(r.departure_date),
         estimated_arrival_date: this.formatDateStr(r.estimated_arrival_date),
         arrived_date: this.formatDateStr(r.arrived_date),
+        agent: exp.agent,
+        agent_currency: exp.agent_currency,
+        china_warehouse: exp.china_warehouse,
+        china_warehouse_currency: exp.china_warehouse_currency,
+        company_service: exp.company_service,
+        company_service_currency: exp.company_service_currency,
+        customs_clearance_of_goods: exp.customs_clearance_of_goods,
+        customs_clearance_of_goods_currency:
+          exp.customs_clearance_of_goods_currency,
+        cct: exp.cct,
+        cct_currency: exp.cct_currency,
+        expenses: {
+          agent: {
+            amount: exp.agent,
+            currency: exp.agent_currency,
+            amount_usd: exp.agent_usd,
+          },
+          china_warehouse: {
+            amount: exp.china_warehouse,
+            currency: exp.china_warehouse_currency,
+            amount_usd: exp.china_warehouse_usd,
+          },
+          company_service: {
+            amount: exp.company_service,
+            currency: exp.company_service_currency,
+            amount_usd: exp.company_service_usd,
+          },
+          customs_clearance_of_goods: {
+            amount: exp.customs_clearance_of_goods,
+            currency: exp.customs_clearance_of_goods_currency,
+            amount_usd: exp.customs_clearance_of_goods_usd,
+          },
+          cct: {
+            amount: exp.cct,
+            currency: exp.cct_currency,
+            amount_usd: exp.cct_usd,
+          },
+          total_usd: exp.total_usd,
+        },
         capacity: {
           max_volume_m3: maxVolume,
           assigned_volume_m3: assignedVolume,
@@ -719,17 +927,53 @@ export class CargoConsolidationsService {
           total_cargos_count: totalCargosCount,
         },
         financials: {
-          total_sell_usd: cargosSellUsd,
-          total_purchase_usd: cargosPurchaseUsd,
+          income: incomeUsd,
+          income_usd: incomeUsd,
+          total_income_usd: incomeUsd,
+          total_sell_usd: incomeUsd,
+          outcome: exp.total_usd,
+          outcome_usd: outcomeUsd,
+          total_outcome_usd: outcomeUsd,
+          total_purchase_usd: 0,
+          expenses: {
+            agent: {
+              amount: exp.agent,
+              currency: exp.agent_currency,
+              amount_usd: exp.agent_usd,
+            },
+            china_warehouse: {
+              amount: exp.china_warehouse,
+              currency: exp.china_warehouse_currency,
+              amount_usd: exp.china_warehouse_usd,
+            },
+            company_service: {
+              amount: exp.company_service,
+              currency: exp.company_service_currency,
+              amount_usd: exp.company_service_usd,
+            },
+            customs_clearance_of_goods: {
+              amount: exp.customs_clearance_of_goods,
+              currency: exp.customs_clearance_of_goods_currency,
+              amount_usd: exp.customs_clearance_of_goods_usd,
+            },
+            cct: {
+              amount: exp.cct,
+              currency: exp.cct_currency,
+              amount_usd: exp.cct_usd,
+            },
+            total_usd: exp.total_usd,
+          },
           carrier_cost: {
-            amount: Number(r.total_carrier_cost || 0),
-            currency: r.carrier_cost_currency,
-            amount_usd: carrierCostUsd,
+            amount: exp.agent,
+            currency: exp.agent_currency,
+            amount_usd: exp.agent_usd,
           },
           consolidated_net_margin: {
             amount: netMarginUsd,
             currency: 'USD',
           },
+          net_margin_usd: netMarginUsd,
+          net_profit_usd: netMarginUsd,
         },
         description: r.description,
         cargos: assignedCargos,
@@ -914,7 +1158,6 @@ export class CargoConsolidationsService {
     let totalVolume = 0;
     let totalWeight = 0;
     let totalSellUsd = 0;
-    let totalPurchaseUsd = 0;
 
     const formattedCargos = cargos.map((r) => {
       const vol = r.volume ? Number(r.volume) : 0;
@@ -924,7 +1167,6 @@ export class CargoConsolidationsService {
 
       const cargoItem = this.formatCargoItem(r, true);
       totalSellUsd += cargoItem.sell_price.amount_usd;
-      totalPurchaseUsd += cargoItem.purchase_price.amount_usd;
 
       return cargoItem;
     });
@@ -954,29 +1196,10 @@ export class CargoConsolidationsService {
         ? Math.round(Math.max(0, maxWeight - totalWeight) * 10000) / 10000
         : null;
 
-    let carrierCostUsd = Number(consolidation.total_carrier_cost || 0);
-    if (
-      consolidation.carrier_cost_currency === 'UZS' &&
-      consolidation.carrier_cost_usd_rate > 0
-    ) {
-      carrierCostUsd = carrierCostUsd / consolidation.carrier_cost_usd_rate;
-    } else if (
-      consolidation.carrier_cost_currency === 'RUB' &&
-      consolidation.carrier_cost_usd_rate > 0
-    ) {
-      carrierCostUsd = (carrierCostUsd * 145.0) / 12850.0;
-    } else if (
-      (consolidation.carrier_cost_currency === 'RMB' ||
-        consolidation.carrier_cost_currency === 'CNY') &&
-      consolidation.carrier_cost_usd_rate > 0
-    ) {
-      carrierCostUsd = (carrierCostUsd * 1815.0) / 12850.0;
-    }
-    carrierCostUsd = Math.round(carrierCostUsd * 100) / 100;
-
-    const consolidatedNetMarginUsd =
-      Math.round((totalSellUsd - totalPurchaseUsd - carrierCostUsd) * 100) /
-      100;
+    const exp = this.computeConsolidationExpenses(consolidation);
+    const incomeUsd = Math.round(totalSellUsd * 100) / 100;
+    const outcomeUsd = exp.total_usd;
+    const netMarginUsd = Math.round((incomeUsd - outcomeUsd) * 100) / 100;
 
     return {
       id: consolidation.id,
@@ -1016,6 +1239,45 @@ export class CargoConsolidationsService {
         consolidation.estimated_arrival_date,
       ),
       arrived_date: this.formatDateStr(consolidation.arrived_date),
+      agent: exp.agent,
+      agent_currency: exp.agent_currency,
+      china_warehouse: exp.china_warehouse,
+      china_warehouse_currency: exp.china_warehouse_currency,
+      company_service: exp.company_service,
+      company_service_currency: exp.company_service_currency,
+      customs_clearance_of_goods: exp.customs_clearance_of_goods,
+      customs_clearance_of_goods_currency:
+        exp.customs_clearance_of_goods_currency,
+      cct: exp.cct,
+      cct_currency: exp.cct_currency,
+      expenses: {
+        agent: {
+          amount: exp.agent,
+          currency: exp.agent_currency,
+          amount_usd: exp.agent_usd,
+        },
+        china_warehouse: {
+          amount: exp.china_warehouse,
+          currency: exp.china_warehouse_currency,
+          amount_usd: exp.china_warehouse_usd,
+        },
+        company_service: {
+          amount: exp.company_service,
+          currency: exp.company_service_currency,
+          amount_usd: exp.company_service_usd,
+        },
+        customs_clearance_of_goods: {
+          amount: exp.customs_clearance_of_goods,
+          currency: exp.customs_clearance_of_goods_currency,
+          amount_usd: exp.customs_clearance_of_goods_usd,
+        },
+        cct: {
+          amount: exp.cct,
+          currency: exp.cct_currency,
+          amount_usd: exp.cct_usd,
+        },
+        total_usd: exp.total_usd,
+      },
       capacity: {
         max_volume_m3: maxVolume,
         assigned_volume_m3: Math.round(totalVolume * 10000) / 10000,
@@ -1028,17 +1290,53 @@ export class CargoConsolidationsService {
         total_cargos_count: formattedCargos.length,
       },
       financials: {
-        total_sell_usd: Math.round(totalSellUsd * 100) / 100,
-        total_purchase_usd: Math.round(totalPurchaseUsd * 100) / 100,
+        income: incomeUsd,
+        income_usd: incomeUsd,
+        total_income_usd: incomeUsd,
+        total_sell_usd: incomeUsd,
+        outcome: exp.total_usd,
+        outcome_usd: outcomeUsd,
+        total_outcome_usd: outcomeUsd,
+        total_purchase_usd: 0,
+        expenses: {
+          agent: {
+            amount: exp.agent,
+            currency: exp.agent_currency,
+            amount_usd: exp.agent_usd,
+          },
+          china_warehouse: {
+            amount: exp.china_warehouse,
+            currency: exp.china_warehouse_currency,
+            amount_usd: exp.china_warehouse_usd,
+          },
+          company_service: {
+            amount: exp.company_service,
+            currency: exp.company_service_currency,
+            amount_usd: exp.company_service_usd,
+          },
+          customs_clearance_of_goods: {
+            amount: exp.customs_clearance_of_goods,
+            currency: exp.customs_clearance_of_goods_currency,
+            amount_usd: exp.customs_clearance_of_goods_usd,
+          },
+          cct: {
+            amount: exp.cct,
+            currency: exp.cct_currency,
+            amount_usd: exp.cct_usd,
+          },
+          total_usd: exp.total_usd,
+        },
         carrier_cost: {
-          amount: Number(consolidation.total_carrier_cost || 0),
-          currency: consolidation.carrier_cost_currency,
-          amount_usd: carrierCostUsd,
+          amount: exp.agent,
+          currency: exp.agent_currency,
+          amount_usd: exp.agent_usd,
         },
         consolidated_net_margin: {
-          amount: consolidatedNetMarginUsd,
+          amount: netMarginUsd,
           currency: 'USD',
         },
+        net_margin_usd: netMarginUsd,
+        net_profit_usd: netMarginUsd,
       },
       description: consolidation.description,
       cargos: formattedCargos,
@@ -1133,10 +1431,46 @@ export class CargoConsolidationsService {
       updatePayload.estimated_arrival_date = dto.estimated_arrival_date || null;
     if (dto.arrived_date !== undefined)
       updatePayload.arrived_date = dto.arrived_date || null;
-    if (dto.total_carrier_cost !== undefined)
+    if (dto.agent !== undefined) {
+      updatePayload.agent = dto.agent;
+      if (dto.total_carrier_cost === undefined) {
+        updatePayload.total_carrier_cost = dto.agent;
+      }
+    }
+    if (dto.agent_currency !== undefined) {
+      updatePayload.agent_currency = dto.agent_currency;
+      if (dto.carrier_cost_currency === undefined) {
+        updatePayload.carrier_cost_currency = dto.agent_currency;
+      }
+    }
+    if (dto.china_warehouse !== undefined)
+      updatePayload.china_warehouse = dto.china_warehouse;
+    if (dto.china_warehouse_currency !== undefined)
+      updatePayload.china_warehouse_currency = dto.china_warehouse_currency;
+    if (dto.company_service !== undefined)
+      updatePayload.company_service = dto.company_service;
+    if (dto.company_service_currency !== undefined)
+      updatePayload.company_service_currency = dto.company_service_currency;
+    if (dto.customs_clearance_of_goods !== undefined)
+      updatePayload.customs_clearance_of_goods = dto.customs_clearance_of_goods;
+    if (dto.customs_clearance_of_goods_currency !== undefined)
+      updatePayload.customs_clearance_of_goods_currency =
+        dto.customs_clearance_of_goods_currency;
+    if (dto.cct !== undefined) updatePayload.cct = dto.cct;
+    if (dto.cct_currency !== undefined)
+      updatePayload.cct_currency = dto.cct_currency;
+    if (dto.total_carrier_cost !== undefined) {
       updatePayload.total_carrier_cost = dto.total_carrier_cost;
-    if (dto.carrier_cost_currency !== undefined)
+      if (dto.agent === undefined) {
+        updatePayload.agent = dto.total_carrier_cost;
+      }
+    }
+    if (dto.carrier_cost_currency !== undefined) {
       updatePayload.carrier_cost_currency = dto.carrier_cost_currency;
+      if (dto.agent_currency === undefined) {
+        updatePayload.agent_currency = dto.carrier_cost_currency;
+      }
+    }
     if (dto.status !== undefined) updatePayload.status = dto.status;
     if (dto.description !== undefined)
       updatePayload.description = dto.description || null;
@@ -1145,12 +1479,44 @@ export class CargoConsolidationsService {
       .where('id', id)
       .update(updatePayload);
 
-    // Sync to attached cargos if requested
+    // Sync consolidation fields to attached cargos
     const cargoUpdates: Record<string, any> = {};
 
-    if (dto.container_truck_id) {
+    if (dto.container_truck_id !== undefined) {
       cargoUpdates.container_truck_id = dto.container_truck_id.trim();
     }
+    if (dto.carrier_name !== undefined) {
+      cargoUpdates.agent_name = dto.carrier_name
+        ? dto.carrier_name.trim()
+        : dto.container_truck_id || existing.container_truck_id;
+    }
+    if (dto.transport_types !== undefined) {
+      cargoUpdates.transport_types = dto.transport_types;
+    }
+    if (dto.origin_place !== undefined) {
+      cargoUpdates.origin_city = dto.origin_place
+        ? dto.origin_place.trim()
+        : null;
+    }
+    if (dto.destination_place !== undefined) {
+      cargoUpdates.destination_city = dto.destination_place
+        ? dto.destination_place.trim()
+        : null;
+    }
+    if (dto.load_date !== undefined || dto.loaded_date !== undefined) {
+      cargoUpdates.loaded_date = dto.load_date || dto.loaded_date || null;
+    }
+    if (dto.arrived_date !== undefined) {
+      cargoUpdates.arrived_date = dto.arrived_date || null;
+    }
+    if (dto.status !== undefined) {
+      cargoUpdates.status = dto.status;
+    }
+    if (dto.carrier_cost_currency !== undefined) {
+      cargoUpdates.purchase_currency = dto.carrier_cost_currency;
+    }
+
+    // Support legacy explicit sync flags if passed
     if (dto.sync_status_to_cargos && dto.status) {
       cargoUpdates.status = dto.status;
     }
@@ -1219,10 +1585,30 @@ export class CargoConsolidationsService {
       .update({
         consolidation_id: id,
         container_truck_id: consolidation.container_truck_id,
+        agent_name:
+          consolidation.carrier_name || consolidation.container_truck_id,
         transport_types: consTransportTypes,
-        ...(consolidation.container_type
-          ? { container_type: consolidation.container_type }
-          : {}),
+        origin_city: consolidation.origin_place || null,
+        origin_country: consolidation.origin_country || null,
+        origin_country_code: consolidation.origin_country_code || null,
+        origin_geoname_id: consolidation.origin_geoname_id || null,
+        origin_lat: consolidation.origin_lat || null,
+        origin_lng: consolidation.origin_lng || null,
+        destination_city: consolidation.destination_place || null,
+        destination_country: consolidation.destination_country || null,
+        destination_country_code:
+          consolidation.destination_country_code || null,
+        destination_geoname_id: consolidation.destination_geoname_id || null,
+        destination_lat: consolidation.destination_lat || null,
+        destination_lng: consolidation.destination_lng || null,
+        loaded_date: this.formatDateStr(
+          consolidation.load_date || consolidation.loaded_date,
+        ),
+        arrived_date: this.formatDateStr(consolidation.arrived_date),
+        status: consolidation.status || 'Waiting',
+        purchase_price: 0,
+        purchase_currency: consolidation.carrier_cost_currency || 'USD',
+        purchase_usd_rate: Number(consolidation.carrier_cost_usd_rate || 1.0),
       });
 
     await this.invalidateCache();

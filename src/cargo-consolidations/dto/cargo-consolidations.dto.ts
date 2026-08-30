@@ -150,6 +150,72 @@ export class CreateCargoConsolidationDto {
   total_carrier_cost?: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'agent must be a number' })
+  @Min(0, { message: 'agent cannot be negative' })
+  agent?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES, {
+    message: 'agent_currency must be UZS, RUB, USD, or RMB',
+  })
+  agent_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'china_warehouse must be a number' })
+  @Min(0, { message: 'china_warehouse cannot be negative' })
+  china_warehouse?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES, {
+    message: 'china_warehouse_currency must be UZS, RUB, USD, or RMB',
+  })
+  china_warehouse_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'company_service must be a number' })
+  @Min(0, { message: 'company_service cannot be negative' })
+  company_service?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES, {
+    message: 'company_service_currency must be UZS, RUB, USD, or RMB',
+  })
+  company_service_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'customs_clearance_of_goods must be a number' })
+  @Min(0, { message: 'customs_clearance_of_goods cannot be negative' })
+  customs_clearance_of_goods?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES, {
+    message:
+      'customs_clearance_of_goods_currency must be UZS, RUB, USD, or RMB',
+  })
+  customs_clearance_of_goods_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'cct must be a number' })
+  @Min(0, { message: 'cct cannot be negative' })
+  cct?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES, {
+    message: 'cct_currency must be UZS, RUB, USD, or RMB',
+  })
+  cct_currency?: ConsolidationCurrency;
+
+  @IsOptional()
   @IsString()
   @IsIn(ALLOWED_CURRENCIES, {
     message: 'carrier_cost_currency must be UZS, RUB, USD, or RMB',
@@ -267,6 +333,61 @@ export class UpdateCargoConsolidationDto {
   @IsNumber()
   @Min(0)
   total_carrier_cost?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  agent?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  agent_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  china_warehouse?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  china_warehouse_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  company_service?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  company_service_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  customs_clearance_of_goods?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  customs_clearance_of_goods_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  cct?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  cct_currency?: ConsolidationCurrency;
 
   @IsOptional()
   @IsString()
@@ -452,7 +573,53 @@ export class CreateConsolidationInlineDto {
 
   @IsOptional()
   @IsString()
+  origin_country?: string;
+
+  @IsOptional()
+  @IsString()
+  origin_country_code?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  origin_geoname_id?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  origin_lat?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  origin_lng?: number;
+
+  @IsOptional()
+  @IsString()
   destination_place?: string;
+
+  @IsOptional()
+  @IsString()
+  destination_country?: string;
+
+  @IsOptional()
+  @IsString()
+  destination_country_code?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  destination_geoname_id?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  destination_lat?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  destination_lng?: number;
 
   @IsOptional()
   @IsString()
@@ -478,6 +645,82 @@ export class CreateConsolidationInlineDto {
   @IsString()
   @Matches(/^\d{4}-\d{2}-\d{2}$/)
   tashkent_arrival_date?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  estimated_arrival_date?: string;
+
+  @IsOptional()
+  @IsString()
+  @Matches(/^\d{4}-\d{2}-\d{2}$/)
+  arrived_date?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  total_carrier_cost?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  agent?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  agent_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  china_warehouse?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  china_warehouse_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  company_service?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  company_service_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  customs_clearance_of_goods?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  customs_clearance_of_goods_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  cct?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  cct_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  carrier_cost_currency?: ConsolidationCurrency;
 
   @IsOptional()
   @IsString()

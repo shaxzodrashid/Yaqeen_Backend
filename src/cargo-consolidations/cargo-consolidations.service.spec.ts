@@ -320,12 +320,26 @@ describe('CargoConsolidationsService', () => {
       expect(details.capacity.volume_utilization_percent).toBe(60);
       expect(details.capacity.total_cargos_count).toBe(2);
 
-      // Financials: Total Sell = $7500, Total Buy = $4500, Carrier Cost = $2000, Net Margin = $7500 - $4500 - $2000 = $1000
+      // Financials: Total Income (Sell) = $7500, Total Outcome (Expenses) = $2000 (Agent), Net Margin = $7500 - $2000 = $5500
       expect(details.financials.total_sell_usd).toBe(7500);
-      expect(details.financials.total_purchase_usd).toBe(4500);
+      expect(details.financials.total_income_usd).toBe(7500);
+      expect(details.financials.total_outcome_usd).toBe(2000);
+      expect(details.financials.total_purchase_usd).toBe(0);
       expect(details.financials.carrier_cost.amount_usd).toBe(2000);
+      expect(details.expenses).toEqual({
+        agent: { amount: 2000, currency: 'USD', amount_usd: 2000 },
+        china_warehouse: { amount: 0, currency: 'USD', amount_usd: 0 },
+        company_service: { amount: 0, currency: 'USD', amount_usd: 0 },
+        customs_clearance_of_goods: {
+          amount: 0,
+          currency: 'USD',
+          amount_usd: 0,
+        },
+        cct: { amount: 0, currency: 'USD', amount_usd: 0 },
+        total_usd: 2000,
+      });
       expect(details.financials.consolidated_net_margin).toEqual({
-        amount: 1000,
+        amount: 5500,
         currency: 'USD',
       });
       expect(details.cargos).toHaveLength(2);
@@ -370,6 +384,11 @@ describe('CargoConsolidationsService', () => {
             total_cargos_sell_usd: '2000.0',
             total_cargos_purchase_usd: '1200.0',
             total_carrier_cost: '500.0',
+            agent: '500.0',
+            china_warehouse: '0.0',
+            company_service: '0.0',
+            customs_clearance_of_goods: '0.0',
+            cct: '0.0',
             carrier_cost_currency: 'USD',
           },
         ]),
@@ -398,7 +417,7 @@ describe('CargoConsolidationsService', () => {
               first: jest.fn().mockResolvedValue({
                 total_count: '1',
                 total_active: '1',
-                total_net_margin_usd: '300.0',
+                total_net_margin_usd: '1500.0',
                 volume_capacity_total: '86.0',
                 volume_capacity_used: '15.0',
               }),
@@ -440,17 +459,17 @@ describe('CargoConsolidationsService', () => {
       expect(result.meta.volume_capacity_total).toBe(86.0);
       expect(result.meta.volume_capacity_used).toBe(15.0);
       expect(result.meta.consolidated_net_margin).toEqual({
-        USD: 300,
-        UZS: 3855000,
-        RUB: 26586.21,
-        RMB: 2123.97,
+        USD: 1500,
+        UZS: 19275000,
+        RUB: 132931.03,
+        RMB: 10619.83,
       });
       expect((result.meta as any).page).toBeUndefined();
       expect((result.meta as any).total_pages).toBeUndefined();
       expect(result.data).toHaveLength(1);
       expect(result.data[0].id).toBe('cons-1');
       expect(result.data[0].financials.consolidated_net_margin).toEqual({
-        amount: 300,
+        amount: 1500,
         currency: 'USD',
       });
       expect(result.data[0].cargos).toHaveLength(1);
@@ -611,12 +630,15 @@ describe('CargoConsolidationsService', () => {
         cargo_registration_ids: ['c-1', 'c-2'],
       });
 
-      expect(updateMock).toHaveBeenCalledWith({
-        consolidation_id: 'cons-1',
-        container_truck_id: 'TRK-9900',
-        container_type: '120m3',
-        transport_types: ['auto'],
-      });
+      expect(updateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          consolidation_id: 'cons-1',
+          container_truck_id: 'TRK-9900',
+          transport_types: ['auto'],
+          agent_name: 'TRK-9900',
+          purchase_price: 0,
+        }),
+      );
     });
 
     it('should remove cargo IDs by setting consolidation_id to null', async () => {
@@ -915,6 +937,12 @@ describe('CargoConsolidationsService', () => {
             }),
           };
         }
+        if (tableName === 'cargo_registrations') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            update: jest.fn().mockResolvedValue(1),
+          };
+        }
         if (tableName === 'cargo_registrations as cr') {
           return {
             leftJoin: jest.fn().mockReturnThis(),
@@ -936,6 +964,267 @@ describe('CargoConsolidationsService', () => {
       expect(updatedPayload.load_date).toBe('2026-08-26');
       expect(updatedPayload.border_arrival_date).toBe('2026-08-29');
       expect(updatedPayload.tashkent_arrival_date).toBe('2026-09-03');
+    });
+
+    it('should cascade update of container_truck_id, carrier_name, transport_types, places, dates, and status to attached cargos', async () => {
+      const user = { id: 'user-uuid-1', role: 'CEO' };
+      let cargoUpdatesPayload: any = null;
+
+      knexMock.mockImplementation((tableName: string) => {
+        if (tableName === 'cargo_consolidations') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            whereNot: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'cons-uuid-1',
+              consolidation_code: 'CNS-202608-0001',
+              container_truck_id: 'TRK-100',
+              carrier_name: 'Old Carrier',
+            }),
+            update: jest.fn().mockResolvedValue(1),
+          };
+        }
+        if (tableName === 'cargo_registrations') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            update: jest.fn((payload) => {
+              cargoUpdatesPayload = payload;
+              return Promise.resolve(1);
+            }),
+          };
+        }
+        if (tableName === 'cargo_registrations as cr') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            orderBy: jest.fn().mockResolvedValue([]),
+          };
+        }
+        return {};
+      });
+
+      await service.updateConsolidation('cons-uuid-1', user, {
+        container_truck_id: '01A999AA',
+        carrier_name: 'Carrier Apex',
+        transport_types: ['auto'],
+        origin_place: 'Yiwu',
+        destination_place: 'Tashkent',
+        load_date: '2026-09-01',
+        arrived_date: '2026-09-10',
+        status: 'In Transit',
+      });
+
+      expect(cargoUpdatesPayload).toBeDefined();
+      expect(cargoUpdatesPayload.container_truck_id).toBe('01A999AA');
+      expect(cargoUpdatesPayload.agent_name).toBe('Carrier Apex');
+      expect(cargoUpdatesPayload.transport_types).toEqual(['auto']);
+      expect(cargoUpdatesPayload.origin_city).toBe('Yiwu');
+      expect(cargoUpdatesPayload.destination_city).toBe('Tashkent');
+      expect(cargoUpdatesPayload.loaded_date).toBe('2026-09-01');
+      expect(cargoUpdatesPayload.arrived_date).toBe('2026-09-10');
+      expect(cargoUpdatesPayload.status).toBe('In Transit');
+    });
+  });
+
+  describe('consolidation expenses (outcomes) and LTL income calculations', () => {
+    it('should compute complete breakdown of 5 expenses in multi-currency: agent in USD, china_warehouse in RMB, company_service in UZS, customs_clearance in USD, cct in UZS', () => {
+      const row = {
+        agent: 3000,
+        agent_currency: 'USD',
+        china_warehouse: 3600,
+        china_warehouse_currency: 'RMB',
+        company_service: 2570000,
+        company_service_currency: 'UZS',
+        customs_clearance_of_goods: 800,
+        customs_clearance_of_goods_currency: 'USD',
+        cct: 1285000,
+        cct_currency: 'UZS',
+        carrier_cost_currency: 'USD',
+        carrier_cost_usd_rate: 1.0,
+      };
+
+      const exp = service.computeConsolidationExpenses(row);
+      expect(exp.agent).toBe(3000);
+      expect(exp.agent_currency).toBe('USD');
+      expect(exp.agent_usd).toBe(3000);
+
+      expect(exp.china_warehouse).toBe(3600);
+      expect(exp.china_warehouse_currency).toBe('RMB');
+      expect(exp.china_warehouse_usd).toBe(508.48);
+
+      expect(exp.company_service).toBe(2570000);
+      expect(exp.company_service_currency).toBe('UZS');
+      expect(exp.company_service_usd).toBe(200);
+
+      expect(exp.customs_clearance_of_goods).toBe(800);
+      expect(exp.customs_clearance_of_goods_currency).toBe('USD');
+      expect(exp.customs_clearance_of_goods_usd).toBe(800);
+
+      expect(exp.cct).toBe(1285000);
+      expect(exp.cct_currency).toBe('UZS');
+      expect(exp.cct_usd).toBe(100);
+
+      expect(exp.total_usd).toBe(4608.48);
+    });
+
+    it('should store and calculate 5 expenses with currencies on createConsolidation and return net margin based on LTL income sum minus outcomes sum', async () => {
+      const user = { id: 'user-uuid-1', role: 'CEO' };
+      let insertedPayload: any = null;
+
+      knexMock.mockImplementation((tableName: string) => {
+        if (tableName === 'cargo_consolidations') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            orderBy: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'cons-exp-1',
+              consolidation_code: 'CNS-202608-0099',
+              container_truck_id: 'TRK-EXP-1',
+              agent: 3000,
+              agent_currency: 'USD',
+              china_warehouse: 500,
+              china_warehouse_currency: 'USD',
+              company_service: 200,
+              company_service_currency: 'USD',
+              customs_clearance_of_goods: 800,
+              customs_clearance_of_goods_currency: 'USD',
+              cct: 150,
+              cct_currency: 'USD',
+              carrier_cost_currency: 'USD',
+              carrier_cost_usd_rate: 1.0,
+            }),
+            insert: jest.fn((payload) => {
+              insertedPayload = payload;
+              return {
+                returning: jest.fn().mockResolvedValue(['cons-exp-1']),
+              };
+            }),
+          };
+        }
+        if (tableName === 'cargo_registrations as cr') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            orderBy: jest.fn().mockResolvedValue([
+              {
+                id: 'ltl-1',
+                cargo_type: 'LTL',
+                cargo: 'Goods A',
+                volume: 20,
+                weight: 5000,
+                sell_price: 6000,
+                sell_currency: 'USD',
+              },
+              {
+                id: 'ltl-2',
+                cargo_type: 'LTL',
+                cargo: 'Goods B',
+                volume: 30,
+                weight: 7000,
+                sell_price: 6000,
+                sell_currency: 'USD',
+              },
+            ]),
+          };
+        }
+        return {};
+      });
+
+      const res = await service.createConsolidation(user, {
+        container_truck_id: 'TRK-EXP-1',
+        agent: 3000,
+        agent_currency: 'USD',
+        china_warehouse: 500,
+        china_warehouse_currency: 'USD',
+        company_service: 200,
+        company_service_currency: 'USD',
+        customs_clearance_of_goods: 800,
+        customs_clearance_of_goods_currency: 'USD',
+        cct: 150,
+        cct_currency: 'USD',
+      });
+
+      expect(insertedPayload.agent).toBe(3000);
+      expect(insertedPayload.agent_currency).toBe('USD');
+      expect(insertedPayload.china_warehouse).toBe(500);
+      expect(insertedPayload.china_warehouse_currency).toBe('USD');
+      expect(insertedPayload.company_service).toBe(200);
+      expect(insertedPayload.company_service_currency).toBe('USD');
+      expect(insertedPayload.customs_clearance_of_goods).toBe(800);
+      expect(insertedPayload.customs_clearance_of_goods_currency).toBe('USD');
+      expect(insertedPayload.cct).toBe(150);
+      expect(insertedPayload.cct_currency).toBe('USD');
+
+      // Income = $6000 + $6000 = $12000
+      // Outcomes = $3000 + $500 + $200 + $800 + $150 = $4650
+      // Net Profit / Margin = $12000 - $4650 = $7350
+      expect(res.financials.income).toBe(12000);
+      expect(res.financials.total_income_usd).toBe(12000);
+      expect(res.financials.outcome).toBe(4650);
+      expect(res.financials.total_outcome_usd).toBe(4650);
+      expect(res.financials.total_purchase_usd).toBe(0);
+      expect(res.financials.consolidated_net_margin.amount).toBe(7350);
+      expect(res.financials.net_profit_usd).toBe(7350);
+      expect(res.expenses).toEqual({
+        agent: { amount: 3000, currency: 'USD', amount_usd: 3000 },
+        china_warehouse: {
+          amount: 500,
+          currency: 'USD',
+          amount_usd: 500,
+        },
+        company_service: {
+          amount: 200,
+          currency: 'USD',
+          amount_usd: 200,
+        },
+        customs_clearance_of_goods: {
+          amount: 800,
+          currency: 'USD',
+          amount_usd: 800,
+        },
+        cct: { amount: 150, currency: 'USD', amount_usd: 150 },
+        total_usd: 4650,
+      });
+    });
+
+    it('should validate DTO with all 5 expense fields and currencies', async () => {
+      const payload = {
+        container_truck_id: 'TRK-EXP-1',
+        agent: 3000,
+        agent_currency: 'USD',
+        china_warehouse: 3600,
+        china_warehouse_currency: 'RMB',
+        company_service: 2500000,
+        company_service_currency: 'UZS',
+        customs_clearance_of_goods: 800,
+        customs_clearance_of_goods_currency: 'USD',
+        cct: 1500000,
+        cct_currency: 'UZS',
+      };
+
+      const dto = plainToInstance(CreateCargoConsolidationDto, payload);
+      const errors = await validate(dto);
+      expect(errors.length).toBe(0);
+    });
+
+    it('should reject negative values for expense fields', async () => {
+      const payload = {
+        container_truck_id: 'TRK-EXP-1',
+        agent: -100,
+        china_warehouse: -50,
+      };
+
+      const dto = plainToInstance(CreateCargoConsolidationDto, payload);
+      const errors = await validate(dto);
+      expect(errors.length).toBeGreaterThan(0);
+      const agentErr = errors.find((e) => e.property === 'agent');
+      const chinaWarehouseErr = errors.find(
+        (e) => e.property === 'china_warehouse',
+      );
+      expect(agentErr).toBeDefined();
+      expect(chinaWarehouseErr).toBeDefined();
     });
   });
 });
