@@ -295,7 +295,6 @@ export class KpiSummaryService {
           (sum, i) =>
             sum +
             Number(i.sales_bonus_amount || 0) +
-            Number(i.kpi_bonus_amount || 0) +
             Number(i.additional_bonus_amount || 0),
           0,
         );
@@ -706,7 +705,6 @@ export class KpiSummaryService {
       const totalSalesUsd = Number(r.total_sales || 0);
       const kpiEarnedUsd =
         Number(r.sales_bonus_amount || 0) +
-        Number(r.kpi_bonus_amount || 0) +
         Number(r.additional_bonus_amount || 0);
       const dateStr = r.created_at
         ? new Date(r.created_at).toISOString().split('T')[0]

@@ -1241,31 +1241,37 @@ export class FinanceService {
         // Table not present
       }
 
-      // Sales evaluations
+      // Sales evaluations (Paid cargos KPI only = Real expense)
       let totalSalesKpiUsd = 0;
       try {
         const salesEvals = await this.knex('sales_manager_evaluations').where(
           'month',
           monthStr,
         );
-        totalSalesKpiUsd = salesEvals.reduce(
-          (sum, r) =>
-            sum +
-            Number(r.sales_bonus_amount || 0) +
-            Number(r.kpi_bonus_amount || 0) +
-            Number(r.additional_bonus_amount || 0),
-          0,
-        );
+        totalSalesKpiUsd = salesEvals.reduce((sum, r) => {
+          const paidBonus =
+            r.paid_sales_bonus_amount !== undefined &&
+            r.paid_sales_bonus_amount !== null
+              ? Number(r.paid_sales_bonus_amount)
+              : Number(r.sales_bonus_amount || 0);
+          return sum + paidBonus + Number(r.additional_bonus_amount || 0);
+        }, 0);
       } catch {
         // Table not present
       }
 
-      // Cargo transactions KPI
+      // Cargo transactions KPI (only paid transactions count towards real expense)
       let totalTxKpiUsd = 0;
       try {
         const txRows = await this.knex('cargo_transactions')
           .where('transaction_date', '>=', `${monthStr}-01`)
-          .where('transaction_date', '<=', endDate);
+          .where('transaction_date', '<=', endDate)
+          .where((b) => {
+            b.where('payment_status', 'paid')
+              .orWhere('payment_status', "To'landi")
+              .orWhere('payment_status', 'tolandi')
+              .orWhereNull('payment_status');
+          });
         for (const tx of txRows) {
           const kb = parseFloat(tx.kpi_bonus as string) || 0;
           const curr = (tx.currency as Currency) || Currency.UZS;

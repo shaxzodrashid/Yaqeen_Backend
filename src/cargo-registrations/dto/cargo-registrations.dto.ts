@@ -217,6 +217,20 @@ export class CreateCargoRegistrationDto {
   @IsString()
   description?: string;
 
+  @IsOptional()
+  @IsString()
+  payment_status?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  payment_deadline_days?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  is_kpi_received?: boolean;
+
   @IsUUID('4', { message: 'client_id must be a valid UUID' })
   client_id: string;
 
@@ -416,6 +430,20 @@ export class UpdateCargoRegistrationDto {
   description?: string;
 
   @IsOptional()
+  @IsString()
+  payment_status?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  payment_deadline_days?: number;
+
+  @IsOptional()
+  @IsBoolean()
+  is_kpi_received?: boolean;
+
+  @IsOptional()
   @IsUUID('4')
   client_id?: string;
 
@@ -500,6 +528,14 @@ export class QueryCargoRegistrationDto {
   @IsOptional()
   @IsString()
   status?: string;
+
+  @IsOptional()
+  @IsString()
+  payment_status?: string;
+
+  @IsOptional()
+  @IsString()
+  is_kpi_received?: string;
 
   @IsOptional()
   @IsString()

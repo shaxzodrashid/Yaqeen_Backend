@@ -1019,6 +1019,13 @@ export class CargoRegistrationsService {
         sell_custom_rate: dto.sell_exchange_rate || null,
         usd_rmb_rate: dto.usd_rmb_rate || null,
         status: finalStatus,
+        payment_status: dto.payment_status || 'waiting',
+        payment_deadline_days:
+          dto.payment_deadline_days !== undefined
+            ? dto.payment_deadline_days
+            : 15,
+        is_kpi_received: dto.is_kpi_received || false,
+        kpi_received_at: dto.is_kpi_received ? this.knex.fn.now() : null,
         description: dto.description || null,
         client_id: dto.client_id,
         employee_id: finalEmployeeId,
@@ -1260,6 +1267,16 @@ export class CargoRegistrationsService {
     updatePayload.sell_usd_rate = sellRes.usd_rate_used;
 
     if (dto.status !== undefined) updatePayload.status = dto.status;
+    if (dto.payment_status !== undefined)
+      updatePayload.payment_status = dto.payment_status;
+    if (dto.payment_deadline_days !== undefined)
+      updatePayload.payment_deadline_days = dto.payment_deadline_days;
+    if (dto.is_kpi_received !== undefined) {
+      updatePayload.is_kpi_received = dto.is_kpi_received;
+      updatePayload.kpi_received_at = dto.is_kpi_received
+        ? this.knex.fn.now()
+        : null;
+    }
     if (dto.description !== undefined)
       updatePayload.description = dto.description || null;
     if (dto.client_id !== undefined) updatePayload.client_id = dto.client_id;
@@ -1583,6 +1600,16 @@ export class CargoRegistrationsService {
       baseQuery.whereNull('cr.consolidation_id');
     }
 
+    // Payment status and KPI received filters
+    if (query.payment_status) {
+      baseQuery.where('cr.payment_status', query.payment_status);
+    }
+    if (query.is_kpi_received !== undefined) {
+      const isReceived =
+        query.is_kpi_received === 'true' || query.is_kpi_received === '1';
+      baseQuery.where('cr.is_kpi_received', isReceived);
+    }
+
     // Date filters
     if (query.confirmed_start_date) {
       baseQuery.where('cr.confirmed_date', '>=', query.confirmed_start_date);
@@ -1849,6 +1876,10 @@ export class CargoRegistrationsService {
           'cr.sell_custom_rate',
           'cr.usd_rmb_rate',
           'cr.status',
+          'cr.payment_status',
+          'cr.payment_deadline_days',
+          'cr.is_kpi_received',
+          'cr.kpi_received_at',
           'cr.created_at',
           'cr.updated_at',
           'c.first_name as client_first_name',
@@ -2552,6 +2583,14 @@ export class CargoRegistrationsService {
       },
       usd_rmb_rate: row.usd_rmb_rate ? Number(row.usd_rmb_rate) : null,
       status: row.status,
+      payment_status: row.payment_status || 'waiting',
+      payment_deadline_days:
+        row.payment_deadline_days !== null &&
+        row.payment_deadline_days !== undefined
+          ? Number(row.payment_deadline_days)
+          : 15,
+      is_kpi_received: Boolean(row.is_kpi_received),
+      kpi_received_at: row.kpi_received_at || null,
       description: row.description,
       client_id: row.client_id,
       client: {

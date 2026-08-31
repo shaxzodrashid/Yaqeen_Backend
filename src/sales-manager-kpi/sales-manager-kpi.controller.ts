@@ -3,6 +3,7 @@ import {
   Get,
   Post,
   Put,
+  Patch,
   Body,
   Param,
   Query,
@@ -21,6 +22,11 @@ import {
   ReviewDemotionDto,
   QueryEvaluationDto,
   UpdateCareerLevelDto,
+  QueryCargosMonitoringDto,
+  UpdateCargoPaymentStatusDto,
+  ConfirmCargoKpiDto,
+  BulkConfirmKpiDto,
+  BulkUpdatePaymentStatusDto,
 } from './dto/sales-manager-kpi.dto';
 
 @Controller('sales-manager-kpi')
@@ -29,6 +35,57 @@ export class SalesManagerKpiController {
   constructor(
     private readonly salesManagerKpiService: SalesManagerKpiService,
   ) {}
+
+  /**
+   * Section 2 / Image 2: Employee Assigned Cargos Monitoring & KPI
+   * GET /api/sales-manager-kpi/cargos-monitoring?employee_id=...&month=...
+   */
+  @Get('cargos-monitoring')
+  @RequirePermission('cargo_kpi', 'read')
+  getCargosMonitoring(@Query() query: QueryCargosMonitoringDto) {
+    return this.salesManagerKpiService.getCargosMonitoring(query);
+  }
+
+  @Get('employee/:employeeId/cargos-monitoring')
+  @RequirePermission('cargo_kpi', 'read')
+  getEmployeeCargosMonitoring(
+    @Param('employeeId') employeeId: string,
+    @Query() query: QueryCargosMonitoringDto,
+  ) {
+    return this.salesManagerKpiService.getCargosMonitoring({
+      ...query,
+      employee_id: employeeId,
+    });
+  }
+
+  @Patch('cargos/:id/payment-status')
+  @RequirePermission('cargo_kpi', 'update')
+  updateCargoPaymentStatus(
+    @Param('id') id: string,
+    @Body() dto: UpdateCargoPaymentStatusDto,
+  ) {
+    return this.salesManagerKpiService.updateCargoPaymentStatus(id, dto);
+  }
+
+  @Patch('cargos/:id/confirm-kpi')
+  @RequirePermission('cargo_kpi', 'update')
+  confirmCargoKpi(@Param('id') id: string, @Body() dto: ConfirmCargoKpiDto) {
+    return this.salesManagerKpiService.confirmCargoKpi(id, dto);
+  }
+
+  @Post('bulk-confirm-kpi')
+  @RequirePermission('cargo_kpi', 'update')
+  @HttpCode(HttpStatus.OK)
+  bulkConfirmEmployeeKpi(@Body() dto: BulkConfirmKpiDto) {
+    return this.salesManagerKpiService.bulkConfirmEmployeeKpi(dto);
+  }
+
+  @Post('bulk-payment-status')
+  @RequirePermission('cargo_kpi', 'update')
+  @HttpCode(HttpStatus.OK)
+  bulkUpdatePaymentStatus(@Body() dto: BulkUpdatePaymentStatusDto) {
+    return this.salesManagerKpiService.bulkUpdatePaymentStatus(dto);
+  }
 
   @Get('evaluations')
   @RequirePermission('cargo_kpi', 'read')

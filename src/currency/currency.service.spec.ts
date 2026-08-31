@@ -102,6 +102,25 @@ describe('CurrencyService', () => {
   });
 
   describe('getRatesForDate', () => {
+    beforeEach(() => {
+      jest.spyOn(service as any, 'fetchRatesFromCbu').mockResolvedValue({
+        USD: {
+          code: 'USD',
+          rate: 12850,
+          nominal: 1,
+          diff: 15,
+          rate_date: '2026-07-23',
+        },
+        RUB: {
+          code: 'RUB',
+          rate: 145,
+          nominal: 1,
+          diff: 0.5,
+          rate_date: '2026-07-23',
+        },
+      });
+    });
+
     it('should handle Date object without throwing dateStr.slice is not a function', async () => {
       const dateObj = new Date('2026-07-23');
       const rates = await service.getRatesForDate(dateObj);

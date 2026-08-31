@@ -702,3 +702,188 @@ Returns full itemized audit trail history of KPIs ("Each amount of money came fr
 ### `GET /api/v1/kpi/employee/:id`
 
 Returns a comprehensive single-employee summary and detailed itemized history breakdown across all KPI sources.
+
+---
+
+## 11. Sales Manager KPI & Career System
+
+This sub-module provides complete management for Sales Manager career tiers, average net margin check ("средний чек" / SR Check), monthly sales KPI bonus calculations, cargo client payment status tracking, and employee KPI bonus confirmations.
+
+### 11.1 Career Levels & SR Check (Средний чек)
+
+| Career Level | Fixed Salary | Monthly Plan (USD) | SR Check Min / Target (USD) | Additional Requirement      | Promotion Rule                            | Demotion Rule                            |
+| :----------- | :----------- | :----------------- | :-------------------------- | :-------------------------- | :---------------------------------------- | :--------------------------------------- |
+| **JUNIOR**   | $300         | $0 - $3,000        | **$150 / $300**             | -                           | 2 consecutive months KPI met $\to$ MID    | -                                        |
+| **MID**      | $500         | $5,000 - $6,000    | **$200 / $400**             | -                           | 3 consecutive months KPI met $\to$ SENIOR | 2 consecutive months failed $\to$ JUNIOR |
+| **SENIOR**   | $700         | $6,001 - $8,000    | **$250 / $500**             | $\ge 1$ Mentee (_shogird_)  | 4 consecutive months KPI met $\to$ EXPERT | 2 consecutive months failed $\to$ MID    |
+| **EXPERT**   | $1,000       | $8,001 - $10,000   | **$300 / $600**             | $\ge 3$ Mentees (_shogird_) | -                                         | 3 consecutive months failed $\to$ SENIOR |
+
+#### SR Check (Средний чек) Rule:
+
+$$\text{Average Check} = \frac{\text{Total Net Margin (Profit)}}{\text{Total Deals (Cargos)}}$$
+
+- When an employee's average net margin is $\ge \text{srCheckMin}$ (e.g. $\ge \$150$ for Junior, $\ge \$200$ for Mid, $\ge \$250$ for Senior, $\ge \$300$ for Expert), the evaluation is **automatically approved** without requiring ROP or CEO confirmation.
+- Only when the sales plan is achieved but the average check is below $\text{srCheckMin}$ does the evaluation flag `PENDING_SR_CHECK_APPROVAL` (requires ROP/CEO review).
+
+### 11.2 Sales Bonus Matrix (Net Margin Sum in USD)
+
+Sales Bonus and KPI Bonus are identical, calculated directly from the total net margin sum across all cargos in the month:
+
+| Total Monthly Net Margin (USD) | Bonus Rate (%) |
+| :----------------------------- | :------------- |
+| $0 - 1,999.99$                 | 0%             |
+| $2,000 - 3,999.99$             | 10%            |
+| $4,000 - 5,999.99$             | 15%            |
+| $6,000 - 7,999.99$             | 20%            |
+| $8,000 - 9,999.99$             | 22%            |
+| $\ge 10,000$                   | 25%            |
+
+$$\text{Sales Bonus} = \text{Total Net Margin} \times \text{Bonus Rate}$$
+$$\text{Total Earnings} = \text{Fixed Salary} + \text{Sales Bonus} + \text{Additional Bonus}$$
+
+### 11.3 Client Payment Status & Real Expense for KPI
+
+Each cargo tracks client payment status:
+
+- **`waiting`** (_Kutilmoqda_): Client payment pending.
+- **`unpaid`** (_Klient bermadi_): Client did not pay.
+- **`paid`** (_To'landi_ / _Klient berdi_): Client payment received.
+
+> [!IMPORTANT]
+> **Real Financial Expense Rule**:
+> Unpaid and waiting cargos **are NOT registered to real company expense** for KPI. Employees only realize and receive their KPI payout for **paid cargos** (`paid_sales_bonus_amount`).
+
+### 11.4 Employee Assigned Cargos Monitoring & KPI (Image 2 Table)
+
+### `GET /api/sales-manager-kpi/cargos-monitoring`
+
+### `GET /api/sales-manager-kpi/employee/:employeeId/cargos-monitoring`
+
+Exposes the exact table format shown in Image 2 (_Xodimning biriktirilgan yuklari bo'yicha monitoring va KPI_).
+
+#### Query Parameters:
+
+- `employee_id` (optional in base endpoint, UUID)
+- `month` (optional, `YYYY-MM`, default current month)
+- `payment_status` (optional: `'waiting'`, `'unpaid'`, `'paid'`, `'all'`)
+- `search` (optional search query)
+- `page`, `limit` (optional pagination)
+
+#### Response (200 OK):
+
+```json
+{
+  "meta": {
+    "employee_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+    "employee_name": "Saidjon Menejer",
+    "department_name": "Sales Department",
+    "career_level": "EXPERT",
+    "month": "2026-08",
+    "fixed_salary": 1000,
+    "total_cargos": 30,
+    "total_buy_price": 245000,
+    "total_sell_price": 260000,
+    "total_profit": 15000,
+    "average_check": 500,
+    "sr_check_min": 300,
+    "sr_check_target": 600,
+    "is_sr_check_achieved": true,
+    "is_plan_achieved": true,
+    "current_kpi_rate": 25,
+    "current_kpi_rate_percentage": "25%",
+    "total_potential_kpi_bonus": 3750,
+    "total_paid_kpi_bonus": 2500,
+    "total_unpaid_kpi_bonus": 1250,
+    "paid_cargos_count": 20,
+    "unpaid_cargos_count": 5,
+    "waiting_cargos_count": 5,
+    "kpi_confirmed_cargos_count": 18,
+    "real_kpi_expense": 2500,
+    "total_earnings_estimated": 4750,
+    "total_earnings_realized": 3500
+  },
+  "pagination": {
+    "total": 30,
+    "page": 1,
+    "limit": 50,
+    "totalPages": 1
+  },
+  "data": [
+    {
+      "index": 1,
+      "id": "cargo-uuid-1",
+      "source": "cargo_registration",
+      "container_truck_id": "06 KG 762 AJW",
+      "client_id": "client-uuid-1",
+      "client_name": "Saidjon aka",
+      "client_company": "Saidjon MCHJ",
+      "client_phone": "+998901234567",
+      "buy_price": 9657,
+      "sell_price": 9950,
+      "profit": 293,
+      "payment_deadline_days": 15,
+      "current_kpi_rate": 25,
+      "current_kpi_rate_percentage": "25%",
+      "cargo_bonus": 73.25,
+      "cargo_bonus_rounded": 73,
+      "payment_status": "waiting",
+      "payment_status_label": "Kutilmoqda",
+      "is_paid": false,
+      "is_kpi_received": false,
+      "kpi_received_at": null,
+      "confirmed_date": "2026-08-01",
+      "cargo": "Electronics",
+      "cargo_type": "FTL"
+    }
+  ]
+}
+```
+
+---
+
+### 11.5 Payment Status & KPI Confirmation Endpoints
+
+#### `PATCH /api/sales-manager-kpi/cargos/:id/payment-status`
+
+Updates payment status and deadline for a cargo item.
+
+```json
+{
+  "payment_status": "paid",
+  "payment_deadline_days": 15
+}
+```
+
+#### `PATCH /api/sales-manager-kpi/cargos/:id/confirm-kpi`
+
+Toggles or records employee confirmation that they received their KPI bonus.
+
+```json
+{
+  "is_kpi_received": true,
+  "review_notes": "Received on card"
+}
+```
+
+#### `POST /api/sales-manager-kpi/bulk-confirm-kpi`
+
+Bulk confirms KPI bonus receipt for an employee for a given month.
+
+```json
+{
+  "employee_id": "employee-uuid",
+  "month": "2026-08",
+  "is_kpi_received": true
+}
+```
+
+#### `POST /api/sales-manager-kpi/bulk-payment-status`
+
+Bulk updates payment status for specified cargo IDs.
+
+```json
+{
+  "cargo_ids": ["cargo-uuid-1", "cargo-uuid-2"],
+  "payment_status": "paid"
+}
+```
