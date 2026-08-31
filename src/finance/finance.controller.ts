@@ -16,7 +16,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/guards/permissions.guard';
 import { RequirePermission } from '../auth/decorators/permissions.decorator';
 import { FinanceService } from './finance.service';
-import { CreateExpenseDto } from './dto/create-expense.dto';
+import { CreateExpenseDto, ExpenseSection } from './dto/create-expense.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
 import { QueryExpenseDto } from './dto/query-expense.dto';
 import { BatchUpdateSalariesDto } from './dto/update-salary.dto';
@@ -38,7 +38,7 @@ export class FinanceController {
   }
 
   // ==========================================
-  // 2. EXPENSES MANAGEMENT
+  // 2. EXPENSES MANAGEMENT (FTL & LTL)
   // ==========================================
 
   @Post('expenses')
@@ -57,11 +57,17 @@ export class FinanceController {
   @Get('expenses/categories')
   @RequirePermission('finance', 'read')
   getExpenseCategories(
+    @Query('section') section?: ExpenseSection,
     @Query('period') period?: string,
     @Query('start_date') startDate?: string,
     @Query('end_date') endDate?: string,
   ) {
-    return this.financeService.getExpenseCategories(period, startDate, endDate);
+    return this.financeService.getExpenseCategories(
+      section,
+      period,
+      startDate,
+      endDate,
+    );
   }
 
   @Get('expenses/:id')

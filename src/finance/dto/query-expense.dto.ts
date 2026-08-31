@@ -9,9 +9,13 @@ import {
   IsUUID,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ExpenseCategory } from './create-expense.dto';
+import { ExpenseCategory, ExpenseSection } from './create-expense.dto';
 
 export class QueryExpenseDto {
+  @IsOptional()
+  @IsEnum(ExpenseSection)
+  section?: ExpenseSection;
+
   @IsOptional()
   @IsEnum(ExpenseCategory)
   category?: ExpenseCategory;
@@ -46,7 +50,7 @@ export class QueryExpenseDto {
 
   @IsOptional()
   @IsString()
-  @IsIn(['expense_date', 'amount', 'category', 'created_at'])
+  @IsIn(['expense_date', 'amount', 'category', 'section', 'created_at'])
   sort_by?: string = 'expense_date';
 
   @IsOptional()

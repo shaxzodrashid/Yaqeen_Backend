@@ -7,7 +7,19 @@ import {
 } from '@nestjs/common';
 import { KNEX_CONNECTION } from '../database/database.module';
 import { Knex } from 'knex';
-import { CreateExpenseDto, ExpenseCategory } from './dto/create-expense.dto';
+import {
+  CreateExpenseDto,
+  ExpenseCategory,
+  ExpenseSection,
+  FTL_EXPENSE_CATEGORIES,
+  LTL_EXPENSE_CATEGORIES,
+  ALL_EXPENSE_CATEGORIES,
+  FTL_CATEGORIES_METADATA,
+  LTL_CATEGORIES_METADATA,
+  getCategoriesForSection,
+  isCategoryAllowedInSection,
+  inferSectionForCategory,
+} from './dto/create-expense.dto';
 import { UpdateExpenseDto } from './dto/update-expense.dto';
 import { QueryExpenseDto } from './dto/query-expense.dto';
 import {
@@ -28,10 +40,20 @@ export class FinanceService {
   ) {}
 
   // ==========================================
-  // 1. EXPENSES CRUD & CATEGORIES
+  // 1. EXPENSES CRUD & CATEGORIES (FTL & LTL)
   // ==========================================
 
   async createExpense(dto: CreateExpenseDto) {
+    const section = dto.section || inferSectionForCategory(dto.category);
+
+    if (!isCategoryAllowedInSection(dto.category, section)) {
+      const allowed = getCategoriesForSection(section);
+      throw new BadRequestException({
+        message: `Category '${dto.category}' is not valid for '${section.toUpperCase()}' section. Allowed categories for ${section.toUpperCase()}: ${allowed.join(', ')}`,
+        location: 'invalid_category_for_section',
+      });
+    }
+
     if (dto.category === ExpenseCategory.SALARY_PAYOUT) {
       if (!dto.employee_id) {
         throw new BadRequestException({
@@ -56,6 +78,7 @@ export class FinanceService {
     const expenseCurrency = dto.currency || Currency.UZS;
     const [expense] = await this.knex('expenses')
       .insert({
+        section,
         category: dto.category,
         amount: dto.amount,
         currency: expenseCurrency,
@@ -78,6 +101,9 @@ export class FinanceService {
 
     const baseQuery = this.knex('expenses');
 
+    if (query.section) {
+      baseQuery.where('section', query.section);
+    }
     if (query.category) {
       baseQuery.where('category', query.category);
     }
@@ -161,6 +187,32 @@ export class FinanceService {
 
     const targetCategory =
       dto.category !== undefined ? dto.category : expense.category;
+    let targetSection =
+      dto.section !== undefined
+        ? dto.section
+        : expense.section || ExpenseSection.FTL;
+
+    // If category changed but section was not explicitly updated, align if needed
+    if (dto.section === undefined && dto.category !== undefined) {
+      if (
+        !isCategoryAllowedInSection(targetCategory, targetSection) &&
+        isCategoryAllowedInSection(
+          targetCategory,
+          inferSectionForCategory(targetCategory),
+        )
+      ) {
+        targetSection = inferSectionForCategory(targetCategory);
+      }
+    }
+
+    if (!isCategoryAllowedInSection(targetCategory, targetSection)) {
+      const allowed = getCategoriesForSection(targetSection);
+      throw new BadRequestException({
+        message: `Category '${targetCategory}' is not valid for '${targetSection.toUpperCase()}' section. Allowed categories for ${targetSection.toUpperCase()}: ${allowed.join(', ')}`,
+        location: 'invalid_category_for_section',
+      });
+    }
+
     const targetEmployeeId =
       dto.employee_id !== undefined ? dto.employee_id : expense.employee_id;
 
@@ -202,6 +254,9 @@ export class FinanceService {
       updated_at: this.knex.fn.now(),
     };
 
+    if (dto.section !== undefined || targetSection !== expense.section) {
+      updatePayload.section = targetSection;
+    }
     if (dto.category !== undefined) updatePayload.category = dto.category;
     if (dto.amount !== undefined) updatePayload.amount = dto.amount;
     if (dto.currency !== undefined) updatePayload.currency = dto.currency;
@@ -230,6 +285,7 @@ export class FinanceService {
   }
 
   async getExpenseCategories(
+    section?: ExpenseSection,
     period?: string,
     start_date?: string,
     end_date?: string,
@@ -256,17 +312,25 @@ export class FinanceService {
     }
 
     const query = this.knex('expenses')
-      .select('category', 'currency')
+      .select('section', 'category', 'currency')
       .sum('amount as total')
       .count('id as count')
-      .groupBy('category', 'currency');
+      .groupBy('section', 'category', 'currency');
 
     if (startDate) query.where('expense_date', '>=', startDate);
     if (endDate) query.where('expense_date', '<=', endDate);
+    if (section) query.where('section', section);
 
     const rows = await query;
 
-    const categoryMap: Record<string, { total: number; count: number }> = {};
+    const sectionMap: Record<
+      ExpenseSection,
+      Record<string, { total: number; count: number }>
+    > = {
+      [ExpenseSection.FTL]: {},
+      [ExpenseSection.LTL]: {},
+    };
+
     const rates = this.currencyService
       ? await this.currencyService.getLatestRates()
       : undefined;
@@ -274,84 +338,107 @@ export class FinanceService {
     for (const r of rows) {
       const rawAmt = parseFloat(r.total as string) || 0;
       const curr = (r.currency as Currency) || Currency.UZS;
+      const rowSection =
+        (r.section as ExpenseSection) === ExpenseSection.LTL
+          ? ExpenseSection.LTL
+          : ExpenseSection.FTL;
       let amtInUzs = rawAmt;
       if (curr !== Currency.UZS && this.currencyService) {
         amtInUzs = await this.currencyService.convertToUzs(rawAmt, curr, rates);
       }
+      const count = parseInt(r.count as string, 10) || 0;
 
-      if (!categoryMap[r.category]) {
-        categoryMap[r.category] = { total: 0, count: 0 };
+      if (!sectionMap[rowSection][r.category]) {
+        sectionMap[rowSection][r.category] = { total: 0, count: 0 };
       }
-      categoryMap[r.category].total += amtInUzs;
-      categoryMap[r.category].count += parseInt(r.count as string, 10) || 0;
+      sectionMap[rowSection][r.category].total += amtInUzs;
+      sectionMap[rowSection][r.category].count += count;
     }
 
-    const categoriesConfig: Array<{
-      category: ExpenseCategory;
-      label: string;
-      description: string;
-    }> = [
-      {
-        category: ExpenseCategory.TAX,
-        label: 'Taxes (Nalog)',
-        description: 'Government taxes, tax transfers, official fees',
-      },
-      {
-        category: ExpenseCategory.UTILITY,
-        label: 'Utilities (Svet/Kommunal)',
-        description: 'Electricity, internet, water, office utilities',
-      },
-      {
-        category: ExpenseCategory.RENT,
-        label: 'Rent (Arenda)',
-        description: 'Office space rent, warehouse rent',
-      },
-      {
-        category: ExpenseCategory.SALARY_PAYOUT,
-        label: 'Salary Payouts (Maosh)',
-        description: 'Manual cash or card salary payouts to staff',
-      },
-      {
-        category: ExpenseCategory.CLEANER,
-        label: 'Cleaning (Uborshchitsa)',
-        description: 'Cleaning services, office supplies',
-      },
-      {
-        category: ExpenseCategory.KPI,
-        label: 'KPI & Bonuses (KPI/Mukofot)',
-        description: 'Employee KPI payouts, performance bonuses, incentives',
-      },
-      {
-        category: ExpenseCategory.FOOD,
-        label: 'Food & Meals (Pitanie/Oziq-ovqat)',
-        description: 'Staff meals, office tea/coffee, snacks and food expenses',
-      },
-      {
-        category: ExpenseCategory.OTHER,
-        label: 'Other Expenses (Prochiy)',
-        description: 'Miscellaneous operational expenses',
-      },
-    ];
-
-    const result = categoriesConfig.map((cat) => {
-      const data = categoryMap[cat.category] || { total: 0, count: 0 };
+    const ftlCategories = FTL_EXPENSE_CATEGORIES.map((catKey) => {
+      const config = FTL_CATEGORIES_METADATA[catKey];
+      const data = sectionMap[ExpenseSection.FTL][catKey] || {
+        total: 0,
+        count: 0,
+      };
       return {
-        category: cat.category,
-        label: cat.label,
-        description: cat.description,
+        category: catKey,
+        section: ExpenseSection.FTL,
+        label: config?.label || catKey,
+        description: config?.description || '',
         total_amount: Math.round(data.total * 100) / 100,
         expense_count: data.count,
       };
     });
 
-    const grandTotal = result.reduce((sum, item) => sum + item.total_amount, 0);
+    const ltlCategories = LTL_EXPENSE_CATEGORIES.map((catKey) => {
+      const config = LTL_CATEGORIES_METADATA[catKey];
+      const data = sectionMap[ExpenseSection.LTL][catKey] || {
+        total: 0,
+        count: 0,
+      };
+      return {
+        category: catKey,
+        section: ExpenseSection.LTL,
+        label: config?.label || catKey,
+        description: config?.description || '',
+        total_amount: Math.round(data.total * 100) / 100,
+        expense_count: data.count,
+      };
+    });
+
+    const ftlTotal = ftlCategories.reduce(
+      (sum, item) => sum + item.total_amount,
+      0,
+    );
+    const ltlTotal = ltlCategories.reduce(
+      (sum, item) => sum + item.total_amount,
+      0,
+    );
+
+    if (section === ExpenseSection.FTL) {
+      return {
+        section: ExpenseSection.FTL,
+        period_start: startDate || null,
+        period_end: endDate || null,
+        base_currency: Currency.UZS,
+        grand_total: Math.round(ftlTotal * 100) / 100,
+        categories: ftlCategories,
+      };
+    }
+
+    if (section === ExpenseSection.LTL) {
+      return {
+        section: ExpenseSection.LTL,
+        period_start: startDate || null,
+        period_end: endDate || null,
+        base_currency: Currency.UZS,
+        grand_total: Math.round(ltlTotal * 100) / 100,
+        categories: ltlCategories,
+      };
+    }
+
+    const grandTotal = ftlTotal + ltlTotal;
 
     return {
       period_start: startDate || null,
       period_end: endDate || null,
       base_currency: Currency.UZS,
       grand_total: Math.round(grandTotal * 100) / 100,
-      categories: result,
+      sections: {
+        [ExpenseSection.FTL]: {
+          section: ExpenseSection.FTL,
+          label: 'FTL (Full Truck Load)',
+          total_amount: Math.round(ftlTotal * 100) / 100,
+          categories: ftlCategories,
+        },
+        [ExpenseSection.LTL]: {
+          section: ExpenseSection.LTL,
+          label: 'LTL (Less Than Truckload / Groupage)',
+          total_amount: Math.round(ltlTotal * 100) / 100,
+          categories: ltlCategories,
+        },
+      },
     };
   }
 
@@ -397,12 +484,10 @@ export class FinanceService {
       color: emp.color,
     }));
 
-    // Fetch latest rates for conversion
     const rates = this.currencyService
       ? await this.currencyService.getLatestRates()
       : undefined;
 
-    // Group by department
     const departmentMap: Record<
       string,
       {
@@ -544,6 +629,7 @@ export class FinanceService {
   async getFinanceSummary(query: QueryFinanceSummaryDto) {
     const { startDate, endDate } = this.resolvePeriodDates(query);
     const targetCurrency = query.currency || Currency.USD;
+    const targetSection = query.section;
 
     const { prevStartDate, prevEndDate } = this.resolvePreviousPeriodDates(
       startDate,
@@ -600,6 +686,7 @@ export class FinanceService {
       startDate,
       endDate,
       rates,
+      targetSection,
     );
 
     // 2. Previous period metrics (in USD base)
@@ -607,6 +694,7 @@ export class FinanceService {
       prevStartDate,
       prevEndDate,
       rates,
+      targetSection,
     );
 
     // 3. Convert metrics if target currency is not USD
@@ -720,6 +808,7 @@ export class FinanceService {
 
     return {
       currency: targetCurrency,
+      section: targetSection || 'all',
       normalized_currency_label:
         currencyLabels[targetCurrency] || `${targetCurrency}`,
       period: {
@@ -733,6 +822,8 @@ export class FinanceService {
         gross_profit: summaryData.gross_profit,
         gross_margin: summaryData.gross_profit,
         operational_expenses: summaryData.operational_expenses,
+        ftl_operational_expenses: summaryData.ftl_operational_expenses,
+        ltl_operational_expenses: summaryData.ltl_operational_expenses,
         fixed_salaries_expense: summaryData.fixed_salaries_expense,
         kpi_bonuses_expense: summaryData.kpi_bonuses_expense,
         total_payroll_expense: summaryData.total_payroll_expense,
@@ -743,6 +834,7 @@ export class FinanceService {
         seo_pure_profit_share: summaryData.seo_cut_10pc,
       },
       flow_diagram: flowDiagram,
+      sections_breakdown: summaryData.sections_breakdown,
       expense_distribution: summaryData.expense_distribution,
       expense_breakdown: summaryData.expense_breakdown,
       comparison: {
@@ -817,21 +909,28 @@ export class FinanceService {
   }
 
   /**
-   * Computes financial metrics for a specific date period in base USD.
+   * Computes financial metrics for a specific date period in base USD, segregating FTL and LTL.
    */
   private async computeMetricsForPeriod(
     startDate: string,
     endDate: string,
     rates: Record<string, any>,
+    targetSection?: ExpenseSection,
   ) {
-    let grossRevenueUsd = 0;
-    let cogsUsd = 0;
+    let grossRevenueFtlUsd = 0;
+    let grossRevenueLtlUsd = 0;
+    let grossRevenueTotalUsd = 0;
+
+    let cogsFtlUsd = 0;
+    let cogsLtlUsd = 0;
+    let cogsTotalUsd = 0;
 
     // 1. Cargo Registrations:
     // a) Sell prices for Gross Revenue (where sell_date is within [startDate, endDate])
     try {
       const sellCargoRows = await this.knex('cargo_registrations')
         .select(
+          'cargo_type',
           'sell_price',
           'sell_currency',
           'sell_date',
@@ -863,21 +962,20 @@ export class FinanceService {
           (row.sell_custom_rate || row.sell_usd_rate) as string,
         );
         const usdRmb = parseFloat(row.usd_rmb_rate as string);
-        const amtUsd = this.convertCargoPriceToUsd(
+        let rowAmtUsd = this.convertCargoPriceToUsd(
           rawAmt,
           curr,
           rates,
           usdRmb,
           customRate,
         );
-        grossRevenueUsd += amtUsd;
 
         if (row.is_turnkey) {
           const turnkeyAmt = parseFloat(row.turnkey_price as string) || 0;
           const turnkeyCurr =
             (row.turnkey_currency as Currency) || curr || Currency.USD;
           if (turnkeyAmt > 0) {
-            grossRevenueUsd += this.convertCargoPriceToUsd(
+            rowAmtUsd += this.convertCargoPriceToUsd(
               turnkeyAmt,
               turnkeyCurr,
               rates,
@@ -891,7 +989,7 @@ export class FinanceService {
         if (speedUpAmt > 0) {
           const speedUpCurr =
             (row.speed_up_currency as Currency) || curr || Currency.USD;
-          grossRevenueUsd += this.convertCargoPriceToUsd(
+          rowAmtUsd += this.convertCargoPriceToUsd(
             speedUpAmt,
             speedUpCurr,
             rates,
@@ -899,6 +997,14 @@ export class FinanceService {
             customRate,
           );
         }
+
+        const cargoType = (row.cargo_type || 'FTL').toUpperCase();
+        if (cargoType === 'LTL') {
+          grossRevenueLtlUsd += rowAmtUsd;
+        } else {
+          grossRevenueFtlUsd += rowAmtUsd;
+        }
+        grossRevenueTotalUsd += rowAmtUsd;
       }
     } catch {
       // If table is not present in some mocked tests, proceed gracefully
@@ -908,6 +1014,7 @@ export class FinanceService {
     try {
       const purchaseCargoRows = await this.knex('cargo_registrations')
         .select(
+          'cargo_type',
           'purchase_price',
           'purchase_currency',
           'purchase_date',
@@ -935,20 +1042,19 @@ export class FinanceService {
           (row.purchase_custom_rate || row.purchase_usd_rate) as string,
         );
         const usdRmb = parseFloat(row.usd_rmb_rate as string);
-        const amtUsd = this.convertCargoPriceToUsd(
+        let rowAmtUsd = this.convertCargoPriceToUsd(
           rawAmt,
           curr,
           rates,
           usdRmb,
           customRate,
         );
-        cogsUsd += amtUsd;
 
         const addExpAmt = parseFloat(row.additional_expense as string) || 0;
         if (addExpAmt > 0) {
           const addExpCurr =
             (row.additional_expense_currency as Currency) || Currency.USD;
-          cogsUsd += this.convertCargoPriceToUsd(
+          rowAmtUsd += this.convertCargoPriceToUsd(
             addExpAmt,
             addExpCurr,
             rates,
@@ -956,6 +1062,14 @@ export class FinanceService {
             customRate,
           );
         }
+
+        const cargoType = (row.cargo_type || 'FTL').toUpperCase();
+        if (cargoType === 'LTL') {
+          cogsLtlUsd += rowAmtUsd;
+        } else {
+          cogsFtlUsd += rowAmtUsd;
+        }
+        cogsTotalUsd += rowAmtUsd;
       }
     } catch {
       // If table is not present in some mocked tests, proceed gracefully
@@ -975,32 +1089,41 @@ export class FinanceService {
         const bp = parseFloat(tx.buy_price as string) || 0;
         const kb = parseFloat(tx.kpi_bonus as string) || 0;
 
-        grossRevenueUsd += this.convertCargoPriceToUsd(sp, curr, rates);
-        cogsUsd += this.convertCargoPriceToUsd(bp, curr, rates);
+        const sellUsd = this.convertCargoPriceToUsd(sp, curr, rates);
+        const buyUsd = this.convertCargoPriceToUsd(bp, curr, rates);
+
+        grossRevenueFtlUsd += sellUsd;
+        grossRevenueTotalUsd += sellUsd;
+        cogsFtlUsd += buyUsd;
+        cogsTotalUsd += buyUsd;
         legacyTxKpiUsd += this.convertCargoPriceToUsd(kb, curr, rates);
       }
     } catch {
       // Ignore if table query fails
     }
 
-    const grossProfitUsd = grossRevenueUsd - cogsUsd;
+    const grossProfitFtlUsd = grossRevenueFtlUsd - cogsFtlUsd;
+    const grossProfitLtlUsd = grossRevenueLtlUsd - cogsLtlUsd;
+    const grossProfitTotalUsd = grossRevenueTotalUsd - cogsTotalUsd;
 
-    // 3. Operational expenses from expenses table
-    const categoryMap: Record<string, { total: number; count: number }> = {
-      tax: { total: 0, count: 0 },
-      utility: { total: 0, count: 0 },
-      rent: { total: 0, count: 0 },
-      salary_payout: { total: 0, count: 0 },
-      cleaner: { total: 0, count: 0 },
-      kpi: { total: 0, count: 0 },
-      food: { total: 0, count: 0 },
-      other: { total: 0, count: 0 },
-    };
+    // 3. Operational expenses from expenses table (FTL & LTL separated)
+    const ftlCategoryMap: Record<string, { total: number; count: number }> = {};
+    for (const cat of FTL_EXPENSE_CATEGORIES) {
+      ftlCategoryMap[cat] = { total: 0, count: 0 };
+    }
 
+    const ltlCategoryMap: Record<string, { total: number; count: number }> = {};
+    for (const cat of LTL_EXPENSE_CATEGORIES) {
+      ltlCategoryMap[cat] = { total: 0, count: 0 };
+    }
+
+    let ftlOpExpensesUsd = 0;
+    let ltlOpExpensesUsd = 0;
     let totalOpExpensesUsd = 0;
+
     try {
       const expenseRows = await this.knex('expenses')
-        .select('category', 'amount', 'currency', 'expense_date')
+        .select('section', 'category', 'amount', 'currency', 'expense_date')
         .where('expense_date', '>=', startDate)
         .where('expense_date', '<=', endDate);
 
@@ -1008,12 +1131,27 @@ export class FinanceService {
         const rawAmt = parseFloat(row.amount as string) || 0;
         const curr = (row.currency as Currency) || Currency.UZS;
         const amtInUsd = this.convertCargoPriceToUsd(rawAmt, curr, rates);
+        const rowSection =
+          (row.section as ExpenseSection) === ExpenseSection.LTL
+            ? ExpenseSection.LTL
+            : ExpenseSection.FTL;
 
-        if (!categoryMap[row.category]) {
-          categoryMap[row.category] = { total: 0, count: 0 };
+        if (rowSection === ExpenseSection.FTL) {
+          if (!ftlCategoryMap[row.category]) {
+            ftlCategoryMap[row.category] = { total: 0, count: 0 };
+          }
+          ftlCategoryMap[row.category].total += amtInUsd;
+          ftlCategoryMap[row.category].count += 1;
+          ftlOpExpensesUsd += amtInUsd;
+        } else {
+          if (!ltlCategoryMap[row.category]) {
+            ltlCategoryMap[row.category] = { total: 0, count: 0 };
+          }
+          ltlCategoryMap[row.category].total += amtInUsd;
+          ltlCategoryMap[row.category].count += 1;
+          ltlOpExpensesUsd += amtInUsd;
         }
-        categoryMap[row.category].total += amtInUsd;
-        categoryMap[row.category].count += 1;
+
         totalOpExpensesUsd += amtInUsd;
       }
     } catch {
@@ -1037,131 +1175,225 @@ export class FinanceService {
       // Ignore if table query fails
     }
 
-    // 5. KPI Bonuses from KPI System
-    let totalKpiBonusesUsd = 0;
-    const monthStr = startDate.slice(0, 7);
-
-    if (this.kpiSummaryService) {
-      try {
-        const kpiRes = await this.kpiSummaryService.getKpiSummary({
-          month: monthStr,
-          target_currency: Currency.USD,
-        });
-        totalKpiBonusesUsd = kpiRes?.meta?.totals?.grand_total_kpi || 0;
-      } catch {
-        // Fallback below
-      }
-    }
-
-    if (totalKpiBonusesUsd === 0) {
-      totalKpiBonusesUsd = await this.calculateKpiBonusesForPeriod(
+    // 5. KPI Bonuses from KPI System (FTL & LTL separated)
+    const { totalFtlKpiUsd, totalLtlKpiUsd, grandTotalKpiUsd } =
+      await this.calculateKpiBonusesSeparated(
         startDate,
         endDate,
         rates,
+        legacyTxKpiUsd,
       );
-      if (totalKpiBonusesUsd === 0 && legacyTxKpiUsd > 0) {
-        totalKpiBonusesUsd = legacyTxKpiUsd;
-      }
+
+    const ftlExpenseBreakdown: Record<string, number> = {};
+    for (const catKey of FTL_EXPENSE_CATEGORIES) {
+      ftlExpenseBreakdown[catKey] = ftlCategoryMap[catKey]?.total || 0;
     }
 
-    const totalPayrollUsd = totalFixedSalariesUsd + totalKpiBonusesUsd;
-    const totalExpensesUsd = totalOpExpensesUsd + totalPayrollUsd;
-    const netProfitUsd = grossProfitUsd - totalExpensesUsd;
-    const seoCutUsd = netProfitUsd > 0 ? netProfitUsd * 0.1 : 0;
+    const ltlExpenseBreakdown: Record<string, number> = {};
+    for (const catKey of LTL_EXPENSE_CATEGORIES) {
+      ltlExpenseBreakdown[catKey] = ltlCategoryMap[catKey]?.total || 0;
+    }
 
-    const categoriesConfig: Array<{
-      category: ExpenseCategory;
-      label: string;
-      description: string;
-    }> = [
-      {
-        category: ExpenseCategory.TAX,
-        label: 'Taxes (Nalog)',
-        description: 'Government taxes, tax transfers, official fees',
-      },
-      {
-        category: ExpenseCategory.UTILITY,
-        label: 'Utilities (Svet/Kommunal)',
-        description: 'Electricity, internet, water, office utilities',
-      },
-      {
-        category: ExpenseCategory.RENT,
-        label: 'Rent (Arenda)',
-        description: 'Office space rent, warehouse space rent',
-      },
-      {
-        category: ExpenseCategory.SALARY_PAYOUT,
-        label: 'Salary Payouts (Maosh)',
-        description: 'Manual cash or card salary payouts',
-      },
-      {
-        category: ExpenseCategory.CLEANER,
-        label: 'Cleaning (Uborshchitsa)',
-        description: 'Office cleaning services, sanitation supplies',
-      },
-      {
-        category: ExpenseCategory.KPI,
-        label: 'KPI & Bonuses (KPI/Mukofot)',
-        description: 'Employee KPI payouts, performance bonuses, incentives',
-      },
-      {
-        category: ExpenseCategory.FOOD,
-        label: 'Food & Meals (Pitanie/Oziq-ovqat)',
-        description: 'Staff meals, office tea/coffee, snacks and food expenses',
-      },
-      {
-        category: ExpenseCategory.OTHER,
-        label: 'Other Expenses (Prochiy)',
-        description: 'Miscellaneous unclassified operational costs',
-      },
-    ];
-
-    const expenseDistribution = categoriesConfig.map((cat) => {
-      const data = categoryMap[cat.category] || { total: 0, count: 0 };
+    const ftlExpenseDistribution = FTL_EXPENSE_CATEGORIES.map((catKey) => {
+      const config = FTL_CATEGORIES_METADATA[catKey];
+      const data = ftlCategoryMap[catKey] || { total: 0, count: 0 };
       const amount = data.total;
       const percentage =
-        totalOpExpensesUsd > 0
-          ? Math.round((amount / totalOpExpensesUsd) * 10000) / 100
+        ftlOpExpensesUsd > 0
+          ? Math.round((amount / ftlOpExpensesUsd) * 10000) / 100
           : 0;
       return {
-        category: cat.category,
-        label: cat.label,
-        description: cat.description,
+        category: catKey,
+        section: ExpenseSection.FTL,
+        label: config?.label || catKey,
+        description: config?.description || '',
         amount,
         percentage,
         count: data.count,
       };
     });
 
-    const expenseBreakdown: Record<string, number> = {};
-    for (const cat of categoriesConfig) {
-      expenseBreakdown[cat.category] = categoryMap[cat.category]?.total || 0;
+    const ltlExpenseDistribution = LTL_EXPENSE_CATEGORIES.map((catKey) => {
+      const config = LTL_CATEGORIES_METADATA[catKey];
+      const data = ltlCategoryMap[catKey] || { total: 0, count: 0 };
+      const amount = data.total;
+      const percentage =
+        ltlOpExpensesUsd > 0
+          ? Math.round((amount / ltlOpExpensesUsd) * 10000) / 100
+          : 0;
+      return {
+        category: catKey,
+        section: ExpenseSection.LTL,
+        label: config?.label || catKey,
+        description: config?.description || '',
+        amount,
+        percentage,
+        count: data.count,
+      };
+    });
+
+    const ftlTotalExpensesUsd = ftlOpExpensesUsd + totalFtlKpiUsd;
+    const ftlNetProfitUsd = grossProfitFtlUsd - ftlTotalExpensesUsd;
+
+    const ltlTotalExpensesUsd = ltlOpExpensesUsd + totalLtlKpiUsd;
+    const ltlNetProfitUsd = grossProfitLtlUsd - ltlTotalExpensesUsd;
+
+    const sectionsBreakdown = {
+      [ExpenseSection.FTL]: {
+        section: ExpenseSection.FTL,
+        label: 'FTL (Full Truck Load)',
+        gross_revenue: grossRevenueFtlUsd,
+        cost_of_goods_sold: cogsFtlUsd,
+        gross_profit: grossProfitFtlUsd,
+        gross_margin: grossProfitFtlUsd,
+        operational_expenses: ftlOpExpensesUsd,
+        kpi_bonuses_expense: totalFtlKpiUsd,
+        total_expenses: ftlTotalExpensesUsd,
+        net_profit: ftlNetProfitUsd,
+        expense_breakdown: ftlExpenseBreakdown,
+        expense_distribution: ftlExpenseDistribution,
+      },
+      [ExpenseSection.LTL]: {
+        section: ExpenseSection.LTL,
+        label: 'LTL (Less Than Truckload / Groupage)',
+        gross_revenue: grossRevenueLtlUsd,
+        cost_of_goods_sold: cogsLtlUsd,
+        gross_profit: grossProfitLtlUsd,
+        gross_margin: grossProfitLtlUsd,
+        operational_expenses: ltlOpExpensesUsd,
+        kpi_bonuses_expense: totalLtlKpiUsd,
+        total_expenses: ltlTotalExpensesUsd,
+        net_profit: ltlNetProfitUsd,
+        expense_breakdown: ltlExpenseBreakdown,
+        expense_distribution: ltlExpenseDistribution,
+      },
+    };
+
+    // If targetSection is FTL:
+    if (targetSection === ExpenseSection.FTL) {
+      const ftlPayrollUsd = totalFixedSalariesUsd + totalFtlKpiUsd;
+      const ftlAllInExpensesUsd = ftlOpExpensesUsd + ftlPayrollUsd;
+      const ftlFinalNetProfitUsd = grossProfitFtlUsd - ftlAllInExpensesUsd;
+      const ftlSeoCutUsd =
+        ftlFinalNetProfitUsd > 0 ? ftlFinalNetProfitUsd * 0.1 : 0;
+
+      return {
+        gross_revenue: grossRevenueFtlUsd,
+        cost_of_goods_sold: cogsFtlUsd,
+        gross_profit: grossProfitFtlUsd,
+        operational_expenses: ftlOpExpensesUsd,
+        ftl_operational_expenses: ftlOpExpensesUsd,
+        ltl_operational_expenses: 0,
+        fixed_salaries_expense: totalFixedSalariesUsd,
+        kpi_bonuses_expense: totalFtlKpiUsd,
+        total_payroll_expense: ftlPayrollUsd,
+        total_expenses: ftlAllInExpensesUsd,
+        net_profit: ftlFinalNetProfitUsd,
+        seo_cut_10pc: ftlSeoCutUsd,
+        expense_breakdown: ftlExpenseBreakdown,
+        expense_distribution: ftlExpenseDistribution,
+        sections_breakdown: sectionsBreakdown,
+      };
     }
 
+    // If targetSection is LTL:
+    if (targetSection === ExpenseSection.LTL) {
+      const ltlPayrollUsd = totalFixedSalariesUsd + totalLtlKpiUsd;
+      const ltlAllInExpensesUsd = ltlOpExpensesUsd + ltlPayrollUsd;
+      const ltlFinalNetProfitUsd = grossProfitLtlUsd - ltlAllInExpensesUsd;
+      const ltlSeoCutUsd =
+        ltlFinalNetProfitUsd > 0 ? ltlFinalNetProfitUsd * 0.1 : 0;
+
+      return {
+        gross_revenue: grossRevenueLtlUsd,
+        cost_of_goods_sold: cogsLtlUsd,
+        gross_profit: grossProfitLtlUsd,
+        operational_expenses: ltlOpExpensesUsd,
+        ftl_operational_expenses: 0,
+        ltl_operational_expenses: ltlOpExpensesUsd,
+        fixed_salaries_expense: totalFixedSalariesUsd,
+        kpi_bonuses_expense: totalLtlKpiUsd,
+        total_payroll_expense: ltlPayrollUsd,
+        total_expenses: ltlAllInExpensesUsd,
+        net_profit: ltlFinalNetProfitUsd,
+        seo_cut_10pc: ltlSeoCutUsd,
+        expense_breakdown: ltlExpenseBreakdown,
+        expense_distribution: ltlExpenseDistribution,
+        sections_breakdown: sectionsBreakdown,
+      };
+    }
+
+    // Default: All Sections Combined
+    const totalPayrollUsd = totalFixedSalariesUsd + grandTotalKpiUsd;
+    const totalExpensesUsd = totalOpExpensesUsd + totalPayrollUsd;
+    const netProfitUsd = grossProfitTotalUsd - totalExpensesUsd;
+    const seoCutUsd = netProfitUsd > 0 ? netProfitUsd * 0.1 : 0;
+
+    const combinedExpenseBreakdown: Record<string, number> = {};
+    for (const catKey of ALL_EXPENSE_CATEGORIES) {
+      combinedExpenseBreakdown[catKey] =
+        (ftlCategoryMap[catKey]?.total || 0) +
+        (ltlCategoryMap[catKey]?.total || 0);
+    }
+
+    const combinedExpenseDistribution = ALL_EXPENSE_CATEGORIES.map((catKey) => {
+      const ftlConfig = FTL_CATEGORIES_METADATA[catKey];
+      const ltlConfig = LTL_CATEGORIES_METADATA[catKey];
+      const label = ftlConfig?.label || ltlConfig?.label || catKey;
+      const description =
+        ftlConfig?.description || ltlConfig?.description || '';
+      const amount =
+        (ftlCategoryMap[catKey]?.total || 0) +
+        (ltlCategoryMap[catKey]?.total || 0);
+      const count =
+        (ftlCategoryMap[catKey]?.count || 0) +
+        (ltlCategoryMap[catKey]?.count || 0);
+      const percentage =
+        totalOpExpensesUsd > 0
+          ? Math.round((amount / totalOpExpensesUsd) * 10000) / 100
+          : 0;
+      return {
+        category: catKey,
+        label,
+        description,
+        amount,
+        percentage,
+        count,
+      };
+    });
+
     return {
-      gross_revenue: grossRevenueUsd,
-      cost_of_goods_sold: cogsUsd,
-      gross_profit: grossProfitUsd,
+      gross_revenue: grossRevenueTotalUsd,
+      cost_of_goods_sold: cogsTotalUsd,
+      gross_profit: grossProfitTotalUsd,
       operational_expenses: totalOpExpensesUsd,
+      ftl_operational_expenses: ftlOpExpensesUsd,
+      ltl_operational_expenses: ltlOpExpensesUsd,
       fixed_salaries_expense: totalFixedSalariesUsd,
-      kpi_bonuses_expense: totalKpiBonusesUsd,
+      kpi_bonuses_expense: grandTotalKpiUsd,
       total_payroll_expense: totalPayrollUsd,
       total_expenses: totalExpensesUsd,
       net_profit: netProfitUsd,
       seo_cut_10pc: seoCutUsd,
-      expense_breakdown: expenseBreakdown,
-      expense_distribution: expenseDistribution,
+      expense_breakdown: combinedExpenseBreakdown,
+      expense_distribution: combinedExpenseDistribution,
+      sections_breakdown: sectionsBreakdown,
     };
   }
 
   /**
-   * Calculates KPI bonuses dynamically from underlying KPI tables when service is not injected.
+   * Separately calculates FTL, LTL, and grand total KPI bonuses for a date period.
    */
-  private async calculateKpiBonusesForPeriod(
+  private async calculateKpiBonusesSeparated(
     startDate: string,
     endDate: string,
     rates: Record<string, any>,
-  ): Promise<number> {
+    legacyTxKpiUsd: number = 0,
+  ): Promise<{
+    totalFtlKpiUsd: number;
+    totalLtlKpiUsd: number;
+    grandTotalKpiUsd: number;
+  }> {
     try {
       const monthStr = startDate.slice(0, 7);
       const [yearStr, mStr] = monthStr.split('-');
@@ -1171,7 +1403,7 @@ export class FinanceService {
       const startMonthDate = new Date(Date.UTC(year, month - 1, 1));
       const endMonthDate = new Date(Date.UTC(year, month, 1));
 
-      // LTL items
+      // 1. LTL items KPI
       let totalLtlKpiUsd = 0;
       try {
         const ltlItems = await this.knex('ltl_cargo_items')
@@ -1230,7 +1462,7 @@ export class FinanceService {
         // Table not present
       }
 
-      // FTL items
+      // 2. FTL items KPI
       let totalFtlKpiUsd = 0;
       try {
         const ftlItems = await this.knex('ftl_fura_items').where(
@@ -1275,7 +1507,7 @@ export class FinanceService {
         // Table not present
       }
 
-      // ROP sales
+      // 3. ROP and Sales KPIs
       let totalRopKpiUsd = 0;
       try {
         const ropSales = await this.knex('rop_worker_sales').where(
@@ -1290,7 +1522,6 @@ export class FinanceService {
         // Table not present
       }
 
-      // Sales evaluations (Paid cargos KPI only = Real expense)
       let totalSalesKpiUsd = 0;
       try {
         const salesEvals = await this.knex('sales_manager_evaluations').where(
@@ -1309,7 +1540,6 @@ export class FinanceService {
         // Table not present
       }
 
-      // Cargo transactions KPI (only paid transactions count towards real expense)
       let totalTxKpiUsd = 0;
       try {
         const txRows = await this.knex('cargo_transactions')
@@ -1330,15 +1560,25 @@ export class FinanceService {
         // Table not present
       }
 
-      return (
+      const grandTotalKpiUsd =
         totalLtlKpiUsd +
         totalFtlKpiUsd +
         totalRopKpiUsd +
         totalSalesKpiUsd +
-        totalTxKpiUsd
-      );
+        totalTxKpiUsd +
+        legacyTxKpiUsd;
+
+      return {
+        totalFtlKpiUsd,
+        totalLtlKpiUsd,
+        grandTotalKpiUsd,
+      };
     } catch {
-      return 0;
+      return {
+        totalFtlKpiUsd: 0,
+        totalLtlKpiUsd: 0,
+        grandTotalKpiUsd: 0,
+      };
     }
   }
 
@@ -1358,11 +1598,68 @@ export class FinanceService {
       }),
     );
 
+    const roundSection = (
+      val: any,
+      defaultSection: ExpenseSection,
+      label: string,
+    ) => {
+      const target = val || {
+        gross_revenue: 0,
+        cost_of_goods_sold: 0,
+        gross_profit: 0,
+        gross_margin: 0,
+        operational_expenses: 0,
+        kpi_bonuses_expense: 0,
+        total_expenses: 0,
+        net_profit: 0,
+        expense_breakdown: {},
+        expense_distribution: [],
+      };
+      const bDown: Record<string, number> = {};
+      for (const [k, v] of Object.entries(target.expense_breakdown || {})) {
+        bDown[k] = round2(v as number);
+      }
+      const dist = (target.expense_distribution || []).map((item: any) => ({
+        ...item,
+        amount: round2(item.amount),
+        percentage: round2(item.percentage),
+      }));
+      return {
+        section: target.section || defaultSection,
+        label: target.label || label,
+        gross_revenue: round2(target.gross_revenue),
+        cost_of_goods_sold: round2(target.cost_of_goods_sold),
+        gross_profit: round2(target.gross_profit),
+        gross_margin: round2(target.gross_margin || target.gross_profit),
+        operational_expenses: round2(target.operational_expenses),
+        kpi_bonuses_expense: round2(target.kpi_bonuses_expense),
+        total_expenses: round2(target.total_expenses),
+        net_profit: round2(target.net_profit),
+        expense_breakdown: bDown,
+        expense_distribution: dist,
+      };
+    };
+
+    const convertedSectionsBreakdown = {
+      [ExpenseSection.FTL]: roundSection(
+        metrics.sections_breakdown?.[ExpenseSection.FTL],
+        ExpenseSection.FTL,
+        'FTL (Full Truck Load)',
+      ),
+      [ExpenseSection.LTL]: roundSection(
+        metrics.sections_breakdown?.[ExpenseSection.LTL],
+        ExpenseSection.LTL,
+        'LTL (Less Than Truckload / Groupage)',
+      ),
+    };
+
     return {
       gross_revenue: round2(metrics.gross_revenue),
       cost_of_goods_sold: round2(metrics.cost_of_goods_sold),
       gross_profit: round2(metrics.gross_profit),
       operational_expenses: round2(metrics.operational_expenses),
+      ftl_operational_expenses: round2(metrics.ftl_operational_expenses),
+      ltl_operational_expenses: round2(metrics.ltl_operational_expenses),
       fixed_salaries_expense: round2(metrics.fixed_salaries_expense),
       kpi_bonuses_expense: round2(metrics.kpi_bonuses_expense),
       total_payroll_expense: round2(metrics.total_payroll_expense),
@@ -1371,6 +1668,7 @@ export class FinanceService {
       seo_cut_10pc: round2(metrics.seo_cut_10pc),
       expense_breakdown: convertedBreakdown,
       expense_distribution: convertedDistribution,
+      sections_breakdown: convertedSectionsBreakdown,
     };
   }
 
@@ -1401,11 +1699,76 @@ export class FinanceService {
       })),
     );
 
+    const convertSection = async (
+      val: any,
+      defaultSection: ExpenseSection,
+      label: string,
+    ) => {
+      const target = val || {
+        gross_revenue: 0,
+        cost_of_goods_sold: 0,
+        gross_profit: 0,
+        gross_margin: 0,
+        operational_expenses: 0,
+        kpi_bonuses_expense: 0,
+        total_expenses: 0,
+        net_profit: 0,
+        expense_breakdown: {},
+        expense_distribution: [],
+      };
+      const bDown: Record<string, number> = {};
+      for (const [k, v] of Object.entries(target.expense_breakdown || {})) {
+        bDown[k] = await convertValue(v as number);
+      }
+      const dist = await Promise.all(
+        (target.expense_distribution || []).map(async (item: any) => ({
+          ...item,
+          amount: await convertValue(item.amount),
+          percentage: item.percentage,
+        })),
+      );
+      return {
+        section: target.section || defaultSection,
+        label: target.label || label,
+        gross_revenue: await convertValue(target.gross_revenue),
+        cost_of_goods_sold: await convertValue(target.cost_of_goods_sold),
+        gross_profit: await convertValue(target.gross_profit),
+        gross_margin: await convertValue(
+          target.gross_margin || target.gross_profit,
+        ),
+        operational_expenses: await convertValue(target.operational_expenses),
+        kpi_bonuses_expense: await convertValue(target.kpi_bonuses_expense),
+        total_expenses: await convertValue(target.total_expenses),
+        net_profit: await convertValue(target.net_profit),
+        expense_breakdown: bDown,
+        expense_distribution: dist,
+      };
+    };
+
+    const convertedSectionsBreakdown = {
+      [ExpenseSection.FTL]: await convertSection(
+        metrics.sections_breakdown?.[ExpenseSection.FTL],
+        ExpenseSection.FTL,
+        'FTL (Full Truck Load)',
+      ),
+      [ExpenseSection.LTL]: await convertSection(
+        metrics.sections_breakdown?.[ExpenseSection.LTL],
+        ExpenseSection.LTL,
+        'LTL (Less Than Truckload / Groupage)',
+      ),
+    };
+
     return {
       gross_revenue: await convertValue(metrics.gross_revenue),
       cost_of_goods_sold: await convertValue(metrics.cost_of_goods_sold),
       gross_profit: await convertValue(metrics.gross_profit),
       operational_expenses: await convertValue(metrics.operational_expenses),
+      ftl_operational_expenses: await convertValue(
+        metrics.ftl_operational_expenses,
+      ),
+      ltl_operational_expenses: await convertValue(
+        metrics.ltl_operational_expenses,
+      ),
       fixed_salaries_expense: await convertValue(
         metrics.fixed_salaries_expense,
       ),
@@ -1416,6 +1779,7 @@ export class FinanceService {
       seo_cut_10pc: await convertValue(metrics.seo_cut_10pc),
       expense_breakdown: convertedBreakdown,
       expense_distribution: convertedDistribution,
+      sections_breakdown: convertedSectionsBreakdown,
     };
   }
 
@@ -1426,7 +1790,6 @@ export class FinanceService {
     const startObj = new Date(startDate);
     const endObj = new Date(endDate);
 
-    // If querying an exact full calendar month
     const startYear = startObj.getFullYear();
     const startMonth = startObj.getMonth() + 1;
     const isFirstDay = startObj.getDate() === 1;
@@ -1448,7 +1811,6 @@ export class FinanceService {
       return { prevStartDate, prevEndDate };
     }
 
-    // Otherwise, arbitrary span of N days
     const diffTime = Math.abs(endObj.getTime() - startObj.getTime());
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
 
@@ -1493,9 +1855,10 @@ export class FinanceService {
   private formatExpense(row: any) {
     return {
       id: row.id,
-      category: row.category,
+      section: (row.section as ExpenseSection) || ExpenseSection.FTL,
+      category: row.category as ExpenseCategory,
       amount: Number(row.amount),
-      currency: row.currency || Currency.UZS,
+      currency: (row.currency as Currency) || Currency.UZS,
       employee_id: row.employee_id || null,
       description: row.description,
       expense_date: this.formatExpenseDate(row.expense_date),

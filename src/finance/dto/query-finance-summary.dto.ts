@@ -6,8 +6,15 @@ import {
   IsEnum,
 } from 'class-validator';
 import { Currency } from '../../currency/currency.types';
+import { ExpenseSection } from './create-expense.dto';
 
 export class QueryFinanceSummaryDto {
+  @IsOptional()
+  @IsEnum(ExpenseSection, {
+    message: 'section must be one of: ftl, ltl',
+  })
+  section?: ExpenseSection;
+
   @IsOptional()
   @IsString()
   @Matches(/^\d{4}-\d{2}$/, {

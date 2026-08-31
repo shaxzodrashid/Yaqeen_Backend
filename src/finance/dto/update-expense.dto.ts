@@ -8,14 +8,20 @@ import {
   Min,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ExpenseCategory } from './create-expense.dto';
+import { ExpenseCategory, ExpenseSection } from './create-expense.dto';
 import { Currency } from '../../currency/currency.types';
 
 export class UpdateExpenseDto {
   @IsOptional()
+  @IsEnum(ExpenseSection, {
+    message: 'section must be one of: ftl, ltl',
+  })
+  section?: ExpenseSection;
+
+  @IsOptional()
   @IsEnum(ExpenseCategory, {
     message:
-      'category must be one of: tax, utility, rent, salary_payout, cleaner, kpi, food, other',
+      'category must be one of: tax, utility, rent, salary_payout, cleaner, kpi, food, other, china_warehouse, firm_service, declarant',
   })
   category?: ExpenseCategory;
 

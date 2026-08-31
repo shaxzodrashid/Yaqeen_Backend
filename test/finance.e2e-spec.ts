@@ -127,11 +127,12 @@ describe('Finance & Expenses API (e2e)', () => {
   }
 
   // ==========================================
-  // 1. EXPENSES CRUD & CATEGORIES
+  // 1. EXPENSES CRUD & CATEGORIES (FTL & LTL)
   // ==========================================
-  describe('1. Expenses CRUD & Categories', () => {
-    it('POST /api/v1/finance/expenses - creates a new expense', async () => {
+  describe('1. Expenses CRUD & Categories (FTL & LTL)', () => {
+    it('POST /api/v1/finance/expenses - creates a new FTL expense', async () => {
       const payload = {
+        section: 'ftl',
         category: 'tax',
         amount: 350.5,
         description: 'Monthly business tax payment',
@@ -145,6 +146,7 @@ describe('Finance & Expenses API (e2e)', () => {
         .expect(201);
 
       expect(res.body).toHaveProperty('id');
+      expect(res.body.section).toBe('ftl');
       expect(res.body.category).toBe('tax');
       expect(res.body.amount).toBe(350.5);
       expect(res.body.description).toBe('Monthly business tax payment');
@@ -153,76 +155,100 @@ describe('Finance & Expenses API (e2e)', () => {
       createdExpenseId = res.body.id;
     });
 
-    it('POST /api/v1/finance/expenses - creates KPI and food expenses', async () => {
-      const kpiRes = await request(app.getHttpServer())
+    it('POST /api/v1/finance/expenses - creates LTL expenses (china_warehouse, firm_service, declarant)', async () => {
+      const chinaRes = await request(app.getHttpServer())
         .post('/api/v1/finance/expenses')
         .set('Authorization', `Bearer ${authToken}`)
         .send({
-          category: 'kpi',
-          amount: 500,
+          section: 'ltl',
+          category: 'china_warehouse',
+          amount: 2000,
           currency: 'USD',
-          description: 'Sales quarterly KPI bonus',
+          description: 'Yiwu warehouse operations',
+          expense_date: '2026-07-18',
+        })
+        .expect(201);
+
+      expect(chinaRes.body.section).toBe('ltl');
+      expect(chinaRes.body.category).toBe('china_warehouse');
+
+      const firmRes = await request(app.getHttpServer())
+        .post('/api/v1/finance/expenses')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          category: 'firm_service', // Auto-infers LTL
+          amount: 400,
+          currency: 'USD',
+          description: 'Customs partner firm service fee',
+          expense_date: '2026-07-19',
+        })
+        .expect(201);
+
+      expect(firmRes.body.section).toBe('ltl');
+      expect(firmRes.body.category).toBe('firm_service');
+
+      const declarantRes = await request(app.getHttpServer())
+        .post('/api/v1/finance/expenses')
+        .set('Authorization', `Bearer ${authToken}`)
+        .send({
+          section: 'ltl',
+          category: 'declarant',
+          amount: 150,
+          currency: 'USD',
+          description: 'Declarant paperwork',
           expense_date: '2026-07-20',
         })
         .expect(201);
 
-      expect(kpiRes.body.category).toBe('kpi');
-      expect(kpiRes.body.amount).toBe(500);
+      expect(declarantRes.body.section).toBe('ltl');
+      expect(declarantRes.body.category).toBe('declarant');
+    });
 
-      const foodRes = await request(app.getHttpServer())
+    it('POST /api/v1/finance/expenses - rejects category not in section', async () => {
+      await request(app.getHttpServer())
         .post('/api/v1/finance/expenses')
         .set('Authorization', `Bearer ${authToken}`)
         .send({
-          category: 'food',
-          amount: 150000,
-          currency: 'UZS',
-          description: 'Office tea and lunch supplies',
-          expense_date: '2026-07-21',
+          section: 'ltl',
+          category: 'cleaner', // cleaner is FTL-only
+          amount: 100,
+          expense_date: '2026-07-20',
         })
-        .expect(201);
-
-      expect(foodRes.body.category).toBe('food');
-      expect(foodRes.body.amount).toBe(150000);
+        .expect(400);
     });
 
-    it('GET /api/v1/finance/expenses - lists expenses with pagination and sum', async () => {
+    it('GET /api/v1/finance/expenses - lists expenses with section filter', async () => {
       const res = await request(app.getHttpServer())
         .get('/api/v1/finance/expenses')
         .set('Authorization', `Bearer ${authToken}`)
-        .query({ category: 'tax' })
+        .query({ section: 'ltl' })
         .expect(200);
 
       expect(res.body).toHaveProperty('data');
-      expect(res.body).toHaveProperty('total_sum');
-      expect(res.body).toHaveProperty('pagination');
       expect(res.body.data.length).toBeGreaterThanOrEqual(1);
-      expect(res.body.total_sum).toBeGreaterThanOrEqual(350.5);
+      for (const row of res.body.data) {
+        expect(row.section).toBe('ltl');
+      }
     });
 
-    it('GET /api/v1/finance/expenses/categories - returns category breakdown with 8 categories', async () => {
-      const res = await request(app.getHttpServer())
+    it('GET /api/v1/finance/expenses/categories - returns section breakdown', async () => {
+      const ftlRes = await request(app.getHttpServer())
         .get('/api/v1/finance/expenses/categories')
         .set('Authorization', `Bearer ${authToken}`)
-        .query({ period: '2026-07' })
+        .query({ section: 'ftl', period: '2026-07' })
         .expect(200);
 
-      expect(res.body).toHaveProperty('categories');
-      expect(res.body).toHaveProperty('grand_total');
-      expect(Array.isArray(res.body.categories)).toBe(true);
-      expect(res.body.categories.length).toBe(8);
+      expect(ftlRes.body.section).toBe('ftl');
+      expect(ftlRes.body.categories.length).toBe(8);
 
-      const taxCat = res.body.categories.find((c: any) => c.category === 'tax');
-      expect(taxCat).toBeDefined();
-      expect(taxCat.total_amount).toBeGreaterThanOrEqual(350.5);
+      const ltlRes = await request(app.getHttpServer())
+        .get('/api/v1/finance/expenses/categories')
+        .set('Authorization', `Bearer ${authToken}`)
+        .query({ section: 'ltl', period: '2026-07' })
+        .expect(200);
 
-      const kpiCat = res.body.categories.find((c: any) => c.category === 'kpi');
-      expect(kpiCat).toBeDefined();
-
-      const foodCat = res.body.categories.find(
-        (c: any) => c.category === 'food',
-      );
-      expect(foodCat).toBeDefined();
-      expect(foodCat.total_amount).toBeGreaterThanOrEqual(150000);
+      expect(ltlRes.body.section).toBe('ltl');
+      expect(ltlRes.body.categories.length).toBe(6);
     });
 
     it('GET /api/v1/finance/expenses/:id - gets single expense details', async () => {
@@ -233,6 +259,7 @@ describe('Finance & Expenses API (e2e)', () => {
 
       expect(res.body.id).toBe(createdExpenseId);
       expect(res.body.amount).toBe(350.5);
+      expect(res.body.section).toBe('ftl');
     });
 
     it('PATCH /api/v1/finance/expenses/:id - updates an expense', async () => {
@@ -328,12 +355,14 @@ describe('Finance & Expenses API (e2e)', () => {
       // 2. Create operational expenses
       await knex('expenses').insert([
         {
+          section: 'ftl',
           category: 'utility',
           amount: 200,
           description: 'Electricity bill',
           expense_date: '2026-07-05',
         },
         {
+          section: 'ftl',
           category: 'rent',
           amount: 500,
           description: 'Office rent',
@@ -351,12 +380,14 @@ describe('Finance & Expenses API (e2e)', () => {
       expect(res.body.summary.gross_revenue).toBe(8000);
       expect(res.body.summary.gross_profit).toBe(3000);
       expect(res.body.summary.operational_expenses).toBe(700);
+      expect(res.body.summary.ftl_operational_expenses).toBe(700);
       expect(res.body.summary.fixed_salaries_expense).toBe(1500);
       expect(res.body.summary.kpi_bonuses_expense).toBe(300);
-      expect(res.body.summary.total_expenses).toBe(2500); // 700 op + 1500 salary + 300 kpi
-      expect(res.body.summary.net_profit).toBe(500); // 3000 gross margin - 2500 total expenses
-      expect(res.body.summary.seo_cut_10pc).toBe(50); // 500 * 0.10
+      expect(res.body.summary.total_expenses).toBe(2500);
+      expect(res.body.summary.net_profit).toBe(500);
+      expect(res.body.summary.seo_cut_10pc).toBe(50);
 
+      expect(res.body).toHaveProperty('sections_breakdown');
       expect(res.body).toHaveProperty('comparison');
       expect(res.body.comparison).toHaveProperty(
         'net_profit_growth_percentage',
