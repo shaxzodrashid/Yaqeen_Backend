@@ -244,6 +244,40 @@ export class CargoConsolidationsService {
       sellUsd = rate > 0 ? (sellUsd * 145.0) / rate : 0;
     }
 
+    let turnkeyUsd = r.is_turnkey ? Number(r.turnkey_price || 0) : 0;
+    const turnkeyCurrency = r.turnkey_currency || r.sell_currency || 'USD';
+    if (turnkeyUsd > 0) {
+      if (turnkeyCurrency === 'UZS') {
+        const rate = r.sell_custom_rate || r.sell_usd_rate || 12850;
+        turnkeyUsd = rate > 0 ? turnkeyUsd / rate : 0;
+      } else if (
+        (turnkeyCurrency === 'RMB' || turnkeyCurrency === 'CNY') &&
+        r.usd_rmb_rate > 0
+      ) {
+        turnkeyUsd = turnkeyUsd / r.usd_rmb_rate;
+      } else if (turnkeyCurrency === 'RUB') {
+        const rate = r.sell_custom_rate || r.sell_usd_rate || 12850;
+        turnkeyUsd = rate > 0 ? (turnkeyUsd * 145.0) / rate : 0;
+      }
+    }
+
+    let speedUpUsd = Number(r.speed_up || 0);
+    const speedUpCurrency = r.speed_up_currency || r.sell_currency || 'USD';
+    if (speedUpUsd > 0) {
+      if (speedUpCurrency === 'UZS') {
+        const rate = r.sell_custom_rate || r.sell_usd_rate || 12850;
+        speedUpUsd = rate > 0 ? speedUpUsd / rate : 0;
+      } else if (
+        (speedUpCurrency === 'RMB' || speedUpCurrency === 'CNY') &&
+        r.usd_rmb_rate > 0
+      ) {
+        speedUpUsd = speedUpUsd / r.usd_rmb_rate;
+      } else if (speedUpCurrency === 'RUB') {
+        const rate = r.sell_custom_rate || r.sell_usd_rate || 12850;
+        speedUpUsd = rate > 0 ? (speedUpUsd * 145.0) / rate : 0;
+      }
+    }
+
     // Purchase USD calculation
     let purchaseUsd = Number(r.purchase_price || 0);
     if (r.purchase_currency === 'UZS') {
@@ -259,6 +293,28 @@ export class CargoConsolidationsService {
       purchaseUsd = rate > 0 ? (purchaseUsd * 145.0) / rate : 0;
     }
 
+    let additionalExpenseUsd = Number(r.additional_expense || 0);
+    const additionalExpenseCurrency = r.additional_expense_currency || 'USD';
+    if (additionalExpenseUsd > 0) {
+      if (additionalExpenseCurrency === 'UZS') {
+        const rate = r.purchase_custom_rate || r.purchase_usd_rate || 12850;
+        additionalExpenseUsd = rate > 0 ? additionalExpenseUsd / rate : 0;
+      } else if (
+        (additionalExpenseCurrency === 'RMB' ||
+          additionalExpenseCurrency === 'CNY') &&
+        r.usd_rmb_rate > 0
+      ) {
+        additionalExpenseUsd = additionalExpenseUsd / r.usd_rmb_rate;
+      } else if (additionalExpenseCurrency === 'RUB') {
+        const rate = r.purchase_custom_rate || r.purchase_usd_rate || 12850;
+        additionalExpenseUsd =
+          rate > 0 ? (additionalExpenseUsd * 145.0) / rate : 0;
+      }
+    }
+
+    const totalIncomeUsd = sellUsd + turnkeyUsd + speedUpUsd;
+    const totalOutcomeUsd = purchaseUsd + additionalExpenseUsd;
+
     const clientName = r.client_first_name
       ? `${r.client_first_name} ${r.client_last_name || ''}`.trim()
       : r.client_company || 'N/A';
@@ -272,10 +328,20 @@ export class CargoConsolidationsService {
       cargo: r.cargo,
       volume: vol,
       weight: wt,
+      is_turnkey: Boolean(r.is_turnkey),
+      turnkey_price: Number(r.turnkey_price || 0),
+      turnkey_currency: turnkeyCurrency,
+      is_speed_up: Boolean(r.is_speed_up || Number(r.speed_up || 0) > 0),
+      speed_up: Number(r.speed_up || 0),
+      speed_up_price: Number(r.speed_up || 0),
+      speed_up_currency: speedUpCurrency,
+      additional_expense: Number(r.additional_expense || 0),
+      additional_expense_currency: additionalExpenseCurrency,
+      total_income_usd: Math.round(totalIncomeUsd * 100) / 100,
+      total_outcome_usd: Math.round(totalOutcomeUsd * 100) / 100,
       ...(isDetail
         ? {
             load_code: r.cargo_type === 'LTL' ? r.load_code || null : null,
-            is_turnkey: Boolean(r.is_turnkey),
           }
         : {}),
       container_type: r.container_type || null,
@@ -310,7 +376,7 @@ export class CargoConsolidationsService {
         currency: r.sell_currency,
         amount_usd: Math.round(sellUsd * 100) / 100,
       },
-      net_yield_usd: Math.round((sellUsd - purchaseUsd) * 100) / 100,
+      net_yield_usd: Math.round((totalIncomeUsd - totalOutcomeUsd) * 100) / 100,
       status: r.status,
       loaded_date: this.formatDateStr(r.loaded_date),
       arrived_date: this.formatDateStr(r.arrived_date),
@@ -631,6 +697,30 @@ export class CargoConsolidationsService {
               WHEN cr.sell_currency = 'RUB' THEN (cr.sell_price * 145.0) / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
               ELSE 0
             END
+            +
+            CASE
+              WHEN cr.is_turnkey AND cr.turnkey_price > 0 THEN
+                CASE
+                  WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'USD' THEN cr.turnkey_price
+                  WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'UZS' THEN cr.turnkey_price / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+                  WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.turnkey_price / cr.usd_rmb_rate
+                  WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'RUB' THEN (cr.turnkey_price * 145.0) / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+                  ELSE cr.turnkey_price
+                END
+              ELSE 0
+            END
+            +
+            CASE
+              WHEN cr.speed_up > 0 THEN
+                CASE
+                  WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'USD' THEN cr.speed_up
+                  WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'UZS' THEN cr.speed_up / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+                  WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.speed_up / cr.usd_rmb_rate
+                  WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'RUB' THEN (cr.speed_up * 145.0) / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+                  ELSE cr.speed_up
+                END
+              ELSE 0
+            END
           ), 0) as total_cargos_sell_usd
         `),
         this.knex.raw(`
@@ -640,6 +730,18 @@ export class CargoConsolidationsService {
               WHEN cr.purchase_currency = 'UZS' THEN cr.purchase_price / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
               WHEN cr.purchase_currency IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.purchase_price / cr.usd_rmb_rate
               WHEN cr.purchase_currency = 'RUB' THEN (cr.purchase_price * 145.0) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
+              ELSE 0
+            END
+            +
+            CASE
+              WHEN cr.additional_expense > 0 THEN
+                CASE
+                  WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'USD' THEN cr.additional_expense
+                  WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'UZS' THEN cr.additional_expense / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
+                  WHEN COALESCE(cr.additional_expense_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.additional_expense / cr.usd_rmb_rate
+                  WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'RUB' THEN (cr.additional_expense * 145.0) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
+                  ELSE cr.additional_expense
+                END
               ELSE 0
             END
           ), 0) as total_cargos_purchase_usd
@@ -759,6 +861,30 @@ export class CargoConsolidationsService {
                 WHEN cr.sell_currency = 'RUB' THEN (cr.sell_price * 145.0) / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
                 ELSE 0
               END
+              +
+              CASE
+                WHEN cr.is_turnkey AND cr.turnkey_price > 0 THEN
+                  CASE
+                    WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'USD' THEN cr.turnkey_price
+                    WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'UZS' THEN cr.turnkey_price / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+                    WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.turnkey_price / cr.usd_rmb_rate
+                    WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'RUB' THEN (cr.turnkey_price * 145.0) / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+                    ELSE cr.turnkey_price
+                  END
+                ELSE 0
+              END
+              +
+              CASE
+                WHEN cr.speed_up > 0 THEN
+                  CASE
+                    WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'USD' THEN cr.speed_up
+                    WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'UZS' THEN cr.speed_up / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+                    WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.speed_up / cr.usd_rmb_rate
+                    WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'RUB' THEN (cr.speed_up * 145.0) / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+                    ELSE cr.speed_up
+                  END
+                ELSE 0
+              END
             ), 0) as total_cargos_sell_usd
           `),
           this.knex.raw(`
@@ -768,6 +894,18 @@ export class CargoConsolidationsService {
                 WHEN cr.purchase_currency = 'UZS' THEN cr.purchase_price / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
                 WHEN cr.purchase_currency IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.purchase_price / cr.usd_rmb_rate
                 WHEN cr.purchase_currency = 'RUB' THEN (cr.purchase_price * 145.0) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
+                ELSE 0
+              END
+              +
+              CASE
+                WHEN cr.additional_expense > 0 THEN
+                  CASE
+                    WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'USD' THEN cr.additional_expense
+                    WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'UZS' THEN cr.additional_expense / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
+                    WHEN COALESCE(cr.additional_expense_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.additional_expense / cr.usd_rmb_rate
+                    WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'RUB' THEN (cr.additional_expense * 145.0) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
+                    ELSE cr.additional_expense
+                  END
                 ELSE 0
               END
             ), 0) as total_cargos_purchase_usd

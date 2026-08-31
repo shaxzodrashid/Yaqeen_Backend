@@ -840,6 +840,12 @@ export class FinanceService {
           'usd_rmb_rate',
           'confirmed_date',
           'created_at',
+          'is_turnkey',
+          'turnkey_price',
+          'turnkey_currency',
+          'is_speed_up',
+          'speed_up',
+          'speed_up_currency',
         )
         .whereRaw(
           'COALESCE(sell_date, confirmed_date, created_at::date) >= ?',
@@ -865,6 +871,34 @@ export class FinanceService {
           customRate,
         );
         grossRevenueUsd += amtUsd;
+
+        if (row.is_turnkey) {
+          const turnkeyAmt = parseFloat(row.turnkey_price as string) || 0;
+          const turnkeyCurr =
+            (row.turnkey_currency as Currency) || curr || Currency.USD;
+          if (turnkeyAmt > 0) {
+            grossRevenueUsd += this.convertCargoPriceToUsd(
+              turnkeyAmt,
+              turnkeyCurr,
+              rates,
+              usdRmb,
+              customRate,
+            );
+          }
+        }
+
+        const speedUpAmt = parseFloat(row.speed_up as string) || 0;
+        if (speedUpAmt > 0) {
+          const speedUpCurr =
+            (row.speed_up_currency as Currency) || curr || Currency.USD;
+          grossRevenueUsd += this.convertCargoPriceToUsd(
+            speedUpAmt,
+            speedUpCurr,
+            rates,
+            usdRmb,
+            customRate,
+          );
+        }
       }
     } catch {
       // If table is not present in some mocked tests, proceed gracefully
@@ -882,6 +916,8 @@ export class FinanceService {
           'usd_rmb_rate',
           'confirmed_date',
           'created_at',
+          'additional_expense',
+          'additional_expense_currency',
         )
         .whereRaw(
           'COALESCE(purchase_date, confirmed_date, created_at::date) >= ?',
@@ -907,6 +943,19 @@ export class FinanceService {
           customRate,
         );
         cogsUsd += amtUsd;
+
+        const addExpAmt = parseFloat(row.additional_expense as string) || 0;
+        if (addExpAmt > 0) {
+          const addExpCurr =
+            (row.additional_expense_currency as Currency) || Currency.USD;
+          cogsUsd += this.convertCargoPriceToUsd(
+            addExpAmt,
+            addExpCurr,
+            rates,
+            usdRmb,
+            customRate,
+          );
+        }
       }
     } catch {
       // If table is not present in some mocked tests, proceed gracefully

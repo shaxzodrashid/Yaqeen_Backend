@@ -280,6 +280,14 @@ export class SalesManagerKpiService {
           'usd_rmb_rate',
           'payment_status',
           'is_kpi_received',
+          'is_turnkey',
+          'turnkey_price',
+          'turnkey_currency',
+          'is_speed_up',
+          'speed_up',
+          'speed_up_currency',
+          'additional_expense',
+          'additional_expense_currency',
         );
 
       for (const reg of regRows) {
@@ -287,18 +295,56 @@ export class SalesManagerKpiService {
         const rawSell = Number(reg.sell_price || 0);
         const usdRmb = reg.usd_rmb_rate ? Number(reg.usd_rmb_rate) : null;
 
-        const buyUsd = await this.convertToUsd(
+        let buyUsd = await this.convertToUsd(
           rawBuy,
           reg.purchase_currency,
           rates,
           usdRmb,
         );
-        const sellUsd = await this.convertToUsd(
+        let sellUsd = await this.convertToUsd(
           rawSell,
           reg.sell_currency,
           rates,
           usdRmb,
         );
+
+        if (reg.is_turnkey) {
+          const turnkeyAmt = Number(reg.turnkey_price || 0);
+          const turnkeyCurr =
+            reg.turnkey_currency || reg.sell_currency || 'USD';
+          if (turnkeyAmt > 0) {
+            sellUsd += await this.convertToUsd(
+              turnkeyAmt,
+              turnkeyCurr,
+              rates,
+              usdRmb,
+            );
+          }
+        }
+
+        const speedUpAmt = Number(reg.speed_up || 0);
+        if (speedUpAmt > 0) {
+          const speedUpCurr =
+            reg.speed_up_currency || reg.sell_currency || 'USD';
+          sellUsd += await this.convertToUsd(
+            speedUpAmt,
+            speedUpCurr,
+            rates,
+            usdRmb,
+          );
+        }
+
+        const addExpAmt = Number(reg.additional_expense || 0);
+        if (addExpAmt > 0) {
+          const addExpCurr = reg.additional_expense_currency || 'USD';
+          buyUsd += await this.convertToUsd(
+            addExpAmt,
+            addExpCurr,
+            rates,
+            usdRmb,
+          );
+        }
+
         const profit = sellUsd - buyUsd;
 
         totalBuyUsd += buyUsd;
@@ -683,6 +729,14 @@ export class SalesManagerKpiService {
           'cr.payment_deadline_days',
           'cr.is_kpi_received',
           'cr.kpi_received_at',
+          'cr.is_turnkey',
+          'cr.turnkey_price',
+          'cr.turnkey_currency',
+          'cr.is_speed_up',
+          'cr.speed_up',
+          'cr.speed_up_currency',
+          'cr.additional_expense',
+          'cr.additional_expense_currency',
           'cr.client_id',
           'c.first_name as client_first_name',
           'c.last_name as client_last_name',
@@ -695,18 +749,54 @@ export class SalesManagerKpiService {
         const rawSell = Number(r.sell_price || 0);
         const usdRmb = r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null;
 
-        const buyUsd = await this.convertToUsd(
+        let buyUsd = await this.convertToUsd(
           rawBuy,
           r.purchase_currency,
           rates,
           usdRmb,
         );
-        const sellUsd = await this.convertToUsd(
+        let sellUsd = await this.convertToUsd(
           rawSell,
           r.sell_currency,
           rates,
           usdRmb,
         );
+
+        if (r.is_turnkey) {
+          const turnkeyAmt = Number(r.turnkey_price || 0);
+          const turnkeyCurr = r.turnkey_currency || r.sell_currency || 'USD';
+          if (turnkeyAmt > 0) {
+            sellUsd += await this.convertToUsd(
+              turnkeyAmt,
+              turnkeyCurr,
+              rates,
+              usdRmb,
+            );
+          }
+        }
+
+        const speedUpAmt = Number(r.speed_up || 0);
+        if (speedUpAmt > 0) {
+          const speedUpCurr = r.speed_up_currency || r.sell_currency || 'USD';
+          sellUsd += await this.convertToUsd(
+            speedUpAmt,
+            speedUpCurr,
+            rates,
+            usdRmb,
+          );
+        }
+
+        const addExpAmt = Number(r.additional_expense || 0);
+        if (addExpAmt > 0) {
+          const addExpCurr = r.additional_expense_currency || 'USD';
+          buyUsd += await this.convertToUsd(
+            addExpAmt,
+            addExpCurr,
+            rates,
+            usdRmb,
+          );
+        }
+
         const profit = sellUsd - buyUsd;
 
         const normStatus = this.normalizePaymentStatus(r.payment_status);
@@ -728,6 +818,14 @@ export class SalesManagerKpiService {
           buy_price: Math.round(buyUsd * 100) / 100,
           sell_price: Math.round(sellUsd * 100) / 100,
           profit: Math.round(profit * 100) / 100,
+          is_turnkey: Boolean(r.is_turnkey),
+          turnkey_price: Number(r.turnkey_price || 0),
+          turnkey_currency: r.turnkey_currency || r.sell_currency || 'USD',
+          is_speed_up: Boolean(r.is_speed_up || Number(r.speed_up || 0) > 0),
+          speed_up: Number(r.speed_up || 0),
+          speed_up_currency: r.speed_up_currency || r.sell_currency || 'USD',
+          additional_expense: Number(r.additional_expense || 0),
+          additional_expense_currency: r.additional_expense_currency || 'USD',
           payment_deadline_days:
             r.payment_deadline_days !== null &&
             r.payment_deadline_days !== undefined

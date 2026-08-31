@@ -93,6 +93,55 @@ export class CreateCargoRegistrationDto {
   is_turnkey?: boolean;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'turnkey_price must be a number' })
+  @Min(0, { message: 'turnkey_price cannot be negative' })
+  turnkey_price?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES, {
+    message: 'turnkey_currency must be UZS, RUB, USD, or RMB',
+  })
+  turnkey_currency?: CargoCurrency;
+
+  @IsOptional()
+  @IsBoolean()
+  is_speed_up?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'speed_up must be a number' })
+  @Min(0, { message: 'speed_up cannot be negative' })
+  speed_up?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'speed_up_price must be a number' })
+  @Min(0, { message: 'speed_up_price cannot be negative' })
+  speed_up_price?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES, {
+    message: 'speed_up_currency must be UZS, RUB, USD, or RMB',
+  })
+  speed_up_currency?: CargoCurrency;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'additional_expense must be a number' })
+  @Min(0, { message: 'additional_expense cannot be negative' })
+  additional_expense?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES, {
+    message: 'additional_expense_currency must be UZS, RUB, USD, or RMB',
+  })
+  additional_expense_currency?: CargoCurrency;
+
+  @IsOptional()
   @IsString()
   container_type?: string;
 
@@ -329,6 +378,49 @@ export class UpdateCargoRegistrationDto {
   @IsOptional()
   @IsBoolean()
   is_turnkey?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  turnkey_price?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  turnkey_currency?: CargoCurrency;
+
+  @IsOptional()
+  @IsBoolean()
+  is_speed_up?: boolean;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  speed_up?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  speed_up_price?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  speed_up_currency?: CargoCurrency;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  additional_expense?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  additional_expense_currency?: CargoCurrency;
 
   @IsOptional()
   @IsString()
@@ -710,6 +802,16 @@ export class QueryCargoRegistrationDto {
   @IsString()
   @IsIn(['true', 'false', '1', '0'])
   has_consolidation?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['true', 'false', '1', '0'])
+  is_turnkey?: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['true', 'false', '1', '0'])
+  is_speed_up?: string;
 }
 
 export class CheckDuplicateCargoDto {

@@ -2082,6 +2082,7 @@ describe('CargoRegistrationsService', () => {
             }),
           };
         }
+
         if (tableName === 'cargo_registrations as cr') {
           return {
             leftJoin: jest.fn().mockReturnThis(),
@@ -2094,6 +2095,7 @@ describe('CargoRegistrationsService', () => {
               weight: 500,
               load_code: 'LC-9988',
               is_turnkey: true,
+              turnkey_price: 300,
               consolidation_id: 'cons-uuid-1',
               purchase_price: 0,
               purchase_currency: 'USD',
@@ -2113,6 +2115,7 @@ describe('CargoRegistrationsService', () => {
         weight: 500,
         load_code: 'LC-9988',
         is_turnkey: true,
+        turnkey_price: 300,
         consolidation_id: 'cons-uuid-1',
         cargo: 'Textiles',
         sell_price: 1500,
@@ -2124,6 +2127,7 @@ describe('CargoRegistrationsService', () => {
       expect(insertedPayload).toBeDefined();
       expect(insertedPayload.load_code).toBe('LC-9988');
       expect(insertedPayload.is_turnkey).toBe(true);
+      expect(insertedPayload.turnkey_price).toBe(300);
       expect(res.load_code).toBe('LC-9988');
       expect(res.is_turnkey).toBe(true);
     });
@@ -2162,10 +2166,10 @@ describe('CargoRegistrationsService', () => {
         }
         if (tableName === 'cargo_registrations') {
           return {
-            insert: jest.fn((payload) => {
+            insert: jest.fn().mockImplementation((payload) => {
               insertedPayload = payload;
               return {
-                returning: jest.fn().mockResolvedValue(['reg-uuid-2']),
+                returning: jest.fn().mockResolvedValue([{ id: 'reg-uuid-2' }]),
               };
             }),
             where: jest.fn().mockReturnThis(),
@@ -2228,6 +2232,170 @@ describe('CargoRegistrationsService', () => {
       expect(insertedPayload.is_turnkey).toBe(false);
       expect(res.load_code).toBeNull();
       expect(res.is_turnkey).toBe(false);
+    });
+
+    it('should throw BadRequestException if is_turnkey is true but turnkey_price is missing or 0', async () => {
+      const user = { id: 'user-uuid-1', role: 'CEO' };
+
+      knexMock.mockImplementation((tableName: string) => {
+        if (tableName === 'users as u') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ role: 'CEO' }),
+          };
+        }
+        if (tableName === 'users') {
+          return {
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ employee_id: 'emp-uuid-1' }),
+          };
+        }
+        if (tableName === 'employees') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ id: 'emp-uuid-1' }),
+          };
+        }
+        if (tableName === 'clients') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ id: 'client-uuid-1' }),
+          };
+        }
+        return {};
+      });
+
+      await expect(
+        service.createCargoRegistration(user, {
+          cargo_type: 'FTL',
+          container_type: '40HQ',
+          is_turnkey: true,
+          // turnkey_price omitted
+          container_truck_id: 'TRK-001',
+          cargo: 'Textiles',
+          purchase_price: 1000,
+          purchase_currency: 'USD',
+          sell_price: 1500,
+          sell_currency: 'USD',
+          client_id: 'client-uuid-1',
+          employee_id: 'emp-uuid-1',
+        }),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('should store speed_up and additional_expense fields and calculate financials correctly', async () => {
+      const user = { id: 'user-uuid-1', role: 'CEO' };
+      let insertedPayload: any = null;
+
+      knexMock.mockImplementation((tableName: string) => {
+        if (tableName === 'users as u') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ role: 'CEO' }),
+          };
+        }
+        if (tableName === 'users') {
+          return {
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ employee_id: 'emp-uuid-1' }),
+          };
+        }
+        if (tableName === 'employees') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ id: 'emp-uuid-1' }),
+          };
+        }
+        if (tableName === 'clients') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ id: 'client-uuid-1' }),
+          };
+        }
+        if (tableName === 'cargo_registrations') {
+          return {
+            insert: jest.fn().mockImplementation((payload) => {
+              insertedPayload = payload;
+              return {
+                returning: jest
+                  .fn()
+                  .mockResolvedValue([{ id: 'reg-uuid-financial' }]),
+              };
+            }),
+          };
+        }
+        if (tableName === 'cargo_registrations as cr') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'reg-uuid-financial',
+              cargo_type: 'FTL',
+              container_type: '40HQ',
+              is_turnkey: true,
+              turnkey_price: 300,
+              turnkey_currency: 'USD',
+              is_speed_up: true,
+              speed_up: 200,
+              speed_up_currency: 'USD',
+              additional_expense: 150,
+              additional_expense_currency: 'USD',
+              purchase_price: 1000,
+              purchase_currency: 'USD',
+              sell_price: 2000,
+              sell_currency: 'USD',
+              client_id: 'client-uuid-1',
+              employee_id: 'emp-uuid-1',
+            }),
+          };
+        }
+        return {};
+      });
+
+      const res = await service.createCargoRegistration(user, {
+        cargo_type: 'FTL',
+        container_type: '40HQ',
+        container_truck_id: 'TRK-002',
+        agent_name: 'Agent Y',
+        cargo: 'Electronics',
+        is_turnkey: true,
+        turnkey_price: 300,
+        turnkey_currency: 'USD',
+        is_speed_up: true,
+        speed_up: 200,
+        speed_up_currency: 'USD',
+        additional_expense: 150,
+        additional_expense_currency: 'USD',
+        purchase_price: 1000,
+        purchase_currency: 'USD',
+        sell_price: 2000,
+        sell_currency: 'USD',
+        client_id: 'client-uuid-1',
+        employee_id: 'emp-uuid-1',
+      });
+
+      expect(insertedPayload).toBeDefined();
+      expect(insertedPayload.is_turnkey).toBe(true);
+      expect(insertedPayload.turnkey_price).toBe(300);
+      expect(insertedPayload.is_speed_up).toBe(true);
+      expect(insertedPayload.speed_up).toBe(200);
+      expect(insertedPayload.additional_expense).toBe(150);
+
+      // Verify financial aggregations:
+      // Total income = sell(2000) + turnkey(300) + speed_up(200) = 2500
+      // Total outcome = purchase(1000) + additional_expense(150) = 1150
+      // Net yield = 2500 - 1150 = 1350
+      expect(res.total_income_usd).toBe(2500);
+      expect(res.total_outcome_usd).toBe(1150);
+      expect(res.net_yield).toBe(1350);
+      expect(res.net_yield_details.amount_usd).toBe(1350);
     });
   });
 });

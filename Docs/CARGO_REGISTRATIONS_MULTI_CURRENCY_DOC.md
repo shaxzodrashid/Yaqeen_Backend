@@ -46,15 +46,26 @@ S_{sell} & \text{if currency is USD} \\
 #### Sell Price Conversion to UZS ($S_{UZS}$):
 $$S_{UZS} = S_{sell} \times R_{USD}(d_{sell})$$
 
-#### Net Yield Calculation ($Y_{net}$):
-$$Y_{net, \text{USD}} = S_{USD} - P_{USD}$$
-$$Y_{net, \text{UZS}} = S_{UZS} - P_{UZS}$$
+#### Additional Income (Sell Side):
+- **Turnkey Price ($T_{USD}$)**: If `is_turnkey` is true, requires `turnkey_price > 0`, converted using `turnkey_currency` (or `sell_currency`).
+- **Speed Up Fee ($U_{USD}$)**: Extra fee charged to the client to expedite delivery, converted using `speed_up_currency` (or `sell_currency`).
+
+#### Additional Expense (Purchase / Cost Side):
+- **Additional Expense ($E_{USD}$)**: Any unforeseen or supplementary transportation costs incurred, converted using `additional_expense_currency` (default: USD).
+
+#### Total Financials & Net Yield Calculation ($Y_{net}$):
+$$\text{Total Income}_{\text{USD}} = S_{USD} + T_{USD} + U_{USD}$$
+$$\text{Total Income}_{\text{UZS}} = S_{UZS} + T_{UZS} + U_{UZS}$$
+$$\text{Total Outcome}_{\text{USD}} = P_{USD} + E_{USD}$$
+$$\text{Total Outcome}_{\text{UZS}} = P_{UZS} + E_{UZS}$$
+$$Y_{net, \text{USD}} = \text{Total Income}_{\text{USD}} - \text{Total Outcome}_{\text{USD}}$$
+$$Y_{net, \text{UZS}} = \text{Total Income}_{\text{UZS}} - \text{Total Outcome}_{\text{UZS}}$$
 
 ---
 
 ## 3. Database Schema
 
-The `cargo_registrations` table includes the following columns for currency date and rate snapshotting:
+The `cargo_registrations` table includes the following columns for currency date, rate snapshotting, and auxiliary financial fields:
 
 | Column | Type | Nullable | Description |
 | :--- | :--- | :--- | :--- |
@@ -69,6 +80,14 @@ The `cargo_registrations` table includes the following columns for currency date
 | `sell_usd_rate` | `decimal(14,4)` | YES | Rate of 1 USD in UZS snapshot at `sell_date` |
 | `sell_custom_rate` | `decimal(14,4)` | YES | Optional custom rate override provided in payload |
 | `usd_rmb_rate` | `decimal(14,4)` | YES | Custom USD to RMB cross-rate (required if currency is RMB) |
+| `is_turnkey` | `boolean` | NO | Turnkey cargo delivery service flag (default: false) |
+| `turnkey_price` | `decimal(14,2)` | NO | Required additional income when `is_turnkey` is true (default: 0) |
+| `turnkey_currency` | `varchar(10)` | YES | Currency for turnkey price (`USD`, `UZS`, `RUB`, `RMB`, default: sell_currency) |
+| `is_speed_up` | `boolean` | NO | Expedited cargo delivery flag (default: false) |
+| `speed_up` | `decimal(14,2)` | NO | Additional expedited fee charged to client (income, default: 0) |
+| `speed_up_currency` | `varchar(10)` | YES | Currency for speed up fee (`USD`, `UZS`, `RUB`, `RMB`, default: sell_currency) |
+| `additional_expense` | `decimal(14,2)` | NO | Additional cost / expense incurred (outcome, default: 0) |
+| `additional_expense_currency` | `varchar(10)` | YES | Currency for additional expense (`USD`, `UZS`, `RUB`, `RMB`, default: USD) |
 | `transport_types` | `text[]` | NO | Array of transport modalities (`auto`, `railway`, `air`, `sea`, `other`). Default: `ARRAY['auto']::text[]` |
 | `origin_city` | `varchar(255)` | YES | Origin departure city (e.g. `Yiwu`, `Guangzhou`, `Istanbul`) |
 | `origin_country` | `varchar(100)` | YES | Origin country name (e.g. `China`, `Turkey`) |
@@ -80,8 +99,7 @@ The `cargo_registrations` table includes the following columns for currency date
 | `destination_country_code` | `varchar(10)` | YES | 2-letter ISO country code (`UZ`) |
 | `destination_geoname_id` | `integer` | YES | Global GeoNames ID for destination |
 | `destination_lat` / `destination_lng` | `decimal(10,7)` | YES | Destination geographic coordinates |
-| `load_code` | `varchar(100)` | YES | Custom string identifier for LTL cargo (detail view only) |
-| `is_turnkey` | `boolean` | NO | Turnkey cargo delivery service flag (default: false, detail view only) |
+| `load_code` | `varchar(100)` | YES | Custom string identifier for LTL cargo |
 
 ---
 

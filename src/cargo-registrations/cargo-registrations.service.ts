@@ -972,6 +972,40 @@ export class CargoRegistrationsService {
       }
     }
 
+    const isTurnkey =
+      dto.is_turnkey !== undefined ? Boolean(dto.is_turnkey) : false;
+    let turnkeyPrice = 0;
+    const turnkeyCurrency = dto.turnkey_currency || dto.sell_currency || 'USD';
+    if (isTurnkey) {
+      if (
+        dto.turnkey_price === undefined ||
+        dto.turnkey_price === null ||
+        Number(dto.turnkey_price) <= 0
+      ) {
+        throw new BadRequestException({
+          message:
+            'turnkey_price is required and must be greater than 0 when is_turnkey is true',
+          location: 'turnkey_price_required',
+        });
+      }
+      turnkeyPrice = Number(dto.turnkey_price);
+    }
+
+    const rawSpeedUp =
+      dto.speed_up !== undefined
+        ? Number(dto.speed_up)
+        : dto.speed_up_price !== undefined
+          ? Number(dto.speed_up_price)
+          : 0;
+    const isSpeedUp =
+      dto.is_speed_up !== undefined ? Boolean(dto.is_speed_up) : rawSpeedUp > 0;
+    const speedUp = isSpeedUp ? rawSpeedUp : 0;
+    const speedUpCurrency = dto.speed_up_currency || dto.sell_currency || 'USD';
+
+    const additionalExpense =
+      dto.additional_expense !== undefined ? Number(dto.additional_expense) : 0;
+    const additionalExpenseCurrency = dto.additional_expense_currency || 'USD';
+
     const [inserted] = await this.knex('cargo_registrations')
       .insert({
         cargo_type: dto.cargo_type,
@@ -981,8 +1015,14 @@ export class CargoRegistrationsService {
           dto.cargo_type === 'LTL' && dto.load_code
             ? dto.load_code.trim()
             : null,
-        is_turnkey:
-          dto.is_turnkey !== undefined ? Boolean(dto.is_turnkey) : false,
+        is_turnkey: isTurnkey,
+        turnkey_price: turnkeyPrice,
+        turnkey_currency: turnkeyCurrency,
+        is_speed_up: isSpeedUp,
+        speed_up: speedUp,
+        speed_up_currency: speedUpCurrency,
+        additional_expense: additionalExpense,
+        additional_expense_currency: additionalExpenseCurrency,
         container_type:
           dto.cargo_type === 'FTL' && finalContainerType
             ? finalContainerType
@@ -1192,8 +1232,67 @@ export class CargoRegistrationsService {
       updatePayload.load_code = null;
     }
 
-    if (dto.is_turnkey !== undefined)
-      updatePayload.is_turnkey = Boolean(dto.is_turnkey);
+    const effectiveIsTurnkey =
+      dto.is_turnkey !== undefined
+        ? Boolean(dto.is_turnkey)
+        : Boolean(existing.is_turnkey);
+    const effectiveTurnkeyPrice =
+      dto.turnkey_price !== undefined
+        ? Number(dto.turnkey_price)
+        : Number(existing.turnkey_price || 0);
+
+    if (effectiveIsTurnkey) {
+      if (effectiveTurnkeyPrice <= 0) {
+        throw new BadRequestException({
+          message:
+            'turnkey_price is required and must be greater than 0 when is_turnkey is true',
+          location: 'turnkey_price_required',
+        });
+      }
+      updatePayload.is_turnkey = true;
+      updatePayload.turnkey_price = effectiveTurnkeyPrice;
+      updatePayload.turnkey_currency =
+        dto.turnkey_currency ||
+        existing.turnkey_currency ||
+        effectiveSellCurrency;
+    } else {
+      if (dto.is_turnkey !== undefined) {
+        updatePayload.is_turnkey = false;
+        updatePayload.turnkey_price = 0;
+      }
+      if (dto.turnkey_currency !== undefined) {
+        updatePayload.turnkey_currency = dto.turnkey_currency;
+      }
+    }
+
+    if (dto.speed_up !== undefined || dto.speed_up_price !== undefined) {
+      const val =
+        dto.speed_up !== undefined
+          ? Number(dto.speed_up)
+          : Number(dto.speed_up_price);
+      updatePayload.speed_up = val;
+      if (dto.is_speed_up !== undefined) {
+        updatePayload.is_speed_up = Boolean(dto.is_speed_up);
+      } else {
+        updatePayload.is_speed_up = val > 0;
+      }
+    } else if (dto.is_speed_up !== undefined) {
+      updatePayload.is_speed_up = Boolean(dto.is_speed_up);
+      if (!dto.is_speed_up) {
+        updatePayload.speed_up = 0;
+      }
+    }
+    if (dto.speed_up_currency !== undefined) {
+      updatePayload.speed_up_currency = dto.speed_up_currency;
+    }
+
+    if (dto.additional_expense !== undefined) {
+      updatePayload.additional_expense = Number(dto.additional_expense);
+    }
+    if (dto.additional_expense_currency !== undefined) {
+      updatePayload.additional_expense_currency =
+        dto.additional_expense_currency;
+    }
 
     if (dto.transport_types !== undefined)
       updatePayload.transport_types = dto.transport_types;
@@ -1609,6 +1708,15 @@ export class CargoRegistrationsService {
         query.is_kpi_received === 'true' || query.is_kpi_received === '1';
       baseQuery.where('cr.is_kpi_received', isReceived);
     }
+    if (query.is_turnkey !== undefined) {
+      const isTurnkey = query.is_turnkey === 'true' || query.is_turnkey === '1';
+      baseQuery.where('cr.is_turnkey', isTurnkey);
+    }
+    if (query.is_speed_up !== undefined) {
+      const isSpeedUp =
+        query.is_speed_up === 'true' || query.is_speed_up === '1';
+      baseQuery.where('cr.is_speed_up', isSpeedUp);
+    }
 
     // Date filters
     if (query.confirmed_start_date) {
@@ -1757,16 +1865,40 @@ export class CargoRegistrationsService {
       this.knex.raw(`
         COALESCE(SUM(CASE WHEN COALESCE(cr.status, 'Waiting') NOT IN ('Arrived', 'Delivered') THEN 1 ELSE 0 END), 0) as active_containers,
         COALESCE(SUM(CASE WHEN COALESCE(cr.status, 'Waiting') IN ('On the border', 'Border', 'On the way', 'In Transit', 'Station', 'At Station', 'Reload') AND (cr.arrived_date IS NULL OR CAST(cr.arrived_date AS TEXT) = '') THEN 1 ELSE 0 END), 0) as action_required,
-        COALESCE(SUM(CASE WHEN cr.sell_currency = 'UZS' THEN cr.sell_price ELSE 0 END), 0) as gross_uzs,
-        COALESCE(SUM(CASE WHEN cr.sell_currency = 'USD' THEN cr.sell_price ELSE 0 END), 0) as gross_usd,
-        COALESCE(SUM(CASE WHEN cr.sell_currency = 'RUB' THEN cr.sell_price ELSE 0 END), 0) as gross_rub,
-        COALESCE(SUM(CASE WHEN cr.sell_currency IN ('RMB', 'CNY') THEN cr.sell_price ELSE 0 END), 0) as gross_rmb,
+        COALESCE(SUM(CASE WHEN cr.sell_currency = 'UZS' THEN cr.sell_price ELSE 0 END + CASE WHEN cr.is_turnkey AND COALESCE(cr.turnkey_currency, cr.sell_currency) = 'UZS' THEN cr.turnkey_price ELSE 0 END + CASE WHEN cr.speed_up > 0 AND COALESCE(cr.speed_up_currency, cr.sell_currency) = 'UZS' THEN cr.speed_up ELSE 0 END), 0) as gross_uzs,
+        COALESCE(SUM(CASE WHEN cr.sell_currency = 'USD' THEN cr.sell_price ELSE 0 END + CASE WHEN cr.is_turnkey AND COALESCE(cr.turnkey_currency, cr.sell_currency) = 'USD' THEN cr.turnkey_price ELSE 0 END + CASE WHEN cr.speed_up > 0 AND COALESCE(cr.speed_up_currency, cr.sell_currency) = 'USD' THEN cr.speed_up ELSE 0 END), 0) as gross_usd,
+        COALESCE(SUM(CASE WHEN cr.sell_currency = 'RUB' THEN cr.sell_price ELSE 0 END + CASE WHEN cr.is_turnkey AND COALESCE(cr.turnkey_currency, cr.sell_currency) = 'RUB' THEN cr.turnkey_price ELSE 0 END + CASE WHEN cr.speed_up > 0 AND COALESCE(cr.speed_up_currency, cr.sell_currency) = 'RUB' THEN cr.speed_up ELSE 0 END), 0) as gross_rub,
+        COALESCE(SUM(CASE WHEN cr.sell_currency IN ('RMB', 'CNY') THEN cr.sell_price ELSE 0 END + CASE WHEN cr.is_turnkey AND COALESCE(cr.turnkey_currency, cr.sell_currency) IN ('RMB', 'CNY') THEN cr.turnkey_price ELSE 0 END + CASE WHEN cr.speed_up > 0 AND COALESCE(cr.speed_up_currency, cr.sell_currency) IN ('RMB', 'CNY') THEN cr.speed_up ELSE 0 END), 0) as gross_rmb,
         COALESCE(SUM(
           CASE
             WHEN cr.sell_currency = 'USD' THEN cr.sell_price
             WHEN cr.sell_currency = 'UZS' THEN cr.sell_price / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
             WHEN cr.sell_currency IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.sell_price / cr.usd_rmb_rate
             WHEN cr.sell_currency = 'RUB' THEN (cr.sell_price * 145.0) / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+            ELSE 0
+          END
+          +
+          CASE
+            WHEN cr.is_turnkey AND cr.turnkey_price > 0 THEN
+              CASE
+                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'USD' THEN cr.turnkey_price
+                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'UZS' THEN cr.turnkey_price / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.turnkey_price / cr.usd_rmb_rate
+                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'RUB' THEN (cr.turnkey_price * 145.0) / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+                ELSE cr.turnkey_price
+              END
+            ELSE 0
+          END
+          +
+          CASE
+            WHEN cr.speed_up > 0 THEN
+              CASE
+                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'USD' THEN cr.speed_up
+                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'UZS' THEN cr.speed_up / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.speed_up / cr.usd_rmb_rate
+                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'RUB' THEN (cr.speed_up * 145.0) / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+                ELSE cr.speed_up
+              END
             ELSE 0
           END
         ), 0) as total_sell_usd,
@@ -1778,6 +1910,30 @@ export class CargoRegistrationsService {
             WHEN cr.sell_currency = 'RUB' THEN cr.sell_price * 145.0
             ELSE 0
           END
+          +
+          CASE
+            WHEN cr.is_turnkey AND cr.turnkey_price > 0 THEN
+              CASE
+                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'UZS' THEN cr.turnkey_price
+                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'USD' THEN cr.turnkey_price * COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850)
+                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.turnkey_price / cr.usd_rmb_rate) * COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850)
+                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'RUB' THEN cr.turnkey_price * 145.0
+                ELSE 0
+              END
+            ELSE 0
+          END
+          +
+          CASE
+            WHEN cr.speed_up > 0 THEN
+              CASE
+                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'UZS' THEN cr.speed_up
+                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'USD' THEN cr.speed_up * COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850)
+                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.speed_up / cr.usd_rmb_rate) * COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850)
+                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'RUB' THEN cr.speed_up * 145.0
+                ELSE 0
+              END
+            ELSE 0
+          END
         ), 0) as total_sell_uzs,
         COALESCE(SUM(
           CASE
@@ -1787,6 +1943,18 @@ export class CargoRegistrationsService {
             WHEN cr.purchase_currency = 'RUB' THEN (cr.purchase_price * 145.0) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
             ELSE 0
           END
+          +
+          CASE
+            WHEN cr.additional_expense > 0 THEN
+              CASE
+                WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'USD' THEN cr.additional_expense
+                WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'UZS' THEN cr.additional_expense / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
+                WHEN COALESCE(cr.additional_expense_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.additional_expense / cr.usd_rmb_rate
+                WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'RUB' THEN (cr.additional_expense * 145.0) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
+                ELSE cr.additional_expense
+              END
+            ELSE 0
+          END
         ), 0) as total_purchase_usd,
         COALESCE(SUM(
           CASE
@@ -1794,6 +1962,18 @@ export class CargoRegistrationsService {
             WHEN cr.purchase_currency = 'USD' THEN cr.purchase_price * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850)
             WHEN cr.purchase_currency IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.purchase_price / cr.usd_rmb_rate) * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850)
             WHEN cr.purchase_currency = 'RUB' THEN cr.purchase_price * 145.0
+            ELSE 0
+          END
+          +
+          CASE
+            WHEN cr.additional_expense > 0 THEN
+              CASE
+                WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'UZS' THEN cr.additional_expense
+                WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'USD' THEN cr.additional_expense * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850)
+                WHEN COALESCE(cr.additional_expense_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.additional_expense / cr.usd_rmb_rate) * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850)
+                WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'RUB' THEN cr.additional_expense * 145.0
+                ELSE 0
+              END
             ELSE 0
           END
         ), 0) as total_purchase_uzs
@@ -1844,7 +2024,17 @@ export class CargoRegistrationsService {
           'cr.cargo_type',
           'cr.volume',
           'cr.weight',
+          'cr.load_code',
+          'cr.is_turnkey',
+          'cr.turnkey_price',
+          'cr.turnkey_currency',
+          'cr.is_speed_up',
+          'cr.speed_up',
+          'cr.speed_up_currency',
+          'cr.additional_expense',
+          'cr.additional_expense_currency',
           'cr.container_type',
+          'cr.transport_types',
           'cr.container_truck_id',
           'cr.consolidation_id',
           'cr.agent_name',
@@ -1951,6 +2141,16 @@ export class CargoRegistrationsService {
 
           const purchaseAmount = Number(r.purchase_price);
           const sellAmount = Number(r.sell_price);
+          const turnkeyAmount = r.is_turnkey ? Number(r.turnkey_price || 0) : 0;
+          const turnkeyCurrency =
+            r.turnkey_currency || r.sell_currency || 'USD';
+          const speedUpAmount = Number(r.speed_up || 0);
+          const speedUpCurrency =
+            r.speed_up_currency || r.sell_currency || 'USD';
+          const isSpeedUp = Boolean(r.is_speed_up || speedUpAmount > 0);
+          const additionalExpenseAmount = Number(r.additional_expense || 0);
+          const additionalExpenseCurrency =
+            r.additional_expense_currency || 'USD';
 
           const purchaseDate = this.formatDateStr(
             r.purchase_date || r.confirmed_date || r.created_at,
@@ -1984,12 +2184,55 @@ export class CargoRegistrationsService {
                 : null,
           );
 
+          const turnkeyRes = this.convertPriceToUsdAndUzs(
+            turnkeyAmount,
+            turnkeyCurrency,
+            sellRates,
+            r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
+          );
+
+          const speedUpRes = this.convertPriceToUsdAndUzs(
+            speedUpAmount,
+            speedUpCurrency,
+            sellRates,
+            r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
+          );
+
+          const additionalExpenseRes = this.convertPriceToUsdAndUzs(
+            additionalExpenseAmount,
+            additionalExpenseCurrency,
+            purchaseRates,
+            r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
+          );
+
+          const totalIncomeUsd =
+            Math.round(
+              (sellRes.amount_usd +
+                turnkeyRes.amount_usd +
+                speedUpRes.amount_usd) *
+                100,
+            ) / 100;
+          const totalIncomeUzs =
+            Math.round(
+              (sellRes.amount_uzs +
+                turnkeyRes.amount_uzs +
+                speedUpRes.amount_uzs) *
+                100,
+            ) / 100;
+
+          const totalOutcomeUsd =
+            Math.round(
+              (purchaseRes.amount_usd + additionalExpenseRes.amount_usd) * 100,
+            ) / 100;
+          const totalOutcomeUzs =
+            Math.round(
+              (purchaseRes.amount_uzs + additionalExpenseRes.amount_uzs) * 100,
+            ) / 100;
+
           const netYieldUsd =
-            Math.round((sellRes.amount_usd - purchaseRes.amount_usd) * 100) /
-            100;
+            Math.round((totalIncomeUsd - totalOutcomeUsd) * 100) / 100;
           const netYieldUzs =
-            Math.round((sellRes.amount_uzs - purchaseRes.amount_uzs) * 100) /
-            100;
+            Math.round((totalIncomeUzs - totalOutcomeUzs) * 100) / 100;
 
           const originLat =
             r.origin_lat !== null && r.origin_lat !== undefined
@@ -2037,6 +2280,24 @@ export class CargoRegistrationsService {
             cargo_type: r.cargo_type,
             volume: r.volume ? Number(r.volume) : null,
             weight: r.weight ? Number(r.weight) : null,
+            load_code: r.cargo_type === 'LTL' ? r.load_code || null : null,
+            is_turnkey: Boolean(r.is_turnkey),
+            turnkey_price: Number(r.turnkey_price || 0),
+            turnkey_currency: turnkeyCurrency,
+            turnkey_amount_usd: turnkeyRes.amount_usd,
+            turnkey_amount_uzs: turnkeyRes.amount_uzs,
+            is_speed_up: isSpeedUp,
+            speed_up: speedUpAmount,
+            speed_up_price: speedUpAmount,
+            speed_up_currency: speedUpCurrency,
+            speed_up_amount_usd: speedUpRes.amount_usd,
+            speed_up_amount_uzs: speedUpRes.amount_uzs,
+            additional_expense: additionalExpenseAmount,
+            additional_expense_currency: additionalExpenseCurrency,
+            additional_expense_amount_usd: additionalExpenseRes.amount_usd,
+            additional_expense_amount_uzs: additionalExpenseRes.amount_uzs,
+            total_income_usd: totalIncomeUsd,
+            total_outcome_usd: totalOutcomeUsd,
             container_type: r.container_type,
             transport_types:
               r.transport_types ||
@@ -2152,6 +2413,13 @@ export class CargoRegistrationsService {
               sell_currency: r.sell_currency,
             },
             status: r.status,
+            payment_status: r.payment_status || 'waiting',
+            payment_deadline_days:
+              r.payment_deadline_days !== null &&
+              r.payment_deadline_days !== undefined
+                ? Number(r.payment_deadline_days)
+                : 15,
+            is_kpi_received: Boolean(r.is_kpi_received),
             created_at: r.created_at || null,
             updated_at: r.updated_at || null,
           };
@@ -2374,6 +2642,13 @@ export class CargoRegistrationsService {
 
     const purchaseAmount = Number(row.purchase_price);
     const sellAmount = Number(row.sell_price);
+    const turnkeyAmount = row.is_turnkey ? Number(row.turnkey_price || 0) : 0;
+    const turnkeyCurrency = row.turnkey_currency || row.sell_currency || 'USD';
+    const speedUpAmount = Number(row.speed_up || 0);
+    const speedUpCurrency = row.speed_up_currency || row.sell_currency || 'USD';
+    const isSpeedUp = Boolean(row.is_speed_up || speedUpAmount > 0);
+    const additionalExpenseAmount = Number(row.additional_expense || 0);
+    const additionalExpenseCurrency = row.additional_expense_currency || 'USD';
 
     const purchaseDate = this.formatDateStr(
       row.purchase_date || row.confirmed_date || row.created_at,
@@ -2422,10 +2697,51 @@ export class CargoRegistrationsService {
           : null,
     );
 
+    const turnkeyRes = this.convertPriceToUsdAndUzs(
+      turnkeyAmount,
+      turnkeyCurrency,
+      sellRates,
+      row.usd_rmb_rate ? Number(row.usd_rmb_rate) : null,
+    );
+
+    const speedUpRes = this.convertPriceToUsdAndUzs(
+      speedUpAmount,
+      speedUpCurrency,
+      sellRates,
+      row.usd_rmb_rate ? Number(row.usd_rmb_rate) : null,
+    );
+
+    const additionalExpenseRes = this.convertPriceToUsdAndUzs(
+      additionalExpenseAmount,
+      additionalExpenseCurrency,
+      purchaseRates,
+      row.usd_rmb_rate ? Number(row.usd_rmb_rate) : null,
+    );
+
+    const totalIncomeUsd =
+      Math.round(
+        (sellRes.amount_usd + turnkeyRes.amount_usd + speedUpRes.amount_usd) *
+          100,
+      ) / 100;
+    const totalIncomeUzs =
+      Math.round(
+        (sellRes.amount_uzs + turnkeyRes.amount_uzs + speedUpRes.amount_uzs) *
+          100,
+      ) / 100;
+
+    const totalOutcomeUsd =
+      Math.round(
+        (purchaseRes.amount_usd + additionalExpenseRes.amount_usd) * 100,
+      ) / 100;
+    const totalOutcomeUzs =
+      Math.round(
+        (purchaseRes.amount_uzs + additionalExpenseRes.amount_uzs) * 100,
+      ) / 100;
+
     const netYieldUsd =
-      Math.round((sellRes.amount_usd - purchaseRes.amount_usd) * 100) / 100;
+      Math.round((totalIncomeUsd - totalOutcomeUsd) * 100) / 100;
     const netYieldUzs =
-      Math.round((sellRes.amount_uzs - purchaseRes.amount_uzs) * 100) / 100;
+      Math.round((totalIncomeUzs - totalOutcomeUzs) * 100) / 100;
 
     const originLat =
       row.origin_lat !== null && row.origin_lat !== undefined
@@ -2475,6 +2791,22 @@ export class CargoRegistrationsService {
       weight: row.weight ? Number(row.weight) : null,
       load_code: row.cargo_type === 'LTL' ? row.load_code || null : null,
       is_turnkey: Boolean(row.is_turnkey),
+      turnkey_price: Number(row.turnkey_price || 0),
+      turnkey_currency: turnkeyCurrency,
+      turnkey_amount_usd: turnkeyRes.amount_usd,
+      turnkey_amount_uzs: turnkeyRes.amount_uzs,
+      is_speed_up: isSpeedUp,
+      speed_up: speedUpAmount,
+      speed_up_price: speedUpAmount,
+      speed_up_currency: speedUpCurrency,
+      speed_up_amount_usd: speedUpRes.amount_usd,
+      speed_up_amount_uzs: speedUpRes.amount_uzs,
+      additional_expense: additionalExpenseAmount,
+      additional_expense_currency: additionalExpenseCurrency,
+      additional_expense_amount_usd: additionalExpenseRes.amount_usd,
+      additional_expense_amount_uzs: additionalExpenseRes.amount_uzs,
+      total_income_usd: totalIncomeUsd,
+      total_outcome_usd: totalOutcomeUsd,
       container_type: row.container_type,
       transport_types:
         row.transport_types ||
@@ -2735,8 +3067,19 @@ export class CargoRegistrationsService {
         return queryBuilder.orderBy('cr.purchase_price', sortOrder);
       case 'sell_price':
         return queryBuilder.orderBy('cr.sell_price', sortOrder);
-      case 'usd_rmb_rate':
-        return queryBuilder.orderBy('cr.usd_rmb_rate', sortOrder);
+      case 'turnkey_price':
+      case 'turnkey':
+        return queryBuilder.orderBy('cr.turnkey_price', sortOrder);
+      case 'is_turnkey':
+        return queryBuilder.orderBy('cr.is_turnkey', sortOrder);
+      case 'speed_up':
+      case 'speed_up_price':
+        return queryBuilder.orderBy('cr.speed_up', sortOrder);
+      case 'is_speed_up':
+        return queryBuilder.orderBy('cr.is_speed_up', sortOrder);
+      case 'additional_expense':
+      case 'expense':
+        return queryBuilder.orderBy('cr.additional_expense', sortOrder);
       case 'id':
         return queryBuilder.orderBy('cr.id', sortOrder);
       case 'created_at':
