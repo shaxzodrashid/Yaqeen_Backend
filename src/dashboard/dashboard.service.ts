@@ -1733,7 +1733,35 @@ export class DashboardService {
   }
 
   /**
+   * Normalize payment status to canonical `waiting`/`unpaid`/`paid` for debt filtering.
+   * Mirrors SalesManagerKpiService.normalizePaymentStatus.
+   */
+  private normalizePaymentStatus(status?: string | null): string {
+    if (!status) return 'waiting';
+    const s = status.toLowerCase().trim();
+    if (
+      s === 'paid' ||
+      s === 'tolandi' ||
+      s === "to'landi" ||
+      s === 'klient berdi' ||
+      s === 'olindi'
+    ) {
+      return 'paid';
+    }
+    if (s === 'unpaid' || s === 'klient_bermadi' || s === 'klient bermadi') {
+      return 'unpaid';
+    }
+    return 'waiting';
+  }
+
+  private isPaidStatus(status?: string | null): boolean {
+    return this.normalizePaymentStatus(status) === 'paid';
+  }
+
+  /**
    * Debitor (Accounts Receivable) & Kreditor (Accounts Payable) calculator
+   * Only outstanding (unpaid / waiting) cargos count as receivable debt.
+   * Paid cargos (`paid` / `To'landi`) are excluded from finance overwatch.
    */
   private async computeDebtSummary(
     records: any[],
@@ -1746,6 +1774,15 @@ export class DashboardService {
     });
 
     const targetRecords = activeRecords.length > 0 ? activeRecords : records;
+
+    // Finance rule: only cargos whose payment_status is NOT 'paid' are considered debt.
+    // Null/undefined defaults to 'waiting' => counted as receivable.
+    const outstandingRecords = targetRecords.filter(
+      (r) => !this.isPaidStatus(r.payment_status),
+    );
+
+    // If every target record is already paid, debt is zero (not fallback to paid).
+    const effectiveRecords = outstandingRecords;
 
     let totalReceivableUzs = 0;
     let totalPayableUzs = 0;
@@ -1765,7 +1802,7 @@ export class DashboardService {
       { agentName: string; amountUzs: number; orderCount: number }
     >();
 
-    for (const r of targetRecords) {
+    for (const r of effectiveRecords) {
       const sellPrice = Number(r.sell_price) || 0;
       const purchasePrice = Number(r.purchase_price) || 0;
       const sellCurr = (r.sell_currency as Currency) || Currency.UZS;
