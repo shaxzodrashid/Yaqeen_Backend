@@ -121,22 +121,22 @@ export class CargoConsolidationsService {
 
     const usdObj = rates?.['USD'] || { rate: 11820.48, nominal: 1 };
     const defaultUsdRate = usdObj.rate / (usdObj.nominal || 1);
-    const usdRateUsed =
-      defaultRate && defaultRate > 1 ? defaultRate : defaultUsdRate;
 
     if (curr === 'UZS') {
+      const usdRateUsed =
+        defaultRate && defaultRate > 1 ? defaultRate : defaultUsdRate;
       return usdRateUsed > 0 ? amount / usdRateUsed : 0;
     }
     if (curr === 'RUB') {
       const rubObj = rates?.['RUB'] || { rate: 137.51, nominal: 1 };
       const rubRate = rubObj.rate / (rubObj.nominal || 1);
-      return usdRateUsed > 0 ? (amount * rubRate) / usdRateUsed : 0;
+      return defaultUsdRate > 0 ? (amount * rubRate) / defaultUsdRate : 0;
     }
     if (curr === 'RMB' || curr === 'CNY') {
       const rmbObj = rates?.['RMB'] ||
         rates?.['CNY'] || { rate: 1758.76, nominal: 1 };
       const rmbRate = rmbObj.rate / (rmbObj.nominal || 1);
-      return usdRateUsed > 0 ? (amount * rmbRate) / usdRateUsed : 0;
+      return defaultUsdRate > 0 ? (amount * rmbRate) / defaultUsdRate : 0;
     }
     return amount;
   }
@@ -477,19 +477,10 @@ export class CargoConsolidationsService {
 
     if (carrierCurrency !== 'USD') {
       const rates = await this.currencyService.getRatesForDate(costDate);
-      if (carrierCurrency === 'UZS') {
-        const usdRate = rates['USD']
-          ? rates['USD'].rate / (rates['USD'].nominal || 1)
-          : 11820.48;
-        carrierCostUsdRate = usdRate;
-      } else if (carrierCurrency === 'RUB') {
-        const rubObj = rates['RUB'] || { rate: 137.51, nominal: 1 };
-        carrierCostUsdRate = rubObj.rate / (rubObj.nominal || 1);
-      } else if (carrierCurrency === 'RMB' || carrierCurrency === 'CNY') {
-        const rmbObj = rates['RMB'] ||
-          rates['CNY'] || { rate: 1758.76, nominal: 1 };
-        carrierCostUsdRate = rmbObj.rate / (rmbObj.nominal || 1);
-      }
+      const usdRate = rates['USD']
+        ? rates['USD'].rate / (rates['USD'].nominal || 1)
+        : 11820.48;
+      carrierCostUsdRate = usdRate;
     }
 
     let consTransportTypes: string[] = ['auto'];

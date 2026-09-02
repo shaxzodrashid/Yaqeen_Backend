@@ -1259,25 +1259,46 @@ describe('CargoConsolidationsService', () => {
       expect(exp.total_usd).toBe(1000);
     });
 
-    it('should use custom carrier_cost_usd_rate when rate > 1 is specified for UZS', () => {
+    it('should correctly convert agent expense in RMB to USD using RMB and USD rates even if carrier_cost_usd_rate is set', () => {
       const row = {
-        agent: 12500000,
-        agent_currency: 'UZS',
-        carrier_cost_currency: 'UZS',
-        carrier_cost_usd_rate: 12500,
+        agent: 70000,
+        agent_currency: 'RMB',
+        carrier_cost_currency: 'RMB',
+        carrier_cost_usd_rate: 1758.76,
+      };
+
+      const rates = {
+        USD: { currency: 'USD', rate: 11820.48, nominal: 1 },
+        RMB: { currency: 'RMB', rate: 1758.76, nominal: 1 },
+      };
+
+      const exp = service.computeConsolidationExpenses(row, rates);
+      expect(exp.agent).toBe(70000);
+      expect(exp.agent_currency).toBe('RMB');
+      // (70,000 * 1758.76) / 11820.48 = 10415.25 USD
+      expect(exp.agent_usd).toBe(10415.25);
+      expect(exp.total_usd).toBe(10415.25);
+    });
+
+    it('should correctly convert agent expense in RUB to USD using RUB and USD rates', () => {
+      const row = {
+        agent: 100000,
+        agent_currency: 'RUB',
+        carrier_cost_currency: 'RUB',
+        carrier_cost_usd_rate: 137.51,
       };
 
       const rates = {
         USD: { currency: 'USD', rate: 12850, nominal: 1 },
-        UZS: { currency: 'UZS', rate: 1, nominal: 1 },
+        RUB: { currency: 'RUB', rate: 137.51, nominal: 1 },
       };
 
       const exp = service.computeConsolidationExpenses(row, rates);
-      expect(exp.agent).toBe(12500000);
-      expect(exp.agent_currency).toBe('UZS');
-      // 12,500,000 UZS / 12,500 = $1,000 USD
-      expect(exp.agent_usd).toBe(1000);
-      expect(exp.total_usd).toBe(1000);
+      expect(exp.agent).toBe(100000);
+      expect(exp.agent_currency).toBe('RUB');
+      // (100,000 * 137.51) / 12850 = 1070.12 USD
+      expect(exp.agent_usd).toBe(1070.12);
+      expect(exp.total_usd).toBe(1070.12);
     });
 
     it('should include turnkey and speed_up prices in findConsolidationDetails income and net margin', async () => {

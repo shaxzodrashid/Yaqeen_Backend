@@ -690,18 +690,10 @@ export class CargoRegistrationsService {
         if (costCurrency !== 'USD') {
           const rates =
             await this.currencyService.getRatesForDate(departureDate);
-          if (costCurrency === 'UZS') {
-            costUsdRate = rates['USD']
-              ? rates['USD'].rate / (rates['USD'].nominal || 1)
-              : 11820.48;
-          } else if (costCurrency === 'RUB') {
-            const rubObj = rates['RUB'] || { rate: 137.51, nominal: 1 };
-            costUsdRate = rubObj.rate / (rubObj.nominal || 1);
-          } else if (costCurrency === 'RMB' || costCurrency === 'CNY') {
-            const rmbObj = rates['RMB'] ||
-              rates['CNY'] || { rate: 1758.76, nominal: 1 };
-            costUsdRate = rmbObj.rate / (rmbObj.nominal || 1);
-          }
+          const usdRate = rates['USD']
+            ? rates['USD'].rate / (rates['USD'].nominal || 1)
+            : 11820.48;
+          costUsdRate = usdRate;
         }
 
         const loadDate = nc.load_date || nc.loaded_date || null;
