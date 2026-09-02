@@ -740,15 +740,19 @@ export class CargoRegistrationsService {
             agent:
               nc.agent !== undefined ? nc.agent : nc.total_carrier_cost || 0,
             agent_currency: nc.agent_currency || costCurrency,
-            china_warehouse: nc.china_warehouse || 0,
-            china_warehouse_currency: nc.china_warehouse_currency || 'USD',
-            company_service: nc.company_service || 0,
-            company_service_currency: nc.company_service_currency || 'USD',
-            customs_clearance_of_goods: nc.customs_clearance_of_goods || 0,
+            customs_clearance_of_goods:
+              nc.customs_clearance_of_goods !== undefined
+                ? nc.customs_clearance_of_goods
+                : nc.tomojnya !== undefined
+                  ? nc.tomojnya
+                  : nc.tamojnya || 0,
             customs_clearance_of_goods_currency:
-              nc.customs_clearance_of_goods_currency || 'USD',
-            cct: nc.cct || 0,
-            cct_currency: nc.cct_currency || 'USD',
+              nc.customs_clearance_of_goods_currency ||
+              nc.tomojnya_currency ||
+              nc.tamojnya_currency ||
+              'USD',
+            cct: nc.cct !== undefined ? nc.cct : nc.certificate || 0,
+            cct_currency: nc.cct_currency || nc.certificate_currency || 'USD',
             carrier_cost_currency: costCurrency,
             carrier_cost_usd_rate: costUsdRate,
             status: nc.status || 'Waiting',

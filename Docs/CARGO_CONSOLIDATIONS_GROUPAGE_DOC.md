@@ -83,14 +83,10 @@ erDiagram
 | `total_carrier_cost`                  | `DECIMAL(14,2)` | `NOT NULL`, Default: `0.00`                           | Full carrier cost paid for the whole truck/container (alias to agent)            |
 | `agent`                               | `DECIMAL(14,2)` | `NOT NULL`, Default: `0.00`                           | Agent line-haul / carrier expense amount                                         |
 | `agent_currency`                      | `VARCHAR(10)`   | `NOT NULL`, Default: `'USD'`                          | Agent currency (`USD`, `UZS`, `RUB`, `RMB`)                                      |
-| `china_warehouse`                     | `DECIMAL(14,2)` | `NOT NULL`, Default: `0.00`                           | China origin warehouse storage / handling expense amount                         |
-| `china_warehouse_currency`            | `VARCHAR(10)`   | `NOT NULL`, Default: `'USD'`                          | China warehouse currency (`USD`, `UZS`, `RUB`, `RMB`)                            |
-| `company_service`                     | `DECIMAL(14,2)` | `NOT NULL`, Default: `0.00`                           | Internal company operational service expense amount                              |
-| `company_service_currency`            | `VARCHAR(10)`   | `NOT NULL`, Default: `'USD'`                          | Company service currency (`USD`, `UZS`, `RUB`, `RMB`)                            |
-| `customs_clearance_of_goods`          | `DECIMAL(14,2)` | `NOT NULL`, Default: `0.00`                           | Customs clearance of goods clearance expense amount                              |
+| `customs_clearance_of_goods`          | `DECIMAL(14,2)` | `NOT NULL`, Default: `0.00`                           | Customs clearance of goods (Tomojnya / Таможня) expense amount                   |
 | `customs_clearance_of_goods_currency` | `VARCHAR(10)`   | `NOT NULL`, Default: `'USD'`                          | Customs clearance currency (`USD`, `UZS`, `RUB`, `RMB`)                          |
-| `cct`                                 | `DECIMAL(14,2)` | `NOT NULL`, Default: `0.00`                           | CCT / Cargo Container Terminal expense amount                                    |
-| `cct_currency`                        | `VARCHAR(10)`   | `NOT NULL`, Default: `'USD'`                          | CCT currency (`USD`, `UZS`, `RUB`, `RMB`)                                        |
+| `cct`                                 | `DECIMAL(14,2)` | `NOT NULL`, Default: `0.00`                           | CCT / Certificate (Sertifikat / Сертификат) expense amount                       |
+| `cct_currency`                        | `VARCHAR(10)`   | `NOT NULL`, Default: `'USD'`                          | CCT / Certificate currency (`USD`, `UZS`, `RUB`, `RMB`)                          |
 | `carrier_cost_currency`               | `VARCHAR(10)`   | `NOT NULL`, Default: `'USD'`                          | Fallback currency for truck costs (`USD`, `UZS`, `RUB`, `RMB`)                   |
 | `carrier_cost_usd_rate`               | `DECIMAL(14,4)` | `NULLABLE`                                            | Rate snapshot used to convert carrier costs to USD                               |
 | `status`                              | `VARCHAR(50)`   | `NOT NULL`, Default: `'Waiting'`, Indexed             | Status: `Waiting`, `Station`, `On the way`, `On the border`, `Reload`, `Arrived` |
@@ -119,13 +115,13 @@ $$\text{Volume Utilization \%} = \left(\frac{\text{Assigned Volume}}{C.\text{max
 
 ### 2. Consolidated Profitability (Income & Outcome)
 
-Consolidations do not have an individual purchase price; instead, the consolidation's income is the sum of its attached LTL cargos' income (`sell_price`).
+Consolidations do not have an individual purchase price; instead, the consolidation's income is the sum of its attached LTL cargos' income (`sell_price` + `turnkey_price` + `speed_up`).
 
-$$\text{Consolidation Income (USD)} = \sum_{i=1}^N r_i.\text{sell\_price\_usd}$$
+$$\text{Consolidation Income (USD)} = \sum_{i=1}^N r_i.\text{total\_income\_usd}$$
 
-Consolidation Outcomes are the sum of its 5 designated operational expenses:
+Consolidation Outcomes are the sum of its 3 individual operational expenses:
 
-$$\text{Total Consolidation Expenses (USD)} = \text{agent} + \text{china\_warehouse} + \text{company\_service} + \text{customs\_clearance\_of\_goods} + \text{cct}$$
+$$\text{Total Consolidation Expenses (USD)} = \text{agent} + \text{customs\_clearance\_of\_goods (Tomojnya)} + \text{cct (Certificate)}$$
 
 $$\text{Consolidated Net Margin (USD)} = \text{Consolidation Income (USD)} - \text{Total Consolidation Expenses (USD)}$$
 
@@ -239,25 +235,15 @@ Returns a paginated list of all consolidations, complete with their capacity uti
         "income_usd": 4800.0,
         "total_income_usd": 4800.0,
         "total_sell_usd": 4800.0,
-        "outcome": 4300.0,
-        "outcome_usd": 4300.0,
-        "total_outcome_usd": 4300.0,
+        "outcome": 4000.0,
+        "outcome_usd": 4000.0,
+        "total_outcome_usd": 4000.0,
         "total_purchase_usd": 0.0,
         "expenses": {
           "agent": {
             "amount": 3500.0,
             "currency": "USD",
             "amount_usd": 3500.0
-          },
-          "china_warehouse": {
-            "amount": 200.0,
-            "currency": "USD",
-            "amount_usd": 200.0
-          },
-          "company_service": {
-            "amount": 100.0,
-            "currency": "USD",
-            "amount_usd": 100.0
           },
           "customs_clearance_of_goods": {
             "amount": 400.0,
@@ -269,14 +255,14 @@ Returns a paginated list of all consolidations, complete with their capacity uti
             "currency": "USD",
             "amount_usd": 100.0
           },
-          "total_usd": 4300.0
+          "total_usd": 4000.0
         },
         "consolidated_net_margin": {
-          "amount": 500.0,
+          "amount": 800.0,
           "currency": "USD"
         },
-        "net_margin_usd": 500.0,
-        "net_profit_usd": 500.0
+        "net_margin_usd": 800.0,
+        "net_profit_usd": 800.0
       },
       "description": "Chemicals & Textile groupage batch",
       "created_at": "2026-08-21T10:15:00.000Z",
@@ -328,25 +314,15 @@ Retrieves full operational and financial details of a specific consolidation (id
     "income_usd": 4800.0,
     "total_income_usd": 4800.0,
     "total_sell_usd": 4800.0,
-    "outcome": 4300.0,
-    "outcome_usd": 4300.0,
-    "total_outcome_usd": 4300.0,
+    "outcome": 4000.0,
+    "outcome_usd": 4000.0,
+    "total_outcome_usd": 4000.0,
     "total_purchase_usd": 0.0,
     "expenses": {
       "agent": {
         "amount": 3500.0,
         "currency": "USD",
         "amount_usd": 3500.0
-      },
-      "china_warehouse": {
-        "amount": 200.0,
-        "currency": "USD",
-        "amount_usd": 200.0
-      },
-      "company_service": {
-        "amount": 100.0,
-        "currency": "USD",
-        "amount_usd": 100.0
       },
       "customs_clearance_of_goods": {
         "amount": 400.0,
@@ -358,14 +334,14 @@ Retrieves full operational and financial details of a specific consolidation (id
         "currency": "USD",
         "amount_usd": 100.0
       },
-      "total_usd": 4300.0
+      "total_usd": 4000.0
     },
     "consolidated_net_margin": {
-      "amount": 500.0,
+      "amount": 800.0,
       "currency": "USD"
     },
-    "net_margin_usd": 500.0,
-    "net_profit_usd": 500.0
+    "net_margin_usd": 800.0,
+    "net_profit_usd": 800.0
   },
   "description": "Chemicals & Textile groupage batch",
   "cargos": [
@@ -478,25 +454,15 @@ Retrieves full operational and financial details of a specific consolidation (id
     "income_usd": 4800.0,
     "total_income_usd": 4800.0,
     "total_sell_usd": 4800.0,
-    "outcome": 4300.0,
-    "outcome_usd": 4300.0,
-    "total_outcome_usd": 4300.0,
+    "outcome": 4000.0,
+    "outcome_usd": 4000.0,
+    "total_outcome_usd": 4000.0,
     "total_purchase_usd": 0.0,
     "expenses": {
       "agent": {
         "amount": 3500.0,
         "currency": "USD",
         "amount_usd": 3500.0
-      },
-      "china_warehouse": {
-        "amount": 200.0,
-        "currency": "USD",
-        "amount_usd": 200.0
-      },
-      "company_service": {
-        "amount": 100.0,
-        "currency": "USD",
-        "amount_usd": 100.0
       },
       "customs_clearance_of_goods": {
         "amount": 400.0,
@@ -508,14 +474,14 @@ Retrieves full operational and financial details of a specific consolidation (id
         "currency": "USD",
         "amount_usd": 100.0
       },
-      "total_usd": 4300.0
+      "total_usd": 4000.0
     },
     "consolidated_net_margin": {
-      "amount": 500.0,
+      "amount": 800.0,
       "currency": "USD"
     },
-    "net_margin_usd": 500.0,
-    "net_profit_usd": 500.0
+    "net_margin_usd": 800.0,
+    "net_profit_usd": 800.0
   },
   "description": "Chemicals & Textile groupage batch",
   "cargos": [

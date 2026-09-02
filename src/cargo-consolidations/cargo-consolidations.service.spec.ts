@@ -328,8 +328,6 @@ describe('CargoConsolidationsService', () => {
       expect((details as any).expenses).toBeUndefined();
       expect(details.financials.expenses).toEqual({
         agent: { amount: 2000, currency: 'USD', amount_usd: 2000 },
-        china_warehouse: { amount: 0, currency: 'USD', amount_usd: 0 },
-        company_service: { amount: 0, currency: 'USD', amount_usd: 0 },
         customs_clearance_of_goods: {
           amount: 0,
           currency: 'USD',
@@ -385,8 +383,6 @@ describe('CargoConsolidationsService', () => {
             total_cargos_purchase_usd: '1200.0',
             total_carrier_cost: '500.0',
             agent: '500.0',
-            china_warehouse: '0.0',
-            company_service: '0.0',
             customs_clearance_of_goods: '0.0',
             cct: '0.0',
             carrier_cost_currency: 'USD',
@@ -1030,14 +1026,10 @@ describe('CargoConsolidationsService', () => {
   });
 
   describe('consolidation expenses (outcomes) and LTL income calculations', () => {
-    it('should compute complete breakdown of 5 expenses in multi-currency: agent in USD, china_warehouse in RMB, company_service in UZS, customs_clearance in USD, cct in UZS', () => {
+    it('should compute complete breakdown of 3 individual consolidation expenses in multi-currency: agent in USD, customs_clearance (Tomojnya) in USD, cct (Certificate) in UZS', () => {
       const row = {
         agent: 3000,
         agent_currency: 'USD',
-        china_warehouse: 3600,
-        china_warehouse_currency: 'RMB',
-        company_service: 2570000,
-        company_service_currency: 'UZS',
         customs_clearance_of_goods: 800,
         customs_clearance_of_goods_currency: 'USD',
         cct: 1285000,
@@ -1058,14 +1050,6 @@ describe('CargoConsolidationsService', () => {
       expect(exp.agent_currency).toBe('USD');
       expect(exp.agent_usd).toBe(3000);
 
-      expect(exp.china_warehouse).toBe(3600);
-      expect(exp.china_warehouse_currency).toBe('RMB');
-      expect(exp.china_warehouse_usd).toBe(508.48);
-
-      expect(exp.company_service).toBe(2570000);
-      expect(exp.company_service_currency).toBe('UZS');
-      expect(exp.company_service_usd).toBe(200);
-
       expect(exp.customs_clearance_of_goods).toBe(800);
       expect(exp.customs_clearance_of_goods_currency).toBe('USD');
       expect(exp.customs_clearance_of_goods_usd).toBe(800);
@@ -1074,10 +1058,10 @@ describe('CargoConsolidationsService', () => {
       expect(exp.cct_currency).toBe('UZS');
       expect(exp.cct_usd).toBe(100);
 
-      expect(exp.total_usd).toBe(4608.48);
+      expect(exp.total_usd).toBe(3900);
     });
 
-    it('should store and calculate 5 expenses with currencies on createConsolidation and return net margin based on LTL income sum minus outcomes sum', async () => {
+    it('should store and calculate 3 expenses with currencies on createConsolidation and return net margin based on LTL income sum minus outcomes sum', async () => {
       const user = { id: 'user-uuid-1', role: 'CEO' };
       let insertedPayload: any = null;
 
@@ -1092,10 +1076,6 @@ describe('CargoConsolidationsService', () => {
               container_truck_id: 'TRK-EXP-1',
               agent: 3000,
               agent_currency: 'USD',
-              china_warehouse: 500,
-              china_warehouse_currency: 'USD',
-              company_service: 200,
-              company_service_currency: 'USD',
               customs_clearance_of_goods: 800,
               customs_clearance_of_goods_currency: 'USD',
               cct: 150,
@@ -1145,10 +1125,6 @@ describe('CargoConsolidationsService', () => {
         container_truck_id: 'TRK-EXP-1',
         agent: 3000,
         agent_currency: 'USD',
-        china_warehouse: 500,
-        china_warehouse_currency: 'USD',
-        company_service: 200,
-        company_service_currency: 'USD',
         customs_clearance_of_goods: 800,
         customs_clearance_of_goods_currency: 'USD',
         cct: 150,
@@ -1157,62 +1133,44 @@ describe('CargoConsolidationsService', () => {
 
       expect(insertedPayload.agent).toBe(3000);
       expect(insertedPayload.agent_currency).toBe('USD');
-      expect(insertedPayload.china_warehouse).toBe(500);
-      expect(insertedPayload.china_warehouse_currency).toBe('USD');
-      expect(insertedPayload.company_service).toBe(200);
-      expect(insertedPayload.company_service_currency).toBe('USD');
       expect(insertedPayload.customs_clearance_of_goods).toBe(800);
       expect(insertedPayload.customs_clearance_of_goods_currency).toBe('USD');
       expect(insertedPayload.cct).toBe(150);
       expect(insertedPayload.cct_currency).toBe('USD');
 
       // Income = $6000 + $6000 = $12000
-      // Outcomes = $3000 + $500 + $200 + $800 + $150 = $4650
-      // Net Profit / Margin = $12000 - $4650 = $7350
+      // Outcomes = $3000 + $800 + $150 = $3950
+      // Net Profit / Margin = $12000 - $3950 = $8050
       expect(res.financials.income).toBe(12000);
       expect(res.financials.total_income_usd).toBe(12000);
-      expect(res.financials.outcome).toBe(4650);
-      expect(res.financials.total_outcome_usd).toBe(4650);
+      expect(res.financials.outcome).toBe(3950);
+      expect(res.financials.total_outcome_usd).toBe(3950);
       expect(res.financials.total_purchase_usd).toBe(0);
-      expect(res.financials.consolidated_net_margin.amount).toBe(7350);
-      expect(res.financials.net_profit_usd).toBe(7350);
+      expect(res.financials.consolidated_net_margin.amount).toBe(8050);
+      expect(res.financials.net_profit_usd).toBe(8050);
       expect((res as any).expenses).toBeUndefined();
       expect((res.financials as any).carrier_cost).toBeUndefined();
       expect(res.financials.expenses).toEqual({
         agent: { amount: 3000, currency: 'USD', amount_usd: 3000 },
-        china_warehouse: {
-          amount: 500,
-          currency: 'USD',
-          amount_usd: 500,
-        },
-        company_service: {
-          amount: 200,
-          currency: 'USD',
-          amount_usd: 200,
-        },
         customs_clearance_of_goods: {
           amount: 800,
           currency: 'USD',
           amount_usd: 800,
         },
         cct: { amount: 150, currency: 'USD', amount_usd: 150 },
-        total_usd: 4650,
+        total_usd: 3950,
       });
     });
 
-    it('should validate DTO with all 5 expense fields and currencies', async () => {
+    it('should validate DTO with expense fields (agent, customs_clearance_of_goods, tomojnya, cct, certificate) and currencies', async () => {
       const payload = {
         container_truck_id: 'TRK-EXP-1',
         agent: 3000,
         agent_currency: 'USD',
-        china_warehouse: 3600,
-        china_warehouse_currency: 'RMB',
-        company_service: 2500000,
-        company_service_currency: 'UZS',
-        customs_clearance_of_goods: 800,
-        customs_clearance_of_goods_currency: 'USD',
-        cct: 1500000,
-        cct_currency: 'UZS',
+        tomojnya: 800,
+        tomojnya_currency: 'USD',
+        certificate: 1500000,
+        certificate_currency: 'UZS',
       };
 
       const dto = plainToInstance(CreateCargoConsolidationDto, payload);
@@ -1224,18 +1182,18 @@ describe('CargoConsolidationsService', () => {
       const payload = {
         container_truck_id: 'TRK-EXP-1',
         agent: -100,
-        china_warehouse: -50,
+        customs_clearance_of_goods: -50,
       };
 
       const dto = plainToInstance(CreateCargoConsolidationDto, payload);
       const errors = await validate(dto);
       expect(errors.length).toBeGreaterThan(0);
       const agentErr = errors.find((e) => e.property === 'agent');
-      const chinaWarehouseErr = errors.find(
-        (e) => e.property === 'china_warehouse',
+      const customsErr = errors.find(
+        (e) => e.property === 'customs_clearance_of_goods',
       );
       expect(agentErr).toBeDefined();
-      expect(chinaWarehouseErr).toBeDefined();
+      expect(customsErr).toBeDefined();
     });
 
     it('should correctly convert agent expense in UZS to USD using rates when carrier_cost_usd_rate is 1.0 (not dividing by 1)', () => {

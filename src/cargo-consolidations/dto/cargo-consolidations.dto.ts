@@ -164,35 +164,21 @@ export class CreateCargoConsolidationDto {
 
   @IsOptional()
   @Type(() => Number)
-  @IsNumber({}, { message: 'china_warehouse must be a number' })
-  @Min(0, { message: 'china_warehouse cannot be negative' })
-  china_warehouse?: number;
-
-  @IsOptional()
-  @IsString()
-  @IsIn(ALLOWED_CURRENCIES, {
-    message: 'china_warehouse_currency must be UZS, RUB, USD, or RMB',
-  })
-  china_warehouse_currency?: ConsolidationCurrency;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber({}, { message: 'company_service must be a number' })
-  @Min(0, { message: 'company_service cannot be negative' })
-  company_service?: number;
-
-  @IsOptional()
-  @IsString()
-  @IsIn(ALLOWED_CURRENCIES, {
-    message: 'company_service_currency must be UZS, RUB, USD, or RMB',
-  })
-  company_service_currency?: ConsolidationCurrency;
-
-  @IsOptional()
-  @Type(() => Number)
   @IsNumber({}, { message: 'customs_clearance_of_goods must be a number' })
   @Min(0, { message: 'customs_clearance_of_goods cannot be negative' })
   customs_clearance_of_goods?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'tomojnya must be a number' })
+  @Min(0, { message: 'tomojnya cannot be negative' })
+  tomojnya?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'tamojnya must be a number' })
+  @Min(0, { message: 'tamojnya cannot be negative' })
+  tamojnya?: number;
 
   @IsOptional()
   @IsString()
@@ -203,10 +189,30 @@ export class CreateCargoConsolidationDto {
   customs_clearance_of_goods_currency?: ConsolidationCurrency;
 
   @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES, {
+    message: 'tomojnya_currency must be UZS, RUB, USD, or RMB',
+  })
+  tomojnya_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES, {
+    message: 'tamojnya_currency must be UZS, RUB, USD, or RMB',
+  })
+  tamojnya_currency?: ConsolidationCurrency;
+
+  @IsOptional()
   @Type(() => Number)
   @IsNumber({}, { message: 'cct must be a number' })
   @Min(0, { message: 'cct cannot be negative' })
   cct?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'certificate must be a number' })
+  @Min(0, { message: 'certificate cannot be negative' })
+  certificate?: number;
 
   @IsOptional()
   @IsString()
@@ -214,6 +220,13 @@ export class CreateCargoConsolidationDto {
     message: 'cct_currency must be UZS, RUB, USD, or RMB',
   })
   cct_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES, {
+    message: 'certificate_currency must be UZS, RUB, USD, or RMB',
+  })
+  certificate_currency?: ConsolidationCurrency;
 
   @IsOptional()
   @IsString()
@@ -349,34 +362,34 @@ export class UpdateCargoConsolidationDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  china_warehouse?: number;
-
-  @IsOptional()
-  @IsString()
-  @IsIn(ALLOWED_CURRENCIES)
-  china_warehouse_currency?: ConsolidationCurrency;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  company_service?: number;
-
-  @IsOptional()
-  @IsString()
-  @IsIn(ALLOWED_CURRENCIES)
-  company_service_currency?: ConsolidationCurrency;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
   customs_clearance_of_goods?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  tomojnya?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  tamojnya?: number;
 
   @IsOptional()
   @IsString()
   @IsIn(ALLOWED_CURRENCIES)
   customs_clearance_of_goods_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  tomojnya_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  tamojnya_currency?: ConsolidationCurrency;
 
   @IsOptional()
   @Type(() => Number)
@@ -385,9 +398,20 @@ export class UpdateCargoConsolidationDto {
   cct?: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  certificate?: number;
+
+  @IsOptional()
   @IsString()
   @IsIn(ALLOWED_CURRENCIES)
   cct_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  certificate_currency?: ConsolidationCurrency;
 
   @IsOptional()
   @IsString()
@@ -677,34 +701,34 @@ export class CreateConsolidationInlineDto {
   @Type(() => Number)
   @IsNumber()
   @Min(0)
-  china_warehouse?: number;
-
-  @IsOptional()
-  @IsString()
-  @IsIn(ALLOWED_CURRENCIES)
-  china_warehouse_currency?: ConsolidationCurrency;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  company_service?: number;
-
-  @IsOptional()
-  @IsString()
-  @IsIn(ALLOWED_CURRENCIES)
-  company_service_currency?: ConsolidationCurrency;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
   customs_clearance_of_goods?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  tomojnya?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  tamojnya?: number;
 
   @IsOptional()
   @IsString()
   @IsIn(ALLOWED_CURRENCIES)
   customs_clearance_of_goods_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  tomojnya_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  tamojnya_currency?: ConsolidationCurrency;
 
   @IsOptional()
   @Type(() => Number)
@@ -713,9 +737,20 @@ export class CreateConsolidationInlineDto {
   cct?: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  certificate?: number;
+
+  @IsOptional()
   @IsString()
   @IsIn(ALLOWED_CURRENCIES)
   cct_currency?: ConsolidationCurrency;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  certificate_currency?: ConsolidationCurrency;
 
   @IsOptional()
   @IsString()
