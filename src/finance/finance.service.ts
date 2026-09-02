@@ -643,7 +643,7 @@ export class FinanceService {
             currency: Currency.USD,
             code: '840',
             nominal: 1,
-            rate: 12850.0,
+            rate: 11820.48,
             diff: 0,
             date: new Date().toISOString().slice(0, 10),
           },
@@ -659,7 +659,7 @@ export class FinanceService {
             currency: Currency.RUB,
             code: '643',
             nominal: 1,
-            rate: 145.0,
+            rate: 137.51,
             diff: 0,
             date: new Date().toISOString().slice(0, 10),
           },
@@ -667,7 +667,7 @@ export class FinanceService {
             currency: Currency.RMB,
             code: '156',
             nominal: 1,
-            rate: 1815.0,
+            rate: 1758.76,
             diff: 0,
             date: new Date().toISOString().slice(0, 10),
           },
@@ -675,7 +675,7 @@ export class FinanceService {
             currency: Currency.CNY,
             code: '156',
             nominal: 1,
-            rate: 1815.0,
+            rate: 1758.76,
             diff: 0,
             date: new Date().toISOString().slice(0, 10),
           },
@@ -875,7 +875,7 @@ export class FinanceService {
     customRate?: number | null,
   ): number {
     if (amount <= 0) return 0;
-    const usdObj = rates['USD'] || { rate: 12850, nominal: 1 };
+    const usdObj = rates['USD'] || { rate: 11820.48, nominal: 1 };
     const defaultUsdRateInUzs = usdObj.rate / (usdObj.nominal || 1);
     const usdRateInUzs =
       customRate && customRate > 0 ? customRate : defaultUsdRateInUzs;
@@ -892,14 +892,15 @@ export class FinanceService {
       if (usdRmbRate && usdRmbRate > 0) {
         return amount / usdRmbRate;
       }
-      const rmbObj = rates['RMB'] || rates['CNY'] || { rate: 1815, nominal: 1 };
+      const rmbObj = rates['RMB'] ||
+        rates['CNY'] || { rate: 1758.76, nominal: 1 };
       const rmbInUzs = rmbObj.rate / (rmbObj.nominal || 1);
       const totalUzs = amount * rmbInUzs;
       return usdRateInUzs > 0 ? totalUzs / usdRateInUzs : 0;
     }
 
     if (currency === 'RUB') {
-      const rubObj = rates['RUB'] || { rate: 145, nominal: 1 };
+      const rubObj = rates['RUB'] || { rate: 137.51, nominal: 1 };
       const rubInUzs = rubObj.rate / (rubObj.nominal || 1);
       const totalUzs = amount * rubInUzs;
       return usdRateInUzs > 0 ? totalUzs / usdRateInUzs : 0;

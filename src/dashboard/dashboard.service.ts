@@ -160,10 +160,10 @@ export class DashboardService {
   ): Record<string, number> {
     const multipliers: Record<string, number> = {
       [Currency.UZS]: 1,
-      [Currency.USD]: 12850,
-      [Currency.RUB]: 145,
-      [Currency.RMB]: 1815,
-      [Currency.CNY]: 1815,
+      [Currency.USD]: 11820.48,
+      [Currency.RUB]: 137.51,
+      [Currency.RMB]: 1758.76,
+      [Currency.CNY]: 1758.76,
     };
     if (rates) {
       for (const key of Object.keys(rates)) {

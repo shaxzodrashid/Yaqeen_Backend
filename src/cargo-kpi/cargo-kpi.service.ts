@@ -973,7 +973,7 @@ export class CargoKpiService {
 
     const defaultUsd = rates?.['USD']
       ? rates['USD'].rate / (rates['USD'].nominal || 1)
-      : 12850;
+      : 11820.48;
 
     if (purchaseAmount > 0) {
       if (purchaseCurrency === Currency.USD) {
@@ -992,7 +992,7 @@ export class CargoKpiService {
           purchaseUsd = purchaseAmount / Number(reg.usd_rmb_rate);
         } else {
           const rmbObj = rates?.['RMB'] ||
-            rates?.['CNY'] || { rate: 1815, nominal: 1 };
+            rates?.['CNY'] || { rate: 1758.76, nominal: 1 };
           const rmbRate = rmbObj.rate / (rmbObj.nominal || 1);
           const rateUsed =
             Number(reg.purchase_custom_rate) ||
@@ -1002,7 +1002,7 @@ export class CargoKpiService {
             rateUsed > 0 ? (purchaseAmount * rmbRate) / rateUsed : 0;
         }
       } else if (purchaseCurrency === Currency.RUB) {
-        const rubObj = rates?.['RUB'] || { rate: 145, nominal: 1 };
+        const rubObj = rates?.['RUB'] || { rate: 137.51, nominal: 1 };
         const rubRate = rubObj.rate / (rubObj.nominal || 1);
         const rateUsed =
           Number(reg.purchase_custom_rate) ||
@@ -1047,7 +1047,7 @@ export class CargoKpiService {
           sellUsd = sellAmount / Number(reg.usd_rmb_rate);
         } else {
           const rmbObj = rates?.['RMB'] ||
-            rates?.['CNY'] || { rate: 1815, nominal: 1 };
+            rates?.['CNY'] || { rate: 1758.76, nominal: 1 };
           const rmbRate = rmbObj.rate / (rmbObj.nominal || 1);
           const rateUsed =
             Number(reg.sell_custom_rate) ||
@@ -1056,7 +1056,7 @@ export class CargoKpiService {
           sellUsd = rateUsed > 0 ? (sellAmount * rmbRate) / rateUsed : 0;
         }
       } else if (sellCurrency === Currency.RUB) {
-        const rubObj = rates?.['RUB'] || { rate: 145, nominal: 1 };
+        const rubObj = rates?.['RUB'] || { rate: 137.51, nominal: 1 };
         const rubRate = rubObj.rate / (rubObj.nominal || 1);
         const rateUsed =
           Number(reg.sell_custom_rate) ||
@@ -1112,7 +1112,7 @@ export class CargoKpiService {
         );
         return conv.converted_amount;
       }
-      const rubObj = rates?.['RUB'] || { rate: 145, nominal: 1 };
+      const rubObj = rates?.['RUB'] || { rate: 137.51, nominal: 1 };
       const rubRate = rubObj.rate / (rubObj.nominal || 1);
       const rateUsed =
         Number(reg.sell_custom_rate) ||

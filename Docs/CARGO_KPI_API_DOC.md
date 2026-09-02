@@ -887,3 +887,110 @@ Bulk updates payment status for specified cargo IDs.
   "payment_status": "paid"
 }
 ```
+
+### 11.6 Sales Manager Evaluations (Career / Bonus Calculation)
+
+#### `POST /api/v1/sales-manager-kpi/evaluations/calculate`
+
+Calculates and upserts monthly evaluation(s) for one or all active sales managers. When `level` is provided, the calculation uses that level's config (`CAREER_LEVEL_CONFIG`) instead of the employee's stored `employees.career_level`. This allows the caller to force evaluation as if the employee is already `"Middle"` (`MID`) or `"Senior"` (`SENIOR`) (also accepts `"Junior"` / `"Expert"`).
+
+##### Request Body:
+
+```json
+{
+  "month": "2026-08",
+  "employee_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+  "additional_bonus_amount": 100,
+  "level": "Middle"
+}
+```
+
+| Field                     | Type            | Required | Description                                                                                                                                                                                                                                                                            |
+| :------------------------ | :-------------- | :------- | :------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `month`                   | `string`        | Yes      | `YYYY-MM`                                                                                                                                                                                                                                                                              |
+| `employee_id`             | `string (UUID)` | No       | If omitted, calculates for **all** active employees                                                                                                                                                                                                                                    |
+| `additional_bonus_amount` | `number`        | No       | Extra bonus added to `total_earnings`                                                                                                                                                                                                                                                  |
+| `level`                   | `string`        | No       | Optional override: `"Junior"`, `"Middle"` / `"Mid"`, `"Senior"`, `"Expert"` (case-insensitive). E.g. `"Middle"` forces `MID` config (`fixed_salary:500, planMin:5000`), `"Senior"` forces `SENIOR` config (`fixed_salary:700, planMin:6001`). Invalid values return `400 Bad Request`. |
+
+##### Response (200 OK):
+
+```json
+{
+  "month": "2026-08",
+  "evaluations_calculated": 1,
+  "evaluations": [
+    {
+      "id": "eval-uuid",
+      "employee_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "month": "2026-08",
+      "career_level": "MID",
+      "fixed_salary": 500,
+      "total_sales": 5500,
+      "deal_count": 12,
+      "average_check": 458.33,
+      "sales_bonus_rate": 15,
+      "sales_bonus_amount": 825,
+      "total_earnings": 1425
+    }
+  ]
+}
+```
+
+#### `GET /api/v1/sales-manager-kpi/evaluations`
+
+Lists evaluations with filters. The `fixed_salary` field in each row is **sourced from `employees.fixed_salary`** (via `JOIN employees`) and returned as a number, overriding the snapshot value stored in `sales_manager_evaluations.fixed_salary`.
+
+##### Query Parameters:
+
+- `month` (optional, `YYYY-MM`)
+- `employee_id` (optional, UUID)
+- `approval_status` (optional, e.g. `APPROVED`, `PENDING_SR_CHECK_APPROVAL`, `DEMOTION_PENDING_REVIEW`)
+- `page`, `limit` (optional pagination, defaults `page=1, limit=20, max 100`)
+
+##### Response (200 OK):
+
+```json
+{
+  "meta": {
+    "total": 42,
+    "page": 1,
+    "limit": 20,
+    "totalPages": 3
+  },
+  "data": [
+    {
+      "id": "eval-uuid",
+      "employee_id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "employee_name": "Jasur Yoldoshev",
+      "employee_first_name": "Jasur",
+      "employee_last_name": "Yoldoshev",
+      "month": "2026-08",
+      "career_level": "SENIOR",
+      "fixed_salary": 1200,
+      "total_sales": 7500,
+      "deal_count": 15,
+      "average_check": 500,
+      "approval_status": "APPROVED",
+      "reviewer_name": "ROP Manager"
+    }
+  ]
+}
+```
+
+> **Note:** `fixed_salary` in the response equals `employees.fixed_salary` (e.g. `1200`), not `sales_manager_evaluations.fixed_salary`/`CAREER_LEVEL_CONFIG.fixedSalary`. `GET /api/v1/sales-manager-kpi/evaluations/:id` applies the same override.
+
+#### `GET /api/v1/sales-manager-kpi/evaluations/:id`
+
+Returns single evaluation by ID; `fixed_salary` is likewise resolved from `employees.fixed_salary`.
+
+#### `POST /api/v1/sales-manager-kpi/evaluations/:id/approve-sr-check`
+
+Approves `PENDING_SR_CHECK_APPROVAL` evaluation (requires ROP/CEO).
+
+#### `POST /api/v1/sales-manager-kpi/evaluations/:id/review-demotion`
+
+Reviews `DEMOTION_PENDING_REVIEW` (`APPROVE_DEMOTION` | `MAINTAIN_LEVEL`).
+
+#### `PUT /api/v1/sales-manager-kpi/employee-level/:employeeId`
+
+Updates `employees.career_level` and optional `mentees_count`.

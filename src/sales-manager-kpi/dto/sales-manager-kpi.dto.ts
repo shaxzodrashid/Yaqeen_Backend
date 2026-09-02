@@ -78,6 +78,10 @@ export class CalculateEvaluationDto {
   @IsNumber()
   @Min(0)
   additional_bonus_amount?: number;
+
+  @IsOptional()
+  @IsString()
+  level?: string;
 }
 
 export class ApproveSrCheckDto {

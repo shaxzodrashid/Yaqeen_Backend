@@ -1044,7 +1044,14 @@ describe('CargoConsolidationsService', () => {
         carrier_cost_usd_rate: 1.0,
       };
 
-      const exp = service.computeConsolidationExpenses(row);
+      const rates = {
+        USD: { currency: 'USD', rate: 12850, nominal: 1 },
+        UZS: { currency: 'UZS', rate: 1, nominal: 1 },
+        RUB: { currency: 'RUB', rate: 145, nominal: 1 },
+        RMB: { currency: 'RMB', rate: 1815, nominal: 1 },
+      };
+
+      const exp = service.computeConsolidationExpenses(row, rates);
       expect(exp.agent).toBe(3000);
       expect(exp.agent_currency).toBe('USD');
       expect(exp.agent_usd).toBe(3000);

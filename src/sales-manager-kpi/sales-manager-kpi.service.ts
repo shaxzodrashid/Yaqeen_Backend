@@ -152,6 +152,25 @@ export class SalesManagerKpiService {
   }
 
   /**
+   * Normalize level string (e.g. "Middle", "Senior") to CareerLevel enum.
+   * Supports: "Junior", "Middle"/"Mid", "Senior", "Expert" (case-insensitive).
+   */
+  private normalizeLevel(level?: string | null): CareerLevel | null {
+    if (!level || typeof level !== 'string') return null;
+    const s = level.trim().toLowerCase();
+    if (s === 'junior') return CareerLevel.JUNIOR;
+    if (s === 'mid' || s === 'middle') return CareerLevel.MID;
+    if (s === 'senior') return CareerLevel.SENIOR;
+    if (s === 'expert') return CareerLevel.EXPERT;
+    // Also accept raw enum values (JUNIOR, MID, etc.) case-insensitively
+    const upper = s.toUpperCase();
+    if ((Object.values(CareerLevel) as string[]).includes(upper)) {
+      return upper as CareerLevel;
+    }
+    return null;
+  }
+
+  /**
    * Helper to get previous month string (YYYY-MM).
    */
   private getPreviousMonth(monthStr: string): string {
@@ -498,7 +517,7 @@ export class SalesManagerKpiService {
    * Calculate and record monthly evaluation for an employee or all sales managers.
    */
   async calculateEvaluation(dto: CalculateEvaluationDto) {
-    const { month, employee_id, additional_bonus_amount = 0 } = dto;
+    const { month, employee_id, additional_bonus_amount = 0, level } = dto;
 
     let employeesQuery = this.knex('employees').where('is_active', true);
     if (employee_id) {
@@ -514,8 +533,17 @@ export class SalesManagerKpiService {
     const results = [];
 
     for (const emp of employees) {
-      const currentLevel =
+      let currentLevel =
         (emp.career_level as CareerLevel) || CareerLevel.JUNIOR;
+      if (level) {
+        const normalized = this.normalizeLevel(level);
+        if (!normalized) {
+          throw new BadRequestException(
+            `Invalid level value '${level}'. Allowed values: Junior, Middle/Mid, Senior, Expert`,
+          );
+        }
+        currentLevel = normalized;
+      }
       const levelConfig =
         CAREER_LEVEL_CONFIG[currentLevel] ||
         CAREER_LEVEL_CONFIG[CareerLevel.JUNIOR];
@@ -1324,6 +1352,7 @@ export class SalesManagerKpiService {
         'employees.last_name as employee_last_name',
         'employees.phone as employee_phone',
         'employees.mentees_count',
+        'employees.fixed_salary as employee_fixed_salary',
         this.knex.raw(
           "COALESCE(NULLIF(TRIM(CONCAT(reviewer_emp.first_name, ' ', reviewer_emp.last_name)), ''), users.username) as reviewer_name",
         ),
@@ -1335,8 +1364,13 @@ export class SalesManagerKpiService {
       throw new NotFoundException('Evaluation record not found');
     }
 
+    const { employee_fixed_salary, ...rest } = record;
     return {
-      ...record,
+      ...rest,
+      fixed_salary:
+        employee_fixed_salary != null
+          ? Number(employee_fixed_salary)
+          : Number(rest.fixed_salary),
       employee_name: `${record.employee_first_name} ${record.employee_last_name}`,
     };
   }
@@ -1368,6 +1402,7 @@ export class SalesManagerKpiService {
         'employees.first_name as employee_first_name',
         'employees.last_name as employee_last_name',
         'employees.mentees_count',
+        'employees.fixed_salary as employee_fixed_salary',
         this.knex.raw(
           "COALESCE(NULLIF(TRIM(CONCAT(reviewer_emp.first_name, ' ', reviewer_emp.last_name)), ''), users.username) as reviewer_name",
         ),
@@ -1405,10 +1440,17 @@ export class SalesManagerKpiService {
       .limit(limit)
       .offset(offset);
 
-    const data = rows.map((r) => ({
-      ...r,
-      employee_name: `${r.employee_first_name} ${r.employee_last_name}`,
-    }));
+    const data = rows.map((r) => {
+      const { employee_fixed_salary, ...rest } = r;
+      return {
+        ...rest,
+        fixed_salary:
+          employee_fixed_salary != null
+            ? Number(employee_fixed_salary)
+            : Number(rest.fixed_salary),
+        employee_name: `${r.employee_first_name} ${r.employee_last_name}`,
+      };
+    });
 
     return {
       meta: {

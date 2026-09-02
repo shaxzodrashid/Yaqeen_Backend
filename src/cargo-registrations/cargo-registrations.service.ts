@@ -337,7 +337,7 @@ export class CargoRegistrationsService {
     if (amount <= 0) {
       const defaultUsd = rates['USD']
         ? rates['USD'].rate / (rates['USD'].nominal || 1)
-        : 12850;
+        : 11820.48;
       return {
         amount_usd: 0,
         amount_uzs: 0,
@@ -345,7 +345,7 @@ export class CargoRegistrationsService {
       };
     }
 
-    const usdObj = rates['USD'] || { rate: 12850, nominal: 1 };
+    const usdObj = rates['USD'] || { rate: 11820.48, nominal: 1 };
     const defaultUsdRateInUzs = usdObj.rate / (usdObj.nominal || 1);
     const usdRateInUzs =
       customRate && customRate > 0 ? customRate : defaultUsdRateInUzs;
@@ -374,7 +374,7 @@ export class CargoRegistrationsService {
         usd = amount / usdRmbRate;
       } else {
         const rmbObj = rates['RMB'] ||
-          rates['CNY'] || { rate: 1815, nominal: 1 };
+          rates['CNY'] || { rate: 1758.76, nominal: 1 };
         const rmbInUzs = rmbObj.rate / (rmbObj.nominal || 1);
         const totalUzs = amount * rmbInUzs;
         usd = usdRateInUzs > 0 ? totalUzs / usdRateInUzs : 0;
@@ -388,7 +388,7 @@ export class CargoRegistrationsService {
     }
 
     if (currency === 'RUB') {
-      const rubObj = rates['RUB'] || { rate: 145, nominal: 1 };
+      const rubObj = rates['RUB'] || { rate: 137.51, nominal: 1 };
       const rubInUzs = rubObj.rate / (rubObj.nominal || 1);
       const uzs = amount * rubInUzs;
       const usd = usdRateInUzs > 0 ? uzs / usdRateInUzs : 0;
@@ -693,13 +693,13 @@ export class CargoRegistrationsService {
           if (costCurrency === 'UZS') {
             costUsdRate = rates['USD']
               ? rates['USD'].rate / (rates['USD'].nominal || 1)
-              : 12850;
+              : 11820.48;
           } else if (costCurrency === 'RUB') {
-            const rubObj = rates['RUB'] || { rate: 145, nominal: 1 };
+            const rubObj = rates['RUB'] || { rate: 137.51, nominal: 1 };
             costUsdRate = rubObj.rate / (rubObj.nominal || 1);
           } else if (costCurrency === 'RMB' || costCurrency === 'CNY') {
             const rmbObj = rates['RMB'] ||
-              rates['CNY'] || { rate: 1815, nominal: 1 };
+              rates['CNY'] || { rate: 1758.76, nominal: 1 };
             costUsdRate = rmbObj.rate / (rmbObj.nominal || 1);
           }
         }
@@ -1859,6 +1859,15 @@ export class CargoRegistrationsService {
     const baseWhereQuery = this.knex('cargo_registrations as cr');
     this.applyCargoRegistrationFilters(baseWhereQuery, query);
 
+    const rates = await this.currencyService.getLatestRates();
+    const usdObj = rates['USD'] || { rate: 11820.48, nominal: 1 };
+    const usdRate = usdObj.rate / (usdObj.nominal || 1);
+    const rubObj = rates['RUB'] || { rate: 137.51, nominal: 1 };
+    const rubRate = rubObj.rate / (rubObj.nominal || 1);
+    const rmbObj = rates['RMB'] ||
+      rates['CNY'] || { rate: 1758.76, nominal: 1 };
+    const rmbRate = rmbObj.rate / (rmbObj.nominal || 1);
+
     // 1. Direct SQL aggregation for totals and multi-currency financials (Single DB roundtrip)
     const aggQuery = baseWhereQuery.clone().select([
       this.knex.raw('COUNT(cr.id) as total_count'),
@@ -1872,9 +1881,10 @@ export class CargoRegistrationsService {
         COALESCE(SUM(
           CASE
             WHEN cr.sell_currency = 'USD' THEN cr.sell_price
-            WHEN cr.sell_currency = 'UZS' THEN cr.sell_price / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+            WHEN cr.sell_currency = 'UZS' THEN cr.sell_price / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, ${usdRate}), 0)
             WHEN cr.sell_currency IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.sell_price / cr.usd_rmb_rate
-            WHEN cr.sell_currency = 'RUB' THEN (cr.sell_price * 145.0) / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+            WHEN cr.sell_currency IN ('RMB', 'CNY') THEN (cr.sell_price * ${rmbRate}) / ${usdRate}
+            WHEN cr.sell_currency = 'RUB' THEN (cr.sell_price * ${rubRate}) / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, ${usdRate}), 0)
             ELSE 0
           END
           +
@@ -1882,9 +1892,10 @@ export class CargoRegistrationsService {
             WHEN cr.is_turnkey AND cr.turnkey_price > 0 THEN
               CASE
                 WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'USD' THEN cr.turnkey_price
-                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'UZS' THEN cr.turnkey_price / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'UZS' THEN cr.turnkey_price / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, ${usdRate}), 0)
                 WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.turnkey_price / cr.usd_rmb_rate
-                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'RUB' THEN (cr.turnkey_price * 145.0) / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') IN ('RMB', 'CNY') THEN (cr.turnkey_price * ${rmbRate}) / ${usdRate}
+                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'RUB' THEN (cr.turnkey_price * ${rubRate}) / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, ${usdRate}), 0)
                 ELSE cr.turnkey_price
               END
             ELSE 0
@@ -1894,9 +1905,10 @@ export class CargoRegistrationsService {
             WHEN cr.speed_up > 0 THEN
               CASE
                 WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'USD' THEN cr.speed_up
-                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'UZS' THEN cr.speed_up / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'UZS' THEN cr.speed_up / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, ${usdRate}), 0)
                 WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.speed_up / cr.usd_rmb_rate
-                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'RUB' THEN (cr.speed_up * 145.0) / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850), 0)
+                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') IN ('RMB', 'CNY') THEN (cr.speed_up * ${rmbRate}) / ${usdRate}
+                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'RUB' THEN (cr.speed_up * ${rubRate}) / NULLIF(COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, ${usdRate}), 0)
                 ELSE cr.speed_up
               END
             ELSE 0
@@ -1905,9 +1917,10 @@ export class CargoRegistrationsService {
         COALESCE(SUM(
           CASE
             WHEN cr.sell_currency = 'UZS' THEN cr.sell_price
-            WHEN cr.sell_currency = 'USD' THEN cr.sell_price * COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850)
-            WHEN cr.sell_currency IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.sell_price / cr.usd_rmb_rate) * COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850)
-            WHEN cr.sell_currency = 'RUB' THEN cr.sell_price * 145.0
+            WHEN cr.sell_currency = 'USD' THEN cr.sell_price * COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, ${usdRate})
+            WHEN cr.sell_currency IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.sell_price / cr.usd_rmb_rate) * COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, ${usdRate})
+            WHEN cr.sell_currency IN ('RMB', 'CNY') THEN cr.sell_price * ${rmbRate}
+            WHEN cr.sell_currency = 'RUB' THEN cr.sell_price * ${rubRate}
             ELSE 0
           END
           +
@@ -1915,9 +1928,10 @@ export class CargoRegistrationsService {
             WHEN cr.is_turnkey AND cr.turnkey_price > 0 THEN
               CASE
                 WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'UZS' THEN cr.turnkey_price
-                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'USD' THEN cr.turnkey_price * COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850)
-                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.turnkey_price / cr.usd_rmb_rate) * COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850)
-                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'RUB' THEN cr.turnkey_price * 145.0
+                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'USD' THEN cr.turnkey_price * COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, ${usdRate})
+                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.turnkey_price / cr.usd_rmb_rate) * COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, ${usdRate})
+                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') IN ('RMB', 'CNY') THEN cr.turnkey_price * ${rmbRate}
+                WHEN COALESCE(cr.turnkey_currency, cr.sell_currency, 'USD') = 'RUB' THEN cr.turnkey_price * ${rubRate}
                 ELSE 0
               END
             ELSE 0
@@ -1927,9 +1941,10 @@ export class CargoRegistrationsService {
             WHEN cr.speed_up > 0 THEN
               CASE
                 WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'UZS' THEN cr.speed_up
-                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'USD' THEN cr.speed_up * COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850)
-                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.speed_up / cr.usd_rmb_rate) * COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, 12850)
-                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'RUB' THEN cr.speed_up * 145.0
+                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'USD' THEN cr.speed_up * COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, ${usdRate})
+                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.speed_up / cr.usd_rmb_rate) * COALESCE(cr.sell_custom_rate, cr.sell_usd_rate, ${usdRate})
+                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') IN ('RMB', 'CNY') THEN cr.speed_up * ${rmbRate}
+                WHEN COALESCE(cr.speed_up_currency, cr.sell_currency, 'USD') = 'RUB' THEN cr.speed_up * ${rubRate}
                 ELSE 0
               END
             ELSE 0
@@ -1938,9 +1953,10 @@ export class CargoRegistrationsService {
         COALESCE(SUM(
           CASE
             WHEN cr.purchase_currency = 'USD' THEN cr.purchase_price
-            WHEN cr.purchase_currency = 'UZS' THEN cr.purchase_price / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
+            WHEN cr.purchase_currency = 'UZS' THEN cr.purchase_price / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
             WHEN cr.purchase_currency IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.purchase_price / cr.usd_rmb_rate
-            WHEN cr.purchase_currency = 'RUB' THEN (cr.purchase_price * 145.0) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
+            WHEN cr.purchase_currency IN ('RMB', 'CNY') THEN (cr.purchase_price * ${rmbRate}) / ${usdRate}
+            WHEN cr.purchase_currency = 'RUB' THEN (cr.purchase_price * ${rubRate}) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
             ELSE 0
           END
           +
@@ -1948,9 +1964,10 @@ export class CargoRegistrationsService {
             WHEN cr.additional_expense > 0 THEN
               CASE
                 WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'USD' THEN cr.additional_expense
-                WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'UZS' THEN cr.additional_expense / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
+                WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'UZS' THEN cr.additional_expense / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
                 WHEN COALESCE(cr.additional_expense_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.additional_expense / cr.usd_rmb_rate
-                WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'RUB' THEN (cr.additional_expense * 145.0) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850), 0)
+                WHEN COALESCE(cr.additional_expense_currency, 'USD') IN ('RMB', 'CNY') THEN (cr.additional_expense * ${rmbRate}) / ${usdRate}
+                WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'RUB' THEN (cr.additional_expense * ${rubRate}) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
                 ELSE cr.additional_expense
               END
             ELSE 0
@@ -1959,9 +1976,10 @@ export class CargoRegistrationsService {
         COALESCE(SUM(
           CASE
             WHEN cr.purchase_currency = 'UZS' THEN cr.purchase_price
-            WHEN cr.purchase_currency = 'USD' THEN cr.purchase_price * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850)
-            WHEN cr.purchase_currency IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.purchase_price / cr.usd_rmb_rate) * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850)
-            WHEN cr.purchase_currency = 'RUB' THEN cr.purchase_price * 145.0
+            WHEN cr.purchase_currency = 'USD' THEN cr.purchase_price * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate})
+            WHEN cr.purchase_currency IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.purchase_price / cr.usd_rmb_rate) * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate})
+            WHEN cr.purchase_currency IN ('RMB', 'CNY') THEN cr.purchase_price * ${rmbRate}
+            WHEN cr.purchase_currency = 'RUB' THEN cr.purchase_price * ${rubRate}
             ELSE 0
           END
           +
@@ -1969,9 +1987,10 @@ export class CargoRegistrationsService {
             WHEN cr.additional_expense > 0 THEN
               CASE
                 WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'UZS' THEN cr.additional_expense
-                WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'USD' THEN cr.additional_expense * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850)
-                WHEN COALESCE(cr.additional_expense_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.additional_expense / cr.usd_rmb_rate) * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, 12850)
-                WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'RUB' THEN cr.additional_expense * 145.0
+                WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'USD' THEN cr.additional_expense * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate})
+                WHEN COALESCE(cr.additional_expense_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.additional_expense / cr.usd_rmb_rate) * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate})
+                WHEN COALESCE(cr.additional_expense_currency, 'USD') IN ('RMB', 'CNY') THEN cr.additional_expense * ${rmbRate}
+                WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'RUB' THEN cr.additional_expense * ${rubRate}
                 ELSE 0
               END
             ELSE 0

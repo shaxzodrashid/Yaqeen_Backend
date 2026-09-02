@@ -944,7 +944,7 @@ export class EmployeesService implements OnModuleInit {
 
     const defaultUsd = rates?.['USD']
       ? rates['USD'].rate / (rates['USD'].nominal || 1)
-      : 12850;
+      : 11820.48;
 
     if (purchaseAmount > 0) {
       if (purchaseCurrency === Currency.USD) {
@@ -963,7 +963,7 @@ export class EmployeesService implements OnModuleInit {
           purchaseUsd = purchaseAmount / Number(reg.usd_rmb_rate);
         } else {
           const rmbObj = rates?.['RMB'] ||
-            rates?.['CNY'] || { rate: 1815, nominal: 1 };
+            rates?.['CNY'] || { rate: 1758.76, nominal: 1 };
           const rmbRate = rmbObj.rate / (rmbObj.nominal || 1);
           const rateUsed =
             Number(reg.purchase_custom_rate) ||
@@ -973,7 +973,7 @@ export class EmployeesService implements OnModuleInit {
             rateUsed > 0 ? (purchaseAmount * rmbRate) / rateUsed : 0;
         }
       } else if (purchaseCurrency === Currency.RUB) {
-        const rubObj = rates?.['RUB'] || { rate: 145, nominal: 1 };
+        const rubObj = rates?.['RUB'] || { rate: 137.51, nominal: 1 };
         const rubRate = rubObj.rate / (rubObj.nominal || 1);
         const rateUsed =
           Number(reg.purchase_custom_rate) ||
@@ -1018,7 +1018,7 @@ export class EmployeesService implements OnModuleInit {
           sellUsd = sellAmount / Number(reg.usd_rmb_rate);
         } else {
           const rmbObj = rates?.['RMB'] ||
-            rates?.['CNY'] || { rate: 1815, nominal: 1 };
+            rates?.['CNY'] || { rate: 1758.76, nominal: 1 };
           const rmbRate = rmbObj.rate / (rmbObj.nominal || 1);
           const rateUsed =
             Number(reg.sell_custom_rate) ||
@@ -1027,7 +1027,7 @@ export class EmployeesService implements OnModuleInit {
           sellUsd = rateUsed > 0 ? (sellAmount * rmbRate) / rateUsed : 0;
         }
       } else if (sellCurrency === Currency.RUB) {
-        const rubObj = rates?.['RUB'] || { rate: 145, nominal: 1 };
+        const rubObj = rates?.['RUB'] || { rate: 137.51, nominal: 1 };
         const rubRate = rubObj.rate / (rubObj.nominal || 1);
         const rateUsed =
           Number(reg.sell_custom_rate) ||
@@ -1083,7 +1083,7 @@ export class EmployeesService implements OnModuleInit {
         );
         return conv.converted_amount;
       }
-      const rubObj = rates?.['RUB'] || { rate: 145, nominal: 1 };
+      const rubObj = rates?.['RUB'] || { rate: 137.51, nominal: 1 };
       const rubRate = rubObj.rate / (rubObj.nominal || 1);
       const rateUsed =
         Number(reg.sell_custom_rate) ||
