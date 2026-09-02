@@ -122,7 +122,7 @@ export class CargoConsolidationsService {
     const usdObj = rates?.['USD'] || { rate: 11820.48, nominal: 1 };
     const defaultUsdRate = usdObj.rate / (usdObj.nominal || 1);
     const usdRateUsed =
-      defaultRate && defaultRate > 0 ? defaultRate : defaultUsdRate;
+      defaultRate && defaultRate > 1 ? defaultRate : defaultUsdRate;
 
     if (curr === 'UZS') {
       return usdRateUsed > 0 ? amount / usdRateUsed : 0;
@@ -680,7 +680,7 @@ export class CargoConsolidationsService {
         this.knex.raw(`
           (
             CASE
-              WHEN COALESCE(cc.agent_currency, cc.carrier_cost_currency, 'USD') = 'UZS' AND cc.carrier_cost_usd_rate > 0 THEN COALESCE(cc.agent, CASE WHEN cc.total_carrier_cost > 0 THEN cc.total_carrier_cost ELSE 0 END) / cc.carrier_cost_usd_rate
+              WHEN COALESCE(cc.agent_currency, cc.carrier_cost_currency, 'USD') = 'UZS' AND cc.carrier_cost_usd_rate > 1 THEN COALESCE(cc.agent, CASE WHEN cc.total_carrier_cost > 0 THEN cc.total_carrier_cost ELSE 0 END) / cc.carrier_cost_usd_rate
               WHEN COALESCE(cc.agent_currency, cc.carrier_cost_currency, 'USD') = 'UZS' THEN COALESCE(cc.agent, CASE WHEN cc.total_carrier_cost > 0 THEN cc.total_carrier_cost ELSE 0 END) / ${usdRate}
               WHEN COALESCE(cc.agent_currency, cc.carrier_cost_currency, 'USD') = 'RUB' THEN (COALESCE(cc.agent, CASE WHEN cc.total_carrier_cost > 0 THEN cc.total_carrier_cost ELSE 0 END) * ${rubRate}) / ${usdRate}
               WHEN COALESCE(cc.agent_currency, cc.carrier_cost_currency, 'USD') IN ('RMB', 'CNY') THEN (COALESCE(cc.agent, CASE WHEN cc.total_carrier_cost > 0 THEN cc.total_carrier_cost ELSE 0 END) * ${rmbRate}) / ${usdRate}
@@ -950,34 +950,6 @@ export class CargoConsolidationsService {
       rows = await paginatedQuery.limit(limit).offset(offset);
     }
 
-    const cargosByConsolidation = new Map<string, any[]>();
-    if (rows.length > 0) {
-      const consolidationIds = rows.map((r) => r.id);
-      const attachedCargos = await this.knex('cargo_registrations as cr')
-        .leftJoin('clients as c', 'cr.client_id', 'c.id')
-        .leftJoin('employees as e', 'cr.employee_id', 'e.id')
-        .select(
-          'cr.*',
-          'c.first_name as client_first_name',
-          'c.last_name as client_last_name',
-          'c.company_name as client_company',
-          'e.first_name as emp_first_name',
-          'e.last_name as emp_last_name',
-        )
-        .whereIn('cr.consolidation_id', consolidationIds)
-        .orderBy('cr.created_at', 'asc');
-
-      for (const cargoRow of attachedCargos) {
-        const cId = cargoRow.consolidation_id;
-        if (!cargosByConsolidation.has(cId)) {
-          cargosByConsolidation.set(cId, []);
-        }
-        cargosByConsolidation
-          .get(cId)!
-          .push(this.formatCargoItem(cargoRow, false, rates));
-      }
-    }
-
     const formattedData = rows.map((r) => {
       const maxVolume = r.max_volume_capacity
         ? Number(r.max_volume_capacity)
@@ -1014,8 +986,6 @@ export class CargoConsolidationsService {
       const outcomeUsd = exp.total_usd;
       const netMarginUsd = Math.round((incomeUsd - outcomeUsd) * 100) / 100;
 
-      const assignedCargos = cargosByConsolidation.get(r.id) || [];
-
       return {
         id: r.id,
         consolidation_code: r.consolidation_code,
@@ -1041,45 +1011,6 @@ export class CargoConsolidationsService {
         departure_date: this.formatDateStr(r.departure_date),
         estimated_arrival_date: this.formatDateStr(r.estimated_arrival_date),
         arrived_date: this.formatDateStr(r.arrived_date),
-        agent: exp.agent,
-        agent_currency: exp.agent_currency,
-        china_warehouse: exp.china_warehouse,
-        china_warehouse_currency: exp.china_warehouse_currency,
-        company_service: exp.company_service,
-        company_service_currency: exp.company_service_currency,
-        customs_clearance_of_goods: exp.customs_clearance_of_goods,
-        customs_clearance_of_goods_currency:
-          exp.customs_clearance_of_goods_currency,
-        cct: exp.cct,
-        cct_currency: exp.cct_currency,
-        expenses: {
-          agent: {
-            amount: exp.agent,
-            currency: exp.agent_currency,
-            amount_usd: exp.agent_usd,
-          },
-          china_warehouse: {
-            amount: exp.china_warehouse,
-            currency: exp.china_warehouse_currency,
-            amount_usd: exp.china_warehouse_usd,
-          },
-          company_service: {
-            amount: exp.company_service,
-            currency: exp.company_service_currency,
-            amount_usd: exp.company_service_usd,
-          },
-          customs_clearance_of_goods: {
-            amount: exp.customs_clearance_of_goods,
-            currency: exp.customs_clearance_of_goods_currency,
-            amount_usd: exp.customs_clearance_of_goods_usd,
-          },
-          cct: {
-            amount: exp.cct,
-            currency: exp.cct_currency,
-            amount_usd: exp.cct_usd,
-          },
-          total_usd: exp.total_usd,
-        },
         capacity: {
           max_volume_m3: maxVolume,
           assigned_volume_m3: assignedVolume,
@@ -1128,11 +1059,6 @@ export class CargoConsolidationsService {
             },
             total_usd: exp.total_usd,
           },
-          carrier_cost: {
-            amount: exp.agent,
-            currency: exp.agent_currency,
-            amount_usd: exp.agent_usd,
-          },
           consolidated_net_margin: {
             amount: netMarginUsd,
             currency: 'USD',
@@ -1141,7 +1067,6 @@ export class CargoConsolidationsService {
           net_profit_usd: netMarginUsd,
         },
         description: r.description,
-        cargos: assignedCargos,
         created_at: r.created_at,
         updated_at: r.updated_at,
       };
@@ -1333,7 +1258,7 @@ export class CargoConsolidationsService {
       totalWeight += wt;
 
       const cargoItem = this.formatCargoItem(r, true, rates);
-      totalSellUsd += cargoItem.sell_price.amount_usd;
+      totalSellUsd += cargoItem.total_income_usd;
 
       return cargoItem;
     });
@@ -1406,45 +1331,6 @@ export class CargoConsolidationsService {
         consolidation.estimated_arrival_date,
       ),
       arrived_date: this.formatDateStr(consolidation.arrived_date),
-      agent: exp.agent,
-      agent_currency: exp.agent_currency,
-      china_warehouse: exp.china_warehouse,
-      china_warehouse_currency: exp.china_warehouse_currency,
-      company_service: exp.company_service,
-      company_service_currency: exp.company_service_currency,
-      customs_clearance_of_goods: exp.customs_clearance_of_goods,
-      customs_clearance_of_goods_currency:
-        exp.customs_clearance_of_goods_currency,
-      cct: exp.cct,
-      cct_currency: exp.cct_currency,
-      expenses: {
-        agent: {
-          amount: exp.agent,
-          currency: exp.agent_currency,
-          amount_usd: exp.agent_usd,
-        },
-        china_warehouse: {
-          amount: exp.china_warehouse,
-          currency: exp.china_warehouse_currency,
-          amount_usd: exp.china_warehouse_usd,
-        },
-        company_service: {
-          amount: exp.company_service,
-          currency: exp.company_service_currency,
-          amount_usd: exp.company_service_usd,
-        },
-        customs_clearance_of_goods: {
-          amount: exp.customs_clearance_of_goods,
-          currency: exp.customs_clearance_of_goods_currency,
-          amount_usd: exp.customs_clearance_of_goods_usd,
-        },
-        cct: {
-          amount: exp.cct,
-          currency: exp.cct_currency,
-          amount_usd: exp.cct_usd,
-        },
-        total_usd: exp.total_usd,
-      },
       capacity: {
         max_volume_m3: maxVolume,
         assigned_volume_m3: Math.round(totalVolume * 10000) / 10000,
@@ -1492,11 +1378,6 @@ export class CargoConsolidationsService {
             amount_usd: exp.cct_usd,
           },
           total_usd: exp.total_usd,
-        },
-        carrier_cost: {
-          amount: exp.agent,
-          currency: exp.agent_currency,
-          amount_usd: exp.agent_usd,
         },
         consolidated_net_margin: {
           amount: netMarginUsd,

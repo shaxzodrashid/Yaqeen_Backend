@@ -171,7 +171,7 @@ Permissions are managed dynamically in the Role & Permissions matrix under the `
 
 ### 5.1. List Consolidations (`GET /api/v1/consolidations`)
 
-Returns a paginated list of all consolidations, complete with their capacity utilization, financials, and the full array of assigned cargo records for each vehicle.
+Returns a paginated list of all consolidations, complete with their capacity utilization and financials. Assigned cargo registrations are omitted for performance and provided in the single details endpoint.
 
 #### Query Parameters
 
@@ -201,10 +201,10 @@ Returns a paginated list of all consolidations, complete with their capacity uti
     "limit": 10,
     "offset": 0,
     "consolidated_net_margin": {
-      "USD": -1600.0,
-      "UZS": -20560000.0,
-      "RUB": -141793.1,
-      "RMB": -11327.82
+      "USD": 500.0,
+      "UZS": 6425000.0,
+      "RUB": 44310.34,
+      "RMB": 3539.94
     }
   },
   "data": [
@@ -223,20 +223,6 @@ Returns a paginated list of all consolidations, complete with their capacity uti
       "departure_date": "2026-08-25",
       "estimated_arrival_date": "2026-09-02",
       "arrived_date": null,
-      "agent": 3500.0,
-      "china_warehouse": 200.0,
-      "company_service": 100.0,
-      "customs_clearance_of_goods": 400.0,
-      "cct": 100.0,
-      "expenses": {
-        "agent": 3500.0,
-        "china_warehouse": 200.0,
-        "company_service": 100.0,
-        "customs_clearance_of_goods": 400.0,
-        "cct": 100.0,
-        "total": 4300.0,
-        "total_usd": 4300.0
-      },
       "capacity": {
         "max_volume_m3": 86.0,
         "assigned_volume_m3": 17.5,
@@ -258,18 +244,32 @@ Returns a paginated list of all consolidations, complete with their capacity uti
         "total_outcome_usd": 4300.0,
         "total_purchase_usd": 0.0,
         "expenses": {
-          "agent": 3500.0,
-          "china_warehouse": 200.0,
-          "company_service": 100.0,
-          "customs_clearance_of_goods": 400.0,
-          "cct": 100.0,
-          "total": 4300.0,
+          "agent": {
+            "amount": 3500.0,
+            "currency": "USD",
+            "amount_usd": 3500.0
+          },
+          "china_warehouse": {
+            "amount": 200.0,
+            "currency": "USD",
+            "amount_usd": 200.0
+          },
+          "company_service": {
+            "amount": 100.0,
+            "currency": "USD",
+            "amount_usd": 100.0
+          },
+          "customs_clearance_of_goods": {
+            "amount": 400.0,
+            "currency": "USD",
+            "amount_usd": 400.0
+          },
+          "cct": {
+            "amount": 100.0,
+            "currency": "USD",
+            "amount_usd": 100.0
+          },
           "total_usd": 4300.0
-        },
-        "carrier_cost": {
-          "amount": 3500.0,
-          "currency": "USD",
-          "amount_usd": 3500.0
         },
         "consolidated_net_margin": {
           "amount": 500.0,
@@ -279,45 +279,6 @@ Returns a paginated list of all consolidations, complete with their capacity uti
         "net_profit_usd": 500.0
       },
       "description": "Chemicals & Textile groupage batch",
-      "cargos": [
-        {
-          "id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
-          "cargo_type": "LTL",
-          "cargo": "Chemical Products",
-          "volume": 5.5,
-          "weight": 1200.0,
-          "container_type": null,
-          "container_truck_id": "01A777AA",
-          "agent_name": "Baytur Agent",
-          "client": {
-            "id": "b1b2b3b4-1111-2222-3333-444455556666",
-            "name": "AIGUL LLC"
-          },
-          "employee": {
-            "id": "e1e2e3e4-1111-2222-3333-444455556666",
-            "name": "Farhod"
-          },
-          "purchase_price": {
-            "amount": 900.0,
-            "currency": "USD",
-            "amount_usd": 900.0
-          },
-          "sell_price": {
-            "amount": 1600.0,
-            "currency": "USD",
-            "amount_usd": 1600.0
-          },
-          "net_yield_usd": 700.0,
-          "status": "Waiting",
-          "loaded_date": null,
-          "arrived_date": null,
-          "confirmed_date": "2026-08-20",
-          "purchase_date": "2026-08-20",
-          "sell_date": "2026-08-20",
-          "created_at": "2026-08-21T10:00:00.000Z",
-          "updated_at": "2026-08-21T10:00:00.000Z"
-        }
-      ],
       "created_at": "2026-08-21T10:15:00.000Z",
       "updated_at": "2026-08-21T10:15:00.000Z"
     }
@@ -339,29 +300,18 @@ Retrieves full operational and financial details of a specific consolidation (id
   "consolidation_code": "CNS-202608-0001",
   "container_truck_id": "01A777AA",
   "container_type": "86m3",
-  "status": "Loading",
+  "status": "Waiting",
   "carrier_name": "Baytur Turkish",
   "carrier_phone": "+998901234567",
   "origin_place": "Istanbul",
   "destination_place": "Tashkent",
+  "load_date": null,
   "loaded_date": null,
   "departure_date": "2026-08-25",
+  "border_arrival_date": null,
+  "tashkent_arrival_date": null,
   "estimated_arrival_date": "2026-09-02",
   "arrived_date": null,
-  "agent": 3500.0,
-  "china_warehouse": 200.0,
-  "company_service": 100.0,
-  "customs_clearance_of_goods": 400.0,
-  "cct": 100.0,
-  "expenses": {
-    "agent": 3500.0,
-    "china_warehouse": 200.0,
-    "company_service": 100.0,
-    "customs_clearance_of_goods": 400.0,
-    "cct": 100.0,
-    "total": 4300.0,
-    "total_usd": 4300.0
-  },
   "capacity": {
     "max_volume_m3": 86.0,
     "assigned_volume_m3": 17.5,
@@ -383,18 +333,32 @@ Retrieves full operational and financial details of a specific consolidation (id
     "total_outcome_usd": 4300.0,
     "total_purchase_usd": 0.0,
     "expenses": {
-      "agent": 3500.0,
-      "china_warehouse": 200.0,
-      "company_service": 100.0,
-      "customs_clearance_of_goods": 400.0,
-      "cct": 100.0,
-      "total": 4300.0,
+      "agent": {
+        "amount": 3500.0,
+        "currency": "USD",
+        "amount_usd": 3500.0
+      },
+      "china_warehouse": {
+        "amount": 200.0,
+        "currency": "USD",
+        "amount_usd": 200.0
+      },
+      "company_service": {
+        "amount": 100.0,
+        "currency": "USD",
+        "amount_usd": 100.0
+      },
+      "customs_clearance_of_goods": {
+        "amount": 400.0,
+        "currency": "USD",
+        "amount_usd": 400.0
+      },
+      "cct": {
+        "amount": 100.0,
+        "currency": "USD",
+        "amount_usd": 100.0
+      },
       "total_usd": 4300.0
-    },
-    "carrier_cost": {
-      "amount": 3500.0,
-      "currency": "USD",
-      "amount_usd": 3500.0
     },
     "consolidated_net_margin": {
       "amount": 500.0,
@@ -510,17 +474,48 @@ Retrieves full operational and financial details of a specific consolidation (id
     "total_cargos_count": 2
   },
   "financials": {
+    "income": 4800.0,
+    "income_usd": 4800.0,
+    "total_income_usd": 4800.0,
     "total_sell_usd": 4800.0,
-    "total_purchase_usd": 2900.0,
-    "carrier_cost": {
-      "amount": 3500.0,
-      "currency": "USD",
-      "amount_usd": 3500.0
+    "outcome": 4300.0,
+    "outcome_usd": 4300.0,
+    "total_outcome_usd": 4300.0,
+    "total_purchase_usd": 0.0,
+    "expenses": {
+      "agent": {
+        "amount": 3500.0,
+        "currency": "USD",
+        "amount_usd": 3500.0
+      },
+      "china_warehouse": {
+        "amount": 200.0,
+        "currency": "USD",
+        "amount_usd": 200.0
+      },
+      "company_service": {
+        "amount": 100.0,
+        "currency": "USD",
+        "amount_usd": 100.0
+      },
+      "customs_clearance_of_goods": {
+        "amount": 400.0,
+        "currency": "USD",
+        "amount_usd": 400.0
+      },
+      "cct": {
+        "amount": 100.0,
+        "currency": "USD",
+        "amount_usd": 100.0
+      },
+      "total_usd": 4300.0
     },
     "consolidated_net_margin": {
-      "amount": -1600.0,
+      "amount": 500.0,
       "currency": "USD"
-    }
+    },
+    "net_margin_usd": 500.0,
+    "net_profit_usd": 500.0
   },
   "description": "Chemicals & Textile groupage batch",
   "cargos": [

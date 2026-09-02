@@ -323,10 +323,10 @@ describe('CargoConsolidationsService', () => {
       // Financials: Total Income (Sell) = $7500, Total Outcome (Expenses) = $2000 (Agent), Net Margin = $7500 - $2000 = $5500
       expect(details.financials.total_sell_usd).toBe(7500);
       expect(details.financials.total_income_usd).toBe(7500);
-      expect(details.financials.total_outcome_usd).toBe(2000);
       expect(details.financials.total_purchase_usd).toBe(0);
-      expect(details.financials.carrier_cost.amount_usd).toBe(2000);
-      expect(details.expenses).toEqual({
+      expect((details.financials as any).carrier_cost).toBeUndefined();
+      expect((details as any).expenses).toBeUndefined();
+      expect(details.financials.expenses).toEqual({
         agent: { amount: 2000, currency: 'USD', amount_usd: 2000 },
         china_warehouse: { amount: 0, currency: 'USD', amount_usd: 0 },
         company_service: { amount: 0, currency: 'USD', amount_usd: 0 },
@@ -472,12 +472,14 @@ describe('CargoConsolidationsService', () => {
         amount: 1500,
         currency: 'USD',
       });
-      expect(result.data[0].cargos).toHaveLength(1);
-      expect(result.data[0].cargos[0].id).toBe('cargo-1');
-      expect(result.data[0].cargos[0].cargo).toBe('Chemicals');
-      expect(result.data[0].cargos[0].client.name).toBe('Bobur');
-      expect(result.data[0].cargos[0].employee.name).toBe('Aziz');
-      expect(result.data[0].cargos[0].net_yield_usd).toBe(800.0);
+      expect((result.data[0] as any).cargos).toBeUndefined();
+      expect((result.data[0] as any).expenses).toBeUndefined();
+      expect((result.data[0].financials as any).carrier_cost).toBeUndefined();
+      expect(result.data[0].financials.expenses.agent).toEqual({
+        amount: 500,
+        currency: 'USD',
+        amount_usd: 500,
+      });
     });
 
     it('should handle empty results gracefully with zeros in consolidated_net_margin and volume capacities', async () => {
@@ -1174,7 +1176,9 @@ describe('CargoConsolidationsService', () => {
       expect(res.financials.total_purchase_usd).toBe(0);
       expect(res.financials.consolidated_net_margin.amount).toBe(7350);
       expect(res.financials.net_profit_usd).toBe(7350);
-      expect(res.expenses).toEqual({
+      expect((res as any).expenses).toBeUndefined();
+      expect((res.financials as any).carrier_cost).toBeUndefined();
+      expect(res.financials.expenses).toEqual({
         agent: { amount: 3000, currency: 'USD', amount_usd: 3000 },
         china_warehouse: {
           amount: 500,
@@ -1232,6 +1236,105 @@ describe('CargoConsolidationsService', () => {
       );
       expect(agentErr).toBeDefined();
       expect(chinaWarehouseErr).toBeDefined();
+    });
+
+    it('should correctly convert agent expense in UZS to USD using rates when carrier_cost_usd_rate is 1.0 (not dividing by 1)', () => {
+      const row = {
+        agent: 12850000,
+        agent_currency: 'UZS',
+        carrier_cost_currency: 'USD',
+        carrier_cost_usd_rate: 1.0,
+      };
+
+      const rates = {
+        USD: { currency: 'USD', rate: 12850, nominal: 1 },
+        UZS: { currency: 'UZS', rate: 1, nominal: 1 },
+      };
+
+      const exp = service.computeConsolidationExpenses(row, rates);
+      expect(exp.agent).toBe(12850000);
+      expect(exp.agent_currency).toBe('UZS');
+      // 12,850,000 UZS / 12,850 = $1,000 USD, NOT $12,850,000
+      expect(exp.agent_usd).toBe(1000);
+      expect(exp.total_usd).toBe(1000);
+    });
+
+    it('should use custom carrier_cost_usd_rate when rate > 1 is specified for UZS', () => {
+      const row = {
+        agent: 12500000,
+        agent_currency: 'UZS',
+        carrier_cost_currency: 'UZS',
+        carrier_cost_usd_rate: 12500,
+      };
+
+      const rates = {
+        USD: { currency: 'USD', rate: 12850, nominal: 1 },
+        UZS: { currency: 'UZS', rate: 1, nominal: 1 },
+      };
+
+      const exp = service.computeConsolidationExpenses(row, rates);
+      expect(exp.agent).toBe(12500000);
+      expect(exp.agent_currency).toBe('UZS');
+      // 12,500,000 UZS / 12,500 = $1,000 USD
+      expect(exp.agent_usd).toBe(1000);
+      expect(exp.total_usd).toBe(1000);
+    });
+
+    it('should include turnkey and speed_up prices in findConsolidationDetails income and net margin', async () => {
+      knexMock.mockImplementation((tableName: string) => {
+        if (tableName === 'cargo_consolidations') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'cons-income-1',
+              consolidation_code: 'CNS-202609-0001',
+              container_truck_id: '01A999AA',
+              agent: 1000,
+              agent_currency: 'USD',
+              carrier_cost_currency: 'USD',
+              carrier_cost_usd_rate: 1.0,
+            }),
+          };
+        }
+        if (tableName === 'cargo_registrations as cr') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            orderBy: jest.fn().mockResolvedValue([
+              {
+                id: 'cargo-turnkey-1',
+                cargo_type: 'LTL',
+                cargo: 'Machines',
+                volume: 10,
+                weight: 2000,
+                sell_price: 3000,
+                sell_currency: 'USD',
+                is_turnkey: true,
+                turnkey_price: 500,
+                turnkey_currency: 'USD',
+                speed_up: 200,
+                speed_up_currency: 'USD',
+              },
+            ]),
+          };
+        }
+        return {};
+      });
+
+      const details = await service.findConsolidationDetails('cons-income-1');
+      // Total Income = 3000 (sell) + 500 (turnkey) + 200 (speed_up) = 3700 USD
+      expect(details.financials.income).toBe(3700);
+      expect(details.financials.total_income_usd).toBe(3700);
+      expect(details.financials.total_sell_usd).toBe(3700);
+      expect(details.financials.outcome).toBe(1000);
+      expect(details.financials.consolidated_net_margin.amount).toBe(2700);
+      expect(details.financials.net_profit_usd).toBe(2700);
+      expect(details.cargos).toHaveLength(1);
+      expect(details.cargos[0].total_income_usd).toBe(3700);
+      expect((details as any).expenses).toBeUndefined();
+      expect((details as any).agent).toBeUndefined();
+      expect((details.financials as any).carrier_cost).toBeUndefined();
     });
   });
 });
