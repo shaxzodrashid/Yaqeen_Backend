@@ -42,42 +42,9 @@ export async function up(knex: Knex): Promise<void> {
       });
     }
   }
-
-  // 3. Update check constraint on expenses table to allow internal_logistics category
-  const hasExpensesTable = await knex.schema.hasTable('expenses');
-  if (hasExpensesTable) {
-    try {
-      await knex.schema.alterTable('expenses', (table) => {
-        table.dropChecks(['expenses_category_check']);
-        table.check(
-          `category IN ('tax', 'utility', 'rent', 'salary_payout', 'cleaner', 'kpi', 'food', 'other', 'china_warehouse', 'firm_service', 'declarant', 'internal_logistics')`,
-          [],
-          'expenses_category_check',
-        );
-      });
-    } catch {
-      // Ignore if table does not have check constraint or in mock DB
-    }
-  }
 }
 
 export async function down(knex: Knex): Promise<void> {
-  const hasExpensesTable = await knex.schema.hasTable('expenses');
-  if (hasExpensesTable) {
-    try {
-      await knex.schema.alterTable('expenses', (table) => {
-        table.dropChecks(['expenses_category_check']);
-        table.check(
-          `category IN ('tax', 'utility', 'rent', 'salary_payout', 'cleaner', 'kpi', 'food', 'other', 'china_warehouse', 'firm_service', 'declarant')`,
-          [],
-          'expenses_category_check',
-        );
-      });
-    } catch {
-      // Ignore if constraint does not exist
-    }
-  }
-
   const hasCargoTxTable = await knex.schema.hasTable('cargo_transactions');
   if (hasCargoTxTable) {
     const hasTxInternalLogisticsCost = await knex.schema.hasColumn(

@@ -751,40 +751,5 @@ describe('FinanceService', () => {
       // LTL COGS should include additional_expense (100) + internal_logistics_cost (400) = 500 USD
       expect(res.summary.cost_of_goods_sold).toBe(500);
     });
-
-    it('should allow creating an expense with category internal_logistics in LTL section', async () => {
-      mockKnex.mockImplementation((table: string) => {
-        if (table === 'expenses') {
-          return {
-            insert: jest.fn().mockReturnThis(),
-            returning: jest.fn().mockResolvedValue([
-              {
-                id: 'exp-int-1',
-                section: ExpenseSection.LTL,
-                category: ExpenseCategory.INTERNAL_LOGISTICS,
-                amount: 300,
-                currency: Currency.USD,
-                description: 'Local China trucking to warehouse',
-                expense_date: '2026-08-15',
-              },
-            ]),
-          };
-        }
-        return {};
-      });
-
-      const exp = await service.createExpense({
-        section: ExpenseSection.LTL,
-        category: ExpenseCategory.INTERNAL_LOGISTICS,
-        amount: 300,
-        currency: Currency.USD,
-        description: 'Local China trucking to warehouse',
-        expense_date: '2026-08-15',
-      });
-
-      expect(exp).toBeDefined();
-      expect(exp.category).toBe('internal_logistics');
-      expect(exp.section).toBe('ltl');
-    });
   });
 });
