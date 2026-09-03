@@ -307,6 +307,8 @@ export class SalesManagerKpiService {
           'speed_up_currency',
           'additional_expense',
           'additional_expense_currency',
+          'internal_logistics_cost',
+          'internal_logistics_currency',
         );
 
       for (const reg of regRows) {
@@ -359,6 +361,17 @@ export class SalesManagerKpiService {
           buyUsd += await this.convertToUsd(
             addExpAmt,
             addExpCurr,
+            rates,
+            usdRmb,
+          );
+        }
+
+        const intLogAmt = Number(reg.internal_logistics_cost || 0);
+        if (intLogAmt > 0) {
+          const intLogCurr = reg.internal_logistics_currency || 'USD';
+          buyUsd += await this.convertToUsd(
+            intLogAmt,
+            intLogCurr,
             rates,
             usdRmb,
           );
@@ -765,6 +778,8 @@ export class SalesManagerKpiService {
           'cr.speed_up_currency',
           'cr.additional_expense',
           'cr.additional_expense_currency',
+          'cr.internal_logistics_cost',
+          'cr.internal_logistics_currency',
           'cr.client_id',
           'c.first_name as client_first_name',
           'c.last_name as client_last_name',
@@ -825,6 +840,17 @@ export class SalesManagerKpiService {
           );
         }
 
+        const intLogAmt = Number(r.internal_logistics_cost || 0);
+        if (intLogAmt > 0) {
+          const intLogCurr = r.internal_logistics_currency || 'USD';
+          buyUsd += await this.convertToUsd(
+            intLogAmt,
+            intLogCurr,
+            rates,
+            usdRmb,
+          );
+        }
+
         const profit = sellUsd - buyUsd;
 
         const normStatus = this.normalizePaymentStatus(r.payment_status);
@@ -854,6 +880,8 @@ export class SalesManagerKpiService {
           speed_up_currency: r.speed_up_currency || r.sell_currency || 'USD',
           additional_expense: Number(r.additional_expense || 0),
           additional_expense_currency: r.additional_expense_currency || 'USD',
+          internal_logistics_cost: Number(r.internal_logistics_cost || 0),
+          internal_logistics_currency: r.internal_logistics_currency || 'USD',
           payment_deadline_days:
             r.payment_deadline_days !== null &&
             r.payment_deadline_days !== undefined

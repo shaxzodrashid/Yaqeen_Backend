@@ -1026,6 +1026,8 @@ export class FinanceService {
           'created_at',
           'additional_expense',
           'additional_expense_currency',
+          'internal_logistics_cost',
+          'internal_logistics_currency',
         )
         .whereRaw(
           'COALESCE(purchase_date, confirmed_date, created_at::date) >= ?',
@@ -1058,6 +1060,20 @@ export class FinanceService {
           rowAmtUsd += this.convertCargoPriceToUsd(
             addExpAmt,
             addExpCurr,
+            rates,
+            usdRmb,
+            customRate,
+          );
+        }
+
+        const internalLogAmt =
+          parseFloat(row.internal_logistics_cost as string) || 0;
+        if (internalLogAmt > 0) {
+          const internalLogCurr =
+            (row.internal_logistics_currency as Currency) || Currency.USD;
+          rowAmtUsd += this.convertCargoPriceToUsd(
+            internalLogAmt,
+            internalLogCurr,
             rates,
             usdRmb,
             customRate,

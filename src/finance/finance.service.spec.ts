@@ -690,5 +690,101 @@ describe('FinanceService', () => {
       expect(ltlRes.expense_breakdown['food']).toEqual(600); // Strictly LTL food
       expect(ltlRes.expense_breakdown['china_warehouse']).toEqual(1400);
     });
+
+    it('should include internal_logistics_cost of LTL cargos in LTL COGS', async () => {
+      mockKnex.mockImplementation((table: string) => {
+        if (table === 'cargo_registrations') {
+          return {
+            select: jest.fn().mockReturnThis(),
+            whereRaw: jest.fn().mockReturnThis(),
+            then: jest.fn((callback) =>
+              callback([
+                {
+                  cargo_type: 'LTL',
+                  purchase_price: 0,
+                  purchase_currency: 'USD',
+                  purchase_date: '2026-08-10',
+                  purchase_usd_rate: 1,
+                  additional_expense: 100,
+                  additional_expense_currency: 'USD',
+                  internal_logistics_cost: 400,
+                  internal_logistics_currency: 'USD',
+                },
+              ]),
+            ),
+          };
+        }
+        if (table === 'cargo_transactions') {
+          return {
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            then: jest.fn((callback) => callback([])),
+          };
+        }
+        if (table === 'expenses') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            whereRaw: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ total: 0 }),
+            select: jest.fn().mockReturnThis(),
+            then: jest.fn((callback) => callback([])),
+          };
+        }
+        if (table === 'employees') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ total: 0 }),
+          };
+        }
+        return {
+          where: jest.fn().mockReturnThis(),
+          then: jest.fn((callback) => callback([])),
+        };
+      });
+
+      const res = await service.getFinanceSummary({
+        section: ExpenseSection.LTL,
+        period: '2026-08',
+        currency: Currency.USD,
+      });
+
+      // LTL COGS should include additional_expense (100) + internal_logistics_cost (400) = 500 USD
+      expect(res.summary.cost_of_goods_sold).toBe(500);
+    });
+
+    it('should allow creating an expense with category internal_logistics in LTL section', async () => {
+      mockKnex.mockImplementation((table: string) => {
+        if (table === 'expenses') {
+          return {
+            insert: jest.fn().mockReturnThis(),
+            returning: jest.fn().mockResolvedValue([
+              {
+                id: 'exp-int-1',
+                section: ExpenseSection.LTL,
+                category: ExpenseCategory.INTERNAL_LOGISTICS,
+                amount: 300,
+                currency: Currency.USD,
+                description: 'Local China trucking to warehouse',
+                expense_date: '2026-08-15',
+              },
+            ]),
+          };
+        }
+        return {};
+      });
+
+      const exp = await service.createExpense({
+        section: ExpenseSection.LTL,
+        category: ExpenseCategory.INTERNAL_LOGISTICS,
+        amount: 300,
+        currency: Currency.USD,
+        description: 'Local China trucking to warehouse',
+        expense_date: '2026-08-15',
+      });
+
+      expect(exp).toBeDefined();
+      expect(exp.category).toBe('internal_logistics');
+      expect(exp.section).toBe('ltl');
+    });
   });
 });

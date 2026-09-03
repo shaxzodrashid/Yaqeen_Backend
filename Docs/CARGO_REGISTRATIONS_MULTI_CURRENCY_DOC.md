@@ -52,12 +52,13 @@ $$S_{UZS} = S_{sell} \times R_{USD}(d_{sell})$$
 
 #### Additional Expense (Purchase / Cost Side):
 - **Additional Expense ($E_{USD}$)**: Any unforeseen or supplementary transportation costs incurred, converted using `additional_expense_currency` (default: USD).
+- **Internal Logistics Cost ($I_{USD}$)**: Domestic/internal logistics and delivery costs incurred by us (company outcome/expense, e.g. factory-to-consolidation-warehouse transit for LTL cargos), converted using `internal_logistics_currency` (default: USD).
 
 #### Total Financials & Net Yield Calculation ($Y_{net}$):
 $$\text{Total Income}_{\text{USD}} = S_{USD} + T_{USD} + U_{USD}$$
 $$\text{Total Income}_{\text{UZS}} = S_{UZS} + T_{UZS} + U_{UZS}$$
-$$\text{Total Outcome}_{\text{USD}} = P_{USD} + E_{USD}$$
-$$\text{Total Outcome}_{\text{UZS}} = P_{UZS} + E_{UZS}$$
+$$\text{Total Outcome}_{\text{USD}} = P_{USD} + E_{USD} + I_{USD}$$
+$$\text{Total Outcome}_{\text{UZS}} = P_{UZS} + E_{UZS} + I_{UZS}$$
 $$Y_{net, \text{USD}} = \text{Total Income}_{\text{USD}} - \text{Total Outcome}_{\text{USD}}$$
 $$Y_{net, \text{UZS}} = \text{Total Income}_{\text{UZS}} - \text{Total Outcome}_{\text{UZS}}$$
 
@@ -88,6 +89,8 @@ The `cargo_registrations` table includes the following columns for currency date
 | `speed_up_currency` | `varchar(10)` | YES | Currency for speed up fee (`USD`, `UZS`, `RUB`, `RMB`, default: sell_currency) |
 | `additional_expense` | `decimal(14,2)` | NO | Additional cost / expense incurred (outcome, default: 0) |
 | `additional_expense_currency` | `varchar(10)` | YES | Currency for additional expense (`USD`, `UZS`, `RUB`, `RMB`, default: USD) |
+| `internal_logistics_cost` | `decimal(14,2)` | NO | Internal logistics outcome paid by us for LTL cargo (default: 0) |
+| `internal_logistics_currency` | `varchar(10)` | NO | Currency for internal logistics cost (`USD`, `UZS`, `RUB`, `RMB`, default: USD) |
 | `transport_types` | `text[]` | NO | Array of transport modalities (`auto`, `railway`, `air`, `sea`, `other`). Default: `ARRAY['auto']::text[]` |
 | `origin_city` | `varchar(255)` | YES | Origin departure city (e.g. `Yiwu`, `Guangzhou`, `Istanbul`) |
 | `origin_country` | `varchar(100)` | YES | Origin country name (e.g. `China`, `Turkey`) |

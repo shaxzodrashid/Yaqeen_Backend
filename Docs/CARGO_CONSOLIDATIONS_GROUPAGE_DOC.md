@@ -123,6 +123,10 @@ Consolidation Outcomes are the sum of its 3 individual operational expenses:
 
 $$\text{Total Consolidation Expenses (USD)} = \text{agent} + \text{customs\_clearance\_of\_goods (Tomojnya)} + \text{cct (Certificate)}$$
 
+Each individual attached LTL cargo also tracks its direct outcomes paid by the company:
+
+$$\text{Cargo Outcome (USD)} = r_i.\text{purchase\_price} + r_i.\text{additional\_expense} + r_i.\text{internal\_logistics\_cost}$$
+
 $$\text{Consolidated Net Margin (USD)} = \text{Consolidation Income (USD)} - \text{Total Consolidation Expenses (USD)}$$
 
 ---

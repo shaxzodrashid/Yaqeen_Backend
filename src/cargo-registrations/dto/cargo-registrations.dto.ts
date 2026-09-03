@@ -142,6 +142,25 @@ export class CreateCargoRegistrationDto {
   additional_expense_currency?: CargoCurrency;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'internal_logistics_cost must be a number' })
+  @Min(0, { message: 'internal_logistics_cost cannot be negative' })
+  internal_logistics_cost?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber({}, { message: 'internal_logistics must be a number' })
+  @Min(0, { message: 'internal_logistics cannot be negative' })
+  internal_logistics?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES, {
+    message: 'internal_logistics_currency must be UZS, RUB, USD, or RMB',
+  })
+  internal_logistics_currency?: CargoCurrency;
+
+  @IsOptional()
   @IsString()
   container_type?: string;
 
@@ -421,6 +440,23 @@ export class UpdateCargoRegistrationDto {
   @IsString()
   @IsIn(ALLOWED_CURRENCIES)
   additional_expense_currency?: CargoCurrency;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  internal_logistics_cost?: number;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  internal_logistics?: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(ALLOWED_CURRENCIES)
+  internal_logistics_currency?: CargoCurrency;
 
   @IsOptional()
   @IsString()

@@ -1002,6 +1002,14 @@ export class CargoRegistrationsService {
       dto.additional_expense !== undefined ? Number(dto.additional_expense) : 0;
     const additionalExpenseCurrency = dto.additional_expense_currency || 'USD';
 
+    const internalLogisticsCost =
+      dto.internal_logistics_cost !== undefined
+        ? Number(dto.internal_logistics_cost)
+        : dto.internal_logistics !== undefined
+          ? Number(dto.internal_logistics)
+          : 0;
+    const internalLogisticsCurrency = dto.internal_logistics_currency || 'USD';
+
     const [inserted] = await this.knex('cargo_registrations')
       .insert({
         cargo_type: dto.cargo_type,
@@ -1019,6 +1027,8 @@ export class CargoRegistrationsService {
         speed_up_currency: speedUpCurrency,
         additional_expense: additionalExpense,
         additional_expense_currency: additionalExpenseCurrency,
+        internal_logistics_cost: internalLogisticsCost,
+        internal_logistics_currency: internalLogisticsCurrency,
         container_type:
           dto.cargo_type === 'FTL' && finalContainerType
             ? finalContainerType
@@ -1288,6 +1298,20 @@ export class CargoRegistrationsService {
     if (dto.additional_expense_currency !== undefined) {
       updatePayload.additional_expense_currency =
         dto.additional_expense_currency;
+    }
+
+    if (
+      dto.internal_logistics_cost !== undefined ||
+      dto.internal_logistics !== undefined
+    ) {
+      updatePayload.internal_logistics_cost =
+        dto.internal_logistics_cost !== undefined
+          ? Number(dto.internal_logistics_cost)
+          : Number(dto.internal_logistics);
+    }
+    if (dto.internal_logistics_currency !== undefined) {
+      updatePayload.internal_logistics_currency =
+        dto.internal_logistics_currency;
     }
 
     if (dto.transport_types !== undefined)
@@ -1968,6 +1992,19 @@ export class CargoRegistrationsService {
               END
             ELSE 0
           END
+          +
+          CASE
+            WHEN cr.internal_logistics_cost > 0 THEN
+              CASE
+                WHEN COALESCE(cr.internal_logistics_currency, 'USD') = 'USD' THEN cr.internal_logistics_cost
+                WHEN COALESCE(cr.internal_logistics_currency, 'USD') = 'UZS' THEN cr.internal_logistics_cost / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
+                WHEN COALESCE(cr.internal_logistics_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.internal_logistics_cost / cr.usd_rmb_rate
+                WHEN COALESCE(cr.internal_logistics_currency, 'USD') IN ('RMB', 'CNY') THEN (cr.internal_logistics_cost * ${rmbRate}) / ${usdRate}
+                WHEN COALESCE(cr.internal_logistics_currency, 'USD') = 'RUB' THEN (cr.internal_logistics_cost * ${rubRate}) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
+                ELSE cr.internal_logistics_cost
+              END
+            ELSE 0
+          END
         ), 0) as total_purchase_usd,
         COALESCE(SUM(
           CASE
@@ -1987,6 +2024,19 @@ export class CargoRegistrationsService {
                 WHEN COALESCE(cr.additional_expense_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.additional_expense / cr.usd_rmb_rate) * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate})
                 WHEN COALESCE(cr.additional_expense_currency, 'USD') IN ('RMB', 'CNY') THEN cr.additional_expense * ${rmbRate}
                 WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'RUB' THEN cr.additional_expense * ${rubRate}
+                ELSE 0
+              END
+            ELSE 0
+          END
+          +
+          CASE
+            WHEN cr.internal_logistics_cost > 0 THEN
+              CASE
+                WHEN COALESCE(cr.internal_logistics_currency, 'USD') = 'UZS' THEN cr.internal_logistics_cost
+                WHEN COALESCE(cr.internal_logistics_currency, 'USD') = 'USD' THEN cr.internal_logistics_cost * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate})
+                WHEN COALESCE(cr.internal_logistics_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.internal_logistics_cost / cr.usd_rmb_rate) * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate})
+                WHEN COALESCE(cr.internal_logistics_currency, 'USD') IN ('RMB', 'CNY') THEN cr.internal_logistics_cost * ${rmbRate}
+                WHEN COALESCE(cr.internal_logistics_currency, 'USD') = 'RUB' THEN cr.internal_logistics_cost * ${rubRate}
                 ELSE 0
               END
             ELSE 0
@@ -2048,6 +2098,8 @@ export class CargoRegistrationsService {
           'cr.speed_up_currency',
           'cr.additional_expense',
           'cr.additional_expense_currency',
+          'cr.internal_logistics_cost',
+          'cr.internal_logistics_currency',
           'cr.container_type',
           'cr.transport_types',
           'cr.container_truck_id',
@@ -2166,6 +2218,11 @@ export class CargoRegistrationsService {
           const additionalExpenseAmount = Number(r.additional_expense || 0);
           const additionalExpenseCurrency =
             r.additional_expense_currency || 'USD';
+          const internalLogisticsAmount = Number(
+            r.internal_logistics_cost || r.internal_logistics || 0,
+          );
+          const internalLogisticsCurrency =
+            r.internal_logistics_currency || 'USD';
 
           const purchaseDate = this.formatDateStr(
             r.purchase_date || r.confirmed_date || r.created_at,
@@ -2220,6 +2277,13 @@ export class CargoRegistrationsService {
             r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
           );
 
+          const internalLogisticsRes = this.convertPriceToUsdAndUzs(
+            internalLogisticsAmount,
+            internalLogisticsCurrency,
+            purchaseRates,
+            r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
+          );
+
           const totalIncomeUsd =
             Math.round(
               (sellRes.amount_usd +
@@ -2237,11 +2301,17 @@ export class CargoRegistrationsService {
 
           const totalOutcomeUsd =
             Math.round(
-              (purchaseRes.amount_usd + additionalExpenseRes.amount_usd) * 100,
+              (purchaseRes.amount_usd +
+                additionalExpenseRes.amount_usd +
+                internalLogisticsRes.amount_usd) *
+                100,
             ) / 100;
           const totalOutcomeUzs =
             Math.round(
-              (purchaseRes.amount_uzs + additionalExpenseRes.amount_uzs) * 100,
+              (purchaseRes.amount_uzs +
+                additionalExpenseRes.amount_uzs +
+                internalLogisticsRes.amount_uzs) *
+                100,
             ) / 100;
 
           const netYieldUsd =
@@ -2311,6 +2381,11 @@ export class CargoRegistrationsService {
             additional_expense_currency: additionalExpenseCurrency,
             additional_expense_amount_usd: additionalExpenseRes.amount_usd,
             additional_expense_amount_uzs: additionalExpenseRes.amount_uzs,
+            internal_logistics_cost: internalLogisticsAmount,
+            internal_logistics: internalLogisticsAmount,
+            internal_logistics_currency: internalLogisticsCurrency,
+            internal_logistics_amount_usd: internalLogisticsRes.amount_usd,
+            internal_logistics_amount_uzs: internalLogisticsRes.amount_uzs,
             total_income_usd: totalIncomeUsd,
             total_outcome_usd: totalOutcomeUsd,
             container_type: r.container_type,
@@ -2664,6 +2739,10 @@ export class CargoRegistrationsService {
     const isSpeedUp = Boolean(row.is_speed_up || speedUpAmount > 0);
     const additionalExpenseAmount = Number(row.additional_expense || 0);
     const additionalExpenseCurrency = row.additional_expense_currency || 'USD';
+    const internalLogisticsAmount = Number(
+      row.internal_logistics_cost || row.internal_logistics || 0,
+    );
+    const internalLogisticsCurrency = row.internal_logistics_currency || 'USD';
 
     const purchaseDate = this.formatDateStr(
       row.purchase_date || row.confirmed_date || row.created_at,
@@ -2733,6 +2812,13 @@ export class CargoRegistrationsService {
       row.usd_rmb_rate ? Number(row.usd_rmb_rate) : null,
     );
 
+    const internalLogisticsRes = this.convertPriceToUsdAndUzs(
+      internalLogisticsAmount,
+      internalLogisticsCurrency,
+      purchaseRates,
+      row.usd_rmb_rate ? Number(row.usd_rmb_rate) : null,
+    );
+
     const totalIncomeUsd =
       Math.round(
         (sellRes.amount_usd + turnkeyRes.amount_usd + speedUpRes.amount_usd) *
@@ -2746,11 +2832,17 @@ export class CargoRegistrationsService {
 
     const totalOutcomeUsd =
       Math.round(
-        (purchaseRes.amount_usd + additionalExpenseRes.amount_usd) * 100,
+        (purchaseRes.amount_usd +
+          additionalExpenseRes.amount_usd +
+          internalLogisticsRes.amount_usd) *
+          100,
       ) / 100;
     const totalOutcomeUzs =
       Math.round(
-        (purchaseRes.amount_uzs + additionalExpenseRes.amount_uzs) * 100,
+        (purchaseRes.amount_uzs +
+          additionalExpenseRes.amount_uzs +
+          internalLogisticsRes.amount_uzs) *
+          100,
       ) / 100;
 
     const netYieldUsd =
@@ -2820,6 +2912,11 @@ export class CargoRegistrationsService {
       additional_expense_currency: additionalExpenseCurrency,
       additional_expense_amount_usd: additionalExpenseRes.amount_usd,
       additional_expense_amount_uzs: additionalExpenseRes.amount_uzs,
+      internal_logistics_cost: internalLogisticsAmount,
+      internal_logistics: internalLogisticsAmount,
+      internal_logistics_currency: internalLogisticsCurrency,
+      internal_logistics_amount_usd: internalLogisticsRes.amount_usd,
+      internal_logistics_amount_uzs: internalLogisticsRes.amount_uzs,
       total_income_usd: totalIncomeUsd,
       total_outcome_usd: totalOutcomeUsd,
       container_type: row.container_type,
@@ -3095,6 +3192,9 @@ export class CargoRegistrationsService {
       case 'additional_expense':
       case 'expense':
         return queryBuilder.orderBy('cr.additional_expense', sortOrder);
+      case 'internal_logistics_cost':
+      case 'internal_logistics':
+        return queryBuilder.orderBy('cr.internal_logistics_cost', sortOrder);
       case 'id':
         return queryBuilder.orderBy('cr.id', sortOrder);
       case 'created_at':

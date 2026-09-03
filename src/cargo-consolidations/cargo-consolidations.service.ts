@@ -308,8 +308,19 @@ export class CargoConsolidationsService {
       );
     }
 
+    const internalLogisticsCurrency = r.internal_logistics_currency || 'USD';
+    let internalLogisticsUsd = 0;
+    if (Number(r.internal_logistics_cost || 0) > 0) {
+      internalLogisticsUsd = convertPrice(
+        Number(r.internal_logistics_cost),
+        internalLogisticsCurrency,
+        purchaseCustomRate ? Number(purchaseCustomRate) : undefined,
+      );
+    }
+
     const totalIncomeUsd = sellUsd + turnkeyUsd + speedUpUsd;
-    const totalOutcomeUsd = purchaseUsd + additionalExpenseUsd;
+    const totalOutcomeUsd =
+      purchaseUsd + additionalExpenseUsd + internalLogisticsUsd;
 
     const clientName = r.client_first_name
       ? `${r.client_first_name} ${r.client_last_name || ''}`.trim()
@@ -333,6 +344,11 @@ export class CargoConsolidationsService {
       speed_up_currency: speedUpCurrency,
       additional_expense: Number(r.additional_expense || 0),
       additional_expense_currency: additionalExpenseCurrency,
+      internal_logistics_cost: Number(r.internal_logistics_cost || 0),
+      internal_logistics: Number(r.internal_logistics_cost || 0),
+      internal_logistics_currency: internalLogisticsCurrency,
+      internal_logistics_amount_usd:
+        Math.round(internalLogisticsUsd * 100) / 100,
       total_income_usd: Math.round(totalIncomeUsd * 100) / 100,
       total_outcome_usd: Math.round(totalOutcomeUsd * 100) / 100,
       ...(isDetail
@@ -735,6 +751,19 @@ export class CargoConsolidationsService {
                 END
               ELSE 0
             END
+            +
+            CASE
+              WHEN cr.internal_logistics_cost > 0 THEN
+                CASE
+                  WHEN COALESCE(cr.internal_logistics_currency, 'USD') = 'USD' THEN cr.internal_logistics_cost
+                  WHEN COALESCE(cr.internal_logistics_currency, 'USD') = 'UZS' THEN cr.internal_logistics_cost / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
+                  WHEN COALESCE(cr.internal_logistics_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.internal_logistics_cost / cr.usd_rmb_rate
+                  WHEN COALESCE(cr.internal_logistics_currency, 'USD') IN ('RMB', 'CNY') THEN (cr.internal_logistics_cost * ${rmbRate}) / ${usdRate}
+                  WHEN COALESCE(cr.internal_logistics_currency, 'USD') = 'RUB' THEN (cr.internal_logistics_cost * ${rubRate}) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
+                  ELSE cr.internal_logistics_cost
+                END
+              ELSE 0
+            END
           ), 0) as total_cargos_purchase_usd
         `),
         this.knex.raw(`
@@ -884,6 +913,19 @@ export class CargoConsolidationsService {
                     WHEN COALESCE(cr.additional_expense_currency, 'USD') IN ('RMB', 'CNY') THEN (cr.additional_expense * ${rmbRate}) / ${usdRate}
                     WHEN COALESCE(cr.additional_expense_currency, 'USD') = 'RUB' THEN (cr.additional_expense * ${rubRate}) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
                     ELSE cr.additional_expense
+                  END
+                ELSE 0
+              END
+              +
+              CASE
+                WHEN cr.internal_logistics_cost > 0 THEN
+                  CASE
+                    WHEN COALESCE(cr.internal_logistics_currency, 'USD') = 'USD' THEN cr.internal_logistics_cost
+                    WHEN COALESCE(cr.internal_logistics_currency, 'USD') = 'UZS' THEN cr.internal_logistics_cost / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
+                    WHEN COALESCE(cr.internal_logistics_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.internal_logistics_cost / cr.usd_rmb_rate
+                    WHEN COALESCE(cr.internal_logistics_currency, 'USD') IN ('RMB', 'CNY') THEN (cr.internal_logistics_cost * ${rmbRate}) / ${usdRate}
+                    WHEN COALESCE(cr.internal_logistics_currency, 'USD') = 'RUB' THEN (cr.internal_logistics_cost * ${rubRate}) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
+                    ELSE cr.internal_logistics_cost
                   END
                 ELSE 0
               END

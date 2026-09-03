@@ -29,6 +29,7 @@ export enum ExpenseCategory {
   CHINA_WAREHOUSE = 'china_warehouse',
   FIRM_SERVICE = 'firm_service',
   DECLARANT = 'declarant',
+  INTERNAL_LOGISTICS = 'internal_logistics',
 }
 
 export const FTL_EXPENSE_CATEGORIES: ExpenseCategory[] = [
@@ -49,6 +50,7 @@ export const LTL_EXPENSE_CATEGORIES: ExpenseCategory[] = [
   ExpenseCategory.FIRM_SERVICE,
   ExpenseCategory.FOOD,
   ExpenseCategory.DECLARANT,
+  ExpenseCategory.INTERNAL_LOGISTICS,
 ];
 
 export const ALL_EXPENSE_CATEGORIES: ExpenseCategory[] =
@@ -154,6 +156,12 @@ export const LTL_CATEGORIES_METADATA: Record<
     section: ExpenseSection.LTL,
     label: 'Deklarant',
     description: 'Customs declaration processing and declarant fees',
+  },
+  [ExpenseCategory.INTERNAL_LOGISTICS]: {
+    category: ExpenseCategory.INTERNAL_LOGISTICS,
+    section: ExpenseSection.LTL,
+    label: 'Ichki logistika',
+    description: 'Internal and domestic logistics/delivery costs for LTL cargo',
   },
 } as any;
 

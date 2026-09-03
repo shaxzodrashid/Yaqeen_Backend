@@ -544,5 +544,78 @@ describe('SalesManagerKpiService', () => {
       expect(res.review_notes).toBe('Paid via bank card');
       expect(res.updated).toBe(true);
     });
+
+    it('should account for internal_logistics_cost in sales manager cargo profit calculation', async () => {
+      const customKnex: any = jest.fn((table: string) => {
+        if (table === 'employees') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'emp-1',
+              first_name: 'John',
+              last_name: 'Doe',
+              career_level: CareerLevel.JUNIOR,
+            }),
+          };
+        }
+        if (table === 'cargo_registrations as cr') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            select: jest.fn().mockResolvedValue([
+              {
+                id: 'cr-int-1',
+                cargo_type: 'LTL',
+                cargo: 'Shoes',
+                sell_price: 2000,
+                sell_currency: 'USD',
+                purchase_price: 0,
+                purchase_currency: 'USD',
+                internal_logistics_cost: 300,
+                internal_logistics_currency: 'USD',
+                payment_status: 'paid',
+                client_id: 'client-1',
+                client_first_name: 'Alisher',
+                client_last_name: 'Navoiy',
+              },
+            ]),
+          };
+        }
+        if (table === 'cargo_transactions as ct') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            select: jest.fn().mockResolvedValue([]),
+          };
+        }
+        return {
+          where: jest.fn().mockReturnThis(),
+          first: jest.fn().mockResolvedValue(null),
+        };
+      });
+      customKnex.schema = {
+        hasTable: jest.fn().mockResolvedValue(true),
+      };
+      customKnex.fn = { now: jest.fn() };
+
+      const testService = new SalesManagerKpiService(customKnex);
+      const res = await testService.getCargosMonitoring({
+        employee_id: 'emp-1',
+        month: '2026-08',
+      });
+
+      expect(res.data).toHaveLength(1);
+      const c = res.data[0];
+      expect(c.sell_price).toBe(2000);
+      expect(c.buy_price).toBe(300); // from internal_logistics_cost
+      expect(c.profit).toBe(1700); // 2000 - 300
+      expect(c.internal_logistics_cost).toBe(300);
+      expect(c.internal_logistics_currency).toBe('USD');
+      expect(res.meta.total_buy_price).toBe(300);
+      expect(res.meta.total_sell_price).toBe(2000);
+      expect(res.meta.total_profit).toBe(1700);
+    });
   });
 });

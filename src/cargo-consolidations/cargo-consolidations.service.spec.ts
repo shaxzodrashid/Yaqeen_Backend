@@ -1315,5 +1315,63 @@ describe('CargoConsolidationsService', () => {
       expect((details as any).agent).toBeUndefined();
       expect((details.financials as any).carrier_cost).toBeUndefined();
     });
+
+    it('should format attached cargos with internal_logistics_cost and compute cargo outcome accurately', async () => {
+      knexMock.mockImplementation((table: string) => {
+        if (table === 'cargo_consolidations') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'cons-int-1',
+              consolidation_code: 'CNS-202609-0099',
+              container_truck_id: 'TRK-555',
+              status: 'Waiting',
+              agent: 1200,
+              agent_currency: 'USD',
+              customs_clearance_of_goods: 300,
+              customs_clearance_of_goods_currency: 'USD',
+              cct: 100,
+              cct_currency: 'USD',
+            }),
+          };
+        }
+        if (table === 'cargo_registrations as cr') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            orderBy: jest.fn().mockResolvedValue([
+              {
+                id: 'cargo-int-1',
+                cargo_type: 'LTL',
+                cargo: 'Textiles',
+                volume: 8,
+                weight: 1500,
+                sell_price: 2500,
+                sell_currency: 'USD',
+                purchase_price: 0,
+                purchase_currency: 'USD',
+                additional_expense: 100,
+                additional_expense_currency: 'USD',
+                internal_logistics_cost: 350,
+                internal_logistics_currency: 'USD',
+              },
+            ]),
+          };
+        }
+        return {};
+      });
+
+      const details = await service.findConsolidationDetails('cons-int-1');
+      expect(details.cargos).toHaveLength(1);
+      const cargo = details.cargos[0];
+      expect(cargo.internal_logistics_cost).toBe(350);
+      expect(cargo.internal_logistics).toBe(350);
+      expect(cargo.internal_logistics_currency).toBe('USD');
+      expect(cargo.internal_logistics_amount_usd).toBe(350);
+      // Cargo total outcome = purchase(0) + additional_expense(100) + internal_logistics(350) = 450 USD
+      expect(cargo.total_outcome_usd).toBe(450);
+      expect(cargo.total_income_usd).toBe(2500);
+    });
   });
 });

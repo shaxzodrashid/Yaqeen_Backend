@@ -54,16 +54,15 @@ Every expense in the system is a **distinct physical record** strictly bound to 
 | `food`          | **Pitaniya**       | Staff meals, office tea/coffee, snacks, food supplies |
 | `other`         | **Prochiy**        | Miscellaneous unclassified operational costs          |
 
-### B. LTL Section Categories (`section: 'ltl'`)
-
-| Category Key      | Display Label (UI) | Description                                            |
-| :---------------- | :----------------- | :----------------------------------------------------- |
-| `rent`            | **Arenda**         | LTL warehouse and consolidation facilities rent        |
-| `salary_payout`   | **Oylik**          | Manual salary payouts (_`employee_id` mandatory_)      |
-| `china_warehouse` | **Xitoy sklad**    | China consolidation warehouse storage & handling costs |
-| `firm_service`    | **Firma usluga**   | Third-party agency fees, brokerage, partner firm fees  |
-| `food`            | **Pitanya**        | Staff meals, office tea/coffee, snacks, food supplies  |
-| `declarant`       | **Deklarant**      | Customs declaration processing and declarant fees      |
+| Category Key         | Display Label (UI)  | Description                                            |
+| :------------------- | :------------------ | :----------------------------------------------------- |
+| `rent`               | **Arenda**          | LTL warehouse and consolidation facilities rent        |
+| `salary_payout`      | **Oylik**           | Manual salary payouts (_`employee_id` mandatory_)      |
+| `china_warehouse`    | **Xitoy sklad**     | China consolidation warehouse storage & handling costs |
+| `firm_service`       | **Firma usluga**    | Third-party agency fees, brokerage, partner firm fees  |
+| `food`               | **Pitanya**         | Staff meals, office tea/coffee, snacks, food supplies  |
+| `declarant`          | **Deklarant**       | Customs declaration processing and declarant fees      |
+| `internal_logistics` | **Ichki logistika** | Internal and domestic logistics/delivery costs for LTL |
 
 ---
 
