@@ -19,6 +19,11 @@ import { CreateDepartmentDto } from './dto/create-department.dto';
 import { CreateEmployeeDto } from './dto/create-employee.dto';
 import { UpdateEmployeeDto } from './dto/update-employee.dto';
 import * as crypto from 'crypto';
+import {
+  normalizePhone,
+  getPhoneVariants,
+  buildPhoneMatchCondition,
+} from '../common/utils/phone.utils';
 
 export interface PlanCompletionSpec {
   ltl_completion: number;
@@ -339,10 +344,10 @@ export class EmployeesService implements OnModuleInit {
   }
 
   /**
-   * Helper to normalize a phone number (leaves only digits).
+   * Helper to normalize a phone number (delegates to standard phone utility).
    */
   private normalizePhone(phone: string): string {
-    return phone.replace(/\D/g, '');
+    return normalizePhone(phone);
   }
 
   /**
@@ -798,6 +803,7 @@ export class EmployeesService implements OnModuleInit {
 
   async createEmployee(dto: CreateEmployeeDto): Promise<EmployeeRow> {
     const phoneDigits = this.normalizePhone(dto.phone);
+    const phoneVariants = getPhoneVariants(dto.phone);
 
     // Check department exists
     await this.findDepartmentById(dto.department_id);
@@ -833,9 +839,30 @@ export class EmployeesService implements OnModuleInit {
 
     const activeRole = roleRecord;
 
-    // Check if employee with same phone digits already exists
+    // Validate that primary and secondary phones are not identical
+    if (
+      dto.phone &&
+      dto.secondary_phone &&
+      this.normalizePhone(dto.phone) ===
+        this.normalizePhone(dto.secondary_phone)
+    ) {
+      throw new BadRequestException({
+        message: 'Primary phone and secondary phone cannot be identical.',
+        location: 'duplicate_phone_and_secondary',
+      });
+    }
+
+    // Check if employee with same phone or secondary phone already exists (Issue 1 & 4)
+    const checkVariants = [...phoneVariants];
+    if (dto.secondary_phone) {
+      checkVariants.push(...getPhoneVariants(dto.secondary_phone));
+    }
+    const uniqueCheckVariants = [...new Set(checkVariants)];
+
     const existingEmployee = (await this.knex('employees')
-      .whereRaw("regexp_replace(phone, '[^0-9]', '', 'g') = ?", [phoneDigits])
+      .where((builder) => {
+        buildPhoneMatchCondition(builder, uniqueCheckVariants);
+      })
       .first()) as unknown as EmployeeRow | undefined;
 
     if (existingEmployee) {
@@ -863,18 +890,30 @@ export class EmployeesService implements OnModuleInit {
         .insert(employeePayload)
         .returning('*')) as unknown as EmployeeRow[];
 
-      // Check if there is an existing user account with this phone number to link
+      // Check if there is an existing user account with this phone or secondary phone to link
       const user = (await trx('users')
-        .where('phone_number', phoneDigits)
+        .whereIn('phone_number', uniqueCheckVariants)
         .first()) as unknown as UserRow | undefined;
 
       if (user) {
-        await trx('users').where('id', user.id).update({
+        const updatePayload: Record<string, any> = {
           employee_id: employee.id,
           role_id: activeRole.id,
           role: activeRole.name,
+          phone_number: phoneDigits,
           updated_at: trx.fn.now(),
-        });
+        };
+        // Re-hiring / Deleted Employee Re-creation (Issue 3):
+        // When an employee is re-created, reset status to 'Pending', is_active to true, and clear old password
+        if (user.status === 'Deleted' || !user.is_active) {
+          updatePayload.status = 'Pending';
+          updatePayload.is_active = true;
+          updatePayload.password_hash = '';
+          this.logger.log(
+            `[Re-hiring] Revived user ${user.id} to Pending and active for newly created employee ${employee.id}`,
+          );
+        }
+        await trx('users').where('id', user.id).update(updatePayload);
       } else {
         await trx('users').insert({
           employee_id: employee.id,
@@ -884,6 +923,7 @@ export class EmployeesService implements OnModuleInit {
           role_id: activeRole.id,
           role: activeRole.name,
           status: 'Pending',
+          is_active: true,
         });
       }
 
@@ -1625,7 +1665,7 @@ export class EmployeesService implements OnModuleInit {
   }
 
   async findEmployeeByUserId(userId: string): Promise<UserEmployeeResponse> {
-    const user = (await this.knex('users as u')
+    let user = (await this.knex('users as u')
       .leftJoin('employees as e', 'u.employee_id', 'e.id')
       .leftJoin('departments as d', 'e.department_id', 'd.id')
       .leftJoin('roles as r', 'u.role_id', 'r.id')
@@ -1667,6 +1707,115 @@ export class EmployeesService implements OnModuleInit {
         message: 'No associated employee profile found for this user.',
         location: 'employee_profile_missing',
       });
+    }
+
+    // Aggressive Self-Healing (Issue 7):
+    // If employee_id is null, find matching employee by phone or secondary_phone variants
+    if (!user.employee_id && user.user_phone) {
+      const variants = getPhoneVariants(user.user_phone);
+      const employee = await this.knex<EmployeeRow>('employees')
+        .where((builder) => {
+          buildPhoneMatchCondition(builder, variants);
+        })
+        .orderBy('is_active', 'desc')
+        .first();
+
+      if (employee) {
+        // Check if another user row already holds this employee_id
+        const existingHolder = await this.knex<UserRow>('users')
+          .where('employee_id', employee.id)
+          .whereNot('id', user.user_id)
+          .first();
+
+        let canLink = true;
+        if (existingHolder) {
+          if (
+            (!existingHolder.password_hash ||
+              existingHolder.status === 'Pending' ||
+              existingHolder.status === 'Deleted') &&
+            (user.user_is_active || user.status === 'Open')
+          ) {
+            await this.knex('users').where('id', existingHolder.id).update({
+              employee_id: null,
+              updated_at: this.knex.fn.now(),
+            });
+          } else {
+            canLink = false;
+          }
+        }
+
+        if (canLink) {
+          await this.knex('users').where('id', user.user_id).update({
+            employee_id: employee.id,
+            updated_at: this.knex.fn.now(),
+          });
+          this.logger.log(
+            `[Employees Self-Healing] Auto-linked user ${user.user_id} (${user.user_phone}) to employee ${employee.id} (${employee.first_name || ''} ${employee.last_name || ''}).`,
+          );
+        }
+
+        // Re-fetch user with employee joined
+        const refreshedUser = (await this.knex('users as u')
+          .leftJoin('employees as e', 'u.employee_id', 'e.id')
+          .leftJoin('departments as d', 'e.department_id', 'd.id')
+          .leftJoin('roles as r', 'u.role_id', 'r.id')
+          .select(
+            'u.id as user_id',
+            'u.phone_number as user_phone',
+            'u.username',
+            'u.role',
+            'u.role_id',
+            'u.status',
+            'u.is_active as user_is_active',
+            'u.created_at as user_created_at',
+            'u.updated_at as user_updated_at',
+            'r.name as role_name',
+            'r.display_name as role_display_name',
+            'r.description as role_description',
+            'r.permissions as role_permissions',
+            'r.is_system as role_is_system',
+            'e.id as employee_id',
+            'e.first_name',
+            'e.last_name',
+            'e.phone as employee_phone',
+            'e.secondary_phone',
+            'e.address',
+            'e.fixed_salary',
+            'e.currency',
+            'e.color',
+            'e.picture_url as employee_picture_path',
+            'e.is_active as employee_is_active',
+            'd.id as department_id',
+            'd.name as department_name',
+            'd.display_name as department_display_name',
+          )
+          .where('u.id', userId)
+          .first()) as unknown as UserWithRoleEmployeeRow | undefined;
+
+        if (refreshedUser) {
+          user = refreshedUser;
+        }
+      }
+    }
+
+    // Role & role_id persistent healing
+    if (!user.role_id && user.role) {
+      const fallbackRole = (await this.knex('roles')
+        .whereRaw('LOWER(name) = ?', [user.role.toLowerCase()])
+        .first()) as unknown as RoleRow | undefined;
+      if (fallbackRole) {
+        await this.knex('users').where('id', user.user_id).update({
+          role_id: fallbackRole.id,
+          role: fallbackRole.name,
+          updated_at: this.knex.fn.now(),
+        });
+        user.role_id = fallbackRole.id;
+        user.role_name = fallbackRole.name;
+        user.role_display_name = fallbackRole.display_name || fallbackRole.name;
+        user.role_description = fallbackRole.description || null;
+        user.role_permissions = (fallbackRole.permissions as any) ?? null;
+        user.role_is_system = fallbackRole.is_system ?? null;
+      }
     }
 
     const presignedUrl = user.employee_id
@@ -1886,7 +2035,16 @@ export class EmployeesService implements OnModuleInit {
     id: string,
     dto: UpdateEmployeeDto,
   ): Promise<EmployeeRow> {
-    await this.findEmployeeById(id);
+    const currentEmp = (await this.knex('employees')
+      .where('id', id)
+      .first()) as unknown as EmployeeRow | undefined;
+
+    if (!currentEmp) {
+      throw new NotFoundException({
+        message: 'Employee not found.',
+        location: 'employee_not_found',
+      });
+    }
 
     const updatePayload: Partial<EmployeeRow> = {};
     if (dto.first_name !== undefined) updatePayload.first_name = dto.first_name;
@@ -1904,11 +2062,36 @@ export class EmployeesService implements OnModuleInit {
       updatePayload.department_id = dto.department_id;
     }
 
+    if (dto.phone !== undefined || dto.secondary_phone !== undefined) {
+      const effectivePhone =
+        dto.phone !== undefined ? dto.phone : currentEmp.phone;
+      const effectiveSecPhone =
+        dto.secondary_phone !== undefined
+          ? dto.secondary_phone
+          : currentEmp.secondary_phone;
+
+      if (
+        effectivePhone &&
+        effectiveSecPhone &&
+        this.normalizePhone(effectivePhone) ===
+          this.normalizePhone(effectiveSecPhone)
+      ) {
+        throw new BadRequestException({
+          message: 'Primary phone and secondary phone cannot be identical.',
+          location: 'duplicate_phone_and_secondary',
+        });
+      }
+    }
+
     let phoneDigits: string | undefined = undefined;
+    let phoneVariants: string[] = [];
     if (dto.phone !== undefined) {
       phoneDigits = this.normalizePhone(dto.phone);
+      phoneVariants = getPhoneVariants(dto.phone);
       const existingPhone = (await this.knex('employees')
-        .whereRaw("regexp_replace(phone, '[^0-9]', '', 'g') = ?", [phoneDigits])
+        .where((builder) => {
+          buildPhoneMatchCondition(builder, phoneVariants);
+        })
         .whereNot('id', id)
         .first()) as unknown as EmployeeRow | undefined;
 
@@ -1919,6 +2102,26 @@ export class EmployeesService implements OnModuleInit {
         });
       }
       updatePayload.phone = dto.phone;
+    }
+
+    if (dto.secondary_phone !== undefined) {
+      if (dto.secondary_phone) {
+        const secVariants = getPhoneVariants(dto.secondary_phone);
+        const existingSecPhone = (await this.knex('employees')
+          .where((builder) => {
+            buildPhoneMatchCondition(builder, secVariants);
+          })
+          .whereNot('id', id)
+          .first()) as unknown as EmployeeRow | undefined;
+
+        if (existingSecPhone) {
+          throw new BadRequestException({
+            message: `Employee with phone number "${dto.secondary_phone}" already exists.`,
+            location: 'employee_phone_exists',
+          });
+        }
+      }
+      updatePayload.secondary_phone = dto.secondary_phone || null;
     }
 
     if (dto.is_active !== undefined) {
@@ -1962,7 +2165,7 @@ export class EmployeesService implements OnModuleInit {
       // Synchronize phone and username with user account
       if (phoneDigits !== undefined) {
         const existingUserWithPhone = (await trx('users')
-          .where('phone_number', phoneDigits)
+          .whereIn('phone_number', phoneVariants)
           .first()) as unknown as UserRow | undefined;
 
         if (
@@ -1995,6 +2198,7 @@ export class EmployeesService implements OnModuleInit {
             role_id: roleRecord ? roleRecord.id : null,
             role: roleRecord ? roleRecord.name : 'EMPLOYEE',
             status: 'Pending',
+            is_active: true,
           });
         }
       }
@@ -2018,7 +2222,11 @@ export class EmployeesService implements OnModuleInit {
             .where('id', user.id)
             .update({
               is_active: dto.is_active,
-              status: dto.is_active ? 'Open' : 'Banned',
+              status: dto.is_active
+                ? user.password_hash
+                  ? 'Open'
+                  : 'Pending'
+                : 'Banned',
               updated_at: trx.fn.now(),
             });
         }

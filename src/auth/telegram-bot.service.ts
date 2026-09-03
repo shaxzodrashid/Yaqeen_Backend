@@ -8,6 +8,11 @@ import {
 import { ConfigService } from '@nestjs/config';
 import { KNEX_CONNECTION } from '../database/database.module';
 import { Knex } from 'knex';
+import {
+  normalizePhone,
+  getPhoneVariants,
+  buildPhoneMatchCondition,
+} from '../common/utils/phone.utils';
 
 @Injectable()
 export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
@@ -31,7 +36,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
   getBotUrl(phoneNumber?: string): string {
     const username = this.botUsername || 'YaqeenOtpBot';
     if (phoneNumber) {
-      const normalized = phoneNumber.replace(/\D/g, '');
+      const normalized = normalizePhone(phoneNumber);
       return `https://t.me/${username}?start=reg_${normalized}`;
     }
     return `https://t.me/${username}`;
@@ -82,7 +87,7 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
     }
 
     this.isPolling = true;
-    this.startPolling();
+    void this.startPolling();
   }
 
   onModuleDestroy() {
@@ -152,19 +157,19 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
         },
       });
     } else if (contact) {
-      let phoneNumber = contact.phone_number;
-      // Normalize phone number (strip all non-digits)
-      phoneNumber = phoneNumber.replace(/\D/g, '');
+      const phoneNumber = normalizePhone(contact.phone_number);
+      const phoneVariants = getPhoneVariants(phoneNumber);
 
       // Upsert into telegram_contacts table using a transaction to avoid unique constraint violations
       try {
-        await this.knex.transaction(async (trx) => {
+        let employeeLinked = false;
+        await this.knex.transaction(async (trx: Knex.Transaction) => {
           // Delete existing mappings for either this chat_id or this phone_number to prevent conflicts
           await trx('telegram_contacts')
             .where('chat_id', chat.id.toString())
             .del();
           await trx('telegram_contacts')
-            .where('phone_number', phoneNumber)
+            .whereIn('phone_number', phoneVariants)
             .del();
 
           // Insert new mapping
@@ -176,60 +181,237 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
             username: contact.username || chat.username || null,
           });
 
-          // Check if a user record exists in the users table with this phone number
-          const user = await trx('users')
-            .where('phone_number', phoneNumber)
-            .first();
-
-          // Check if an employee record exists with this phone number
+          // Check if an employee record exists with this phone number or secondary phone number
           const employee = await trx('employees')
-            .whereRaw("regexp_replace(phone, '[^0-9]', '', 'g') = ?", [
-              phoneNumber,
-            ])
+            .where((builder: any) => {
+              buildPhoneMatchCondition(builder, phoneVariants);
+            })
+            .orderBy('is_active', 'desc')
             .first();
 
-          // Check if a user record is already linked to this employee
-          const linkedUser = employee
-            ? await trx('users').where('employee_id', employee.id).first()
-            : null;
+          if (!employee) {
+            // No associated employee exists yet.
+            // DO NOT create an orphaned user with employee_id = null!
+            // Contact is recorded in telegram_contacts for future auto-reconciliation.
+            this.logger.warn(
+              `[Telegram Bot] Phone +${phoneNumber} (chat ${chat.id}) verified in Telegram, but no employee profile exists in CRM yet. Skipping users creation to prevent orphaned accounts.`,
+            );
+            return;
+          }
 
-          if (linkedUser) {
-            // Update linked user's phone to match the verified telegram phone number
-            await trx('users').where('id', linkedUser.id).update({
+          employeeLinked = true;
+
+          // Helper to resolve role record based on user's role name
+          const resolveRole = async (preferredRoleName?: string | null) => {
+            const name = preferredRoleName || 'EMPLOYEE';
+            const roleRec = await trx('roles')
+              .whereRaw('LOWER(name) = ?', [name.toLowerCase()])
+              .first();
+            if (roleRec) return roleRec;
+            return await trx('roles')
+              .whereRaw('LOWER(name) = ?', ['employee'])
+              .first();
+          };
+
+          const defaultRole = await resolveRole('EMPLOYEE');
+
+          // Find existing user linked to this employee
+          const linkedUser = await trx('users')
+            .where('employee_id', employee.id)
+            .first();
+
+          // Find user by phone number
+          const userByPhone = await trx('users')
+            .whereIn('phone_number', phoneVariants)
+            .first();
+
+          if (linkedUser && userByPhone && linkedUser.id === userByPhone.id) {
+            // Same user account: ensure phone, role, and active status are synchronized
+            const resolvedRole = linkedUser.role_id
+              ? null
+              : await resolveRole(linkedUser.role);
+            const targetRoleId = linkedUser.role_id || resolvedRole?.id || null;
+            const targetRoleName =
+              linkedUser.role || resolvedRole?.name || 'EMPLOYEE';
+            const updatePayload: Record<string, any> = {
+              phone_number: phoneNumber,
+              role_id: targetRoleId,
+              role: targetRoleName,
+              updated_at: trx.fn.now(),
+            };
+            if (linkedUser.status === 'Deleted' || !linkedUser.is_active) {
+              updatePayload.status = 'Pending';
+              updatePayload.is_active = true;
+              updatePayload.password_hash = '';
+            }
+            await trx('users').where('id', linkedUser.id).update(updatePayload);
+          } else if (
+            linkedUser &&
+            userByPhone &&
+            linkedUser.id !== userByPhone.id
+          ) {
+            // Two distinct user accounts found! Handle unique constraint conflict cleanly
+            this.logger.warn(
+              `[Telegram Bot Conflict] LinkedUser (${linkedUser.id}) and userByPhone (${userByPhone.id}) conflict for employee ${employee.id}. Resolving...`,
+            );
+
+            if (!userByPhone.employee_id) {
+              // userByPhone is unlinked.
+              if (
+                userByPhone.status === 'Open' &&
+                userByPhone.password_hash &&
+                linkedUser.status === 'Pending' &&
+                !linkedUser.password_hash
+              ) {
+                // User already registered and set password on userByPhone!
+                // Remove empty pending linkedUser placeholder and link userByPhone to employee
+                await trx('users').where('id', linkedUser.id).del();
+                await trx('users')
+                  .where('id', userByPhone.id)
+                  .update({
+                    employee_id: employee.id,
+                    role_id:
+                      linkedUser.role_id ||
+                      userByPhone.role_id ||
+                      (await resolveRole(userByPhone.role || linkedUser.role))
+                        ?.id ||
+                      defaultRole?.id ||
+                      null,
+                    role:
+                      linkedUser.role ||
+                      userByPhone.role ||
+                      defaultRole?.name ||
+                      'EMPLOYEE',
+                    updated_at: trx.fn.now(),
+                  });
+              } else {
+                // userByPhone is an orphaned placeholder: remove it so phoneNumber is freed for linkedUser
+                await trx('users').where('id', userByPhone.id).del();
+                const resolvedRole = linkedUser.role_id
+                  ? null
+                  : await resolveRole(linkedUser.role);
+                const updatePayload: Record<string, any> = {
+                  phone_number: phoneNumber,
+                  username: phoneNumber,
+                  role_id:
+                    linkedUser.role_id ||
+                    resolvedRole?.id ||
+                    defaultRole?.id ||
+                    null,
+                  role:
+                    linkedUser.role ||
+                    resolvedRole?.name ||
+                    defaultRole?.name ||
+                    'EMPLOYEE',
+                  updated_at: trx.fn.now(),
+                };
+                if (linkedUser.status === 'Deleted' || !linkedUser.is_active) {
+                  updatePayload.status = 'Pending';
+                  updatePayload.is_active = true;
+                  updatePayload.password_hash = '';
+                }
+                await trx('users')
+                  .where('id', linkedUser.id)
+                  .update(updatePayload);
+              }
+            } else {
+              // userByPhone is linked to another employee! Keep existing linkedUser
+              this.logger.error(
+                `[Telegram Bot Conflict] Phone ${phoneNumber} belongs to another employee (${userByPhone.employee_id}). Cannot reassign.`,
+              );
+            }
+          } else if (linkedUser) {
+            // Linked user exists for employee, but no other user holds this phone
+            const resolvedRole = linkedUser.role_id
+              ? null
+              : await resolveRole(linkedUser.role);
+            const updatePayload: Record<string, any> = {
+              phone_number: phoneNumber,
+              username:
+                linkedUser.username &&
+                !linkedUser.username.startsWith('998') &&
+                isNaN(Number(linkedUser.username))
+                  ? linkedUser.username
+                  : phoneNumber,
+              role_id:
+                linkedUser.role_id ||
+                resolvedRole?.id ||
+                defaultRole?.id ||
+                null,
+              role:
+                linkedUser.role ||
+                resolvedRole?.name ||
+                defaultRole?.name ||
+                'EMPLOYEE',
+              updated_at: trx.fn.now(),
+            };
+            if (linkedUser.status === 'Deleted' || !linkedUser.is_active) {
+              updatePayload.status = 'Pending';
+              updatePayload.is_active = true;
+              updatePayload.password_hash = '';
+            }
+            await trx('users').where('id', linkedUser.id).update(updatePayload);
+          } else if (userByPhone) {
+            // User exists with this phone, but wasn't linked to this employee yet
+            const resolvedRole = userByPhone.role_id
+              ? null
+              : await resolveRole(userByPhone.role);
+            const updatePayload: Record<string, any> = {
+              employee_id: employee.id,
+              role_id:
+                userByPhone.role_id ||
+                resolvedRole?.id ||
+                defaultRole?.id ||
+                null,
+              role:
+                userByPhone.role ||
+                resolvedRole?.name ||
+                defaultRole?.name ||
+                'EMPLOYEE',
+              updated_at: trx.fn.now(),
+            };
+            if (userByPhone.status === 'Deleted' || !userByPhone.is_active) {
+              updatePayload.status = 'Pending';
+              updatePayload.is_active = true;
+              updatePayload.password_hash = '';
+            }
+            await trx('users')
+              .where('id', userByPhone.id)
+              .update(updatePayload);
+          } else {
+            // Neither exists: create new pending user linked to the employee
+            await trx('users').insert({
+              employee_id: employee.id,
               phone_number: phoneNumber,
               username: phoneNumber,
-              updated_at: trx.fn.now(),
-            });
-          } else if (!user) {
-            // Create a pending user account (linked to employee if found)
-            await trx('users').insert({
-              employee_id: employee ? employee.id : null,
-              phone_number: phoneNumber,
-              username: phoneNumber, // default username to phone
-              password_hash: '', // no password yet
-              role: 'EMPLOYEE', // default role
+              password_hash: '',
+              role: defaultRole?.name || 'EMPLOYEE',
+              role_id: defaultRole?.id || null,
               status: 'Pending',
               is_active: true,
-            });
-          } else if (!user.employee_id && employee) {
-            // Link existing employee profile if user wasn't linked yet
-            await trx('users').where('id', user.id).update({
-              employee_id: employee.id,
-              updated_at: trx.fn.now(),
             });
           }
         });
 
         this.logger.log(
-          `Successfully mapped Telegram chat_id ${chat.id} to phone number: +${phoneNumber}`,
+          `Successfully mapped Telegram chat_id ${chat.id} to phone number: +${phoneNumber} (Employee linked: ${employeeLinked})`,
         );
 
-        await this.sendMessage(chat.id, {
-          text: `Successfully registered! You can now receive OTP codes for authentication and password resets.`,
-          reply_markup: {
-            remove_keyboard: true,
-          },
-        });
+        if (employeeLinked) {
+          await this.sendMessage(chat.id, {
+            text: `Successfully registered! You can now receive OTP codes for authentication and password resets.`,
+            reply_markup: {
+              remove_keyboard: true,
+            },
+          });
+        } else {
+          await this.sendMessage(chat.id, {
+            text: `Assalomu alaykum! Your phone number (+${phoneNumber}) has been successfully verified. Once your company administrator creates your employee profile, you will be able to complete registration on the Yaqeen web platform.`,
+            reply_markup: {
+              remove_keyboard: true,
+            },
+          });
+        }
       } catch (err) {
         this.logger.error(
           `Failed to register contact in database: ${err.message}`,
@@ -246,14 +428,35 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
   }
 
   async sendOtp(phoneNumber: string, otp: string): Promise<boolean> {
-    const normalized = phoneNumber.replace(/\D/g, '');
-    const contact = await this.knex('telegram_contacts')
-      .where('phone_number', normalized)
+    const variants = getPhoneVariants(phoneNumber);
+    let contact = await this.knex('telegram_contacts')
+      .whereIn('phone_number', variants)
       .first();
 
     if (!contact) {
+      // Secondary phone fallback: check if phoneNumber belongs to an employee whose alternate phone has Telegram
+      const employee = await this.knex('employees')
+        .where((builder: any) => {
+          buildPhoneMatchCondition(builder, variants);
+        })
+        .first();
+
+      if (employee) {
+        const empVariants: string[] = [];
+        if (employee.phone)
+          empVariants.push(...getPhoneVariants(employee.phone));
+        if (employee.secondary_phone)
+          empVariants.push(...getPhoneVariants(employee.secondary_phone));
+        const uniqueEmpVariants = [...new Set(empVariants)];
+        contact = await this.knex('telegram_contacts')
+          .whereIn('phone_number', uniqueEmpVariants)
+          .first();
+      }
+    }
+
+    if (!contact) {
       this.logger.warn(
-        `No Telegram chat found registered for phone: +${normalized}`,
+        `No Telegram chat found registered for phone: +${phoneNumber} (variants: ${variants.join(', ')})`,
       );
       return false;
     }
@@ -273,17 +476,26 @@ export class TelegramBotService implements OnModuleInit, OnModuleDestroy {
       const employee = await this.knex('employees')
         .where('id', employeeId)
         .first();
-      if (!employee || !employee.phone) {
+      if (!employee || (!employee.phone && !employee.secondary_phone)) {
         return false;
       }
-      const normalizedPhone = employee.phone.replace(/\D/g, '');
+
+      const variants: string[] = [];
+      if (employee.phone) {
+        variants.push(...getPhoneVariants(employee.phone));
+      }
+      if (employee.secondary_phone) {
+        variants.push(...getPhoneVariants(employee.secondary_phone));
+      }
+      const uniqueVariants = [...new Set(variants)];
+
       const contact = await this.knex('telegram_contacts')
-        .where('phone_number', normalizedPhone)
+        .whereIn('phone_number', uniqueVariants)
         .first();
 
       if (!contact) {
         this.logger.warn(
-          `No Telegram contact found for employee ID ${employeeId} (${employee.phone})`,
+          `No Telegram contact found for employee ID ${employeeId} (${employee.phone || employee.secondary_phone})`,
         );
         return false;
       }

@@ -19,6 +19,11 @@ import { LogoutDto } from './dto/logout.dto';
 import * as bcrypt from 'bcryptjs';
 import * as jwt from 'jsonwebtoken';
 import * as crypto from 'crypto';
+import {
+  normalizePhone,
+  getPhoneVariants,
+  buildPhoneMatchCondition,
+} from '../common/utils/phone.utils';
 
 interface TelegramContact {
   id?: string;
@@ -50,8 +55,10 @@ interface UserRow {
 interface EmployeeRow {
   id: string;
   phone?: string;
+  secondary_phone?: string | null;
   first_name?: string;
   last_name?: string;
+  is_active?: boolean;
 }
 
 interface RefreshTokenPayload {
@@ -72,19 +79,178 @@ export class AuthService {
   ) {}
 
   /**
-   * Helper to normalize a phone number (leaves only digits).
+   * Helper to normalize a phone number (delegates to standard phone utility).
    */
   private normalizePhone(phone: string): string {
-    return phone.replace(/\D/g, '');
+    return normalizePhone(phone);
+  }
+
+  /**
+   * Aggressively troubleshoots and self-heals user account anomalies:
+   * 1. If employee_id is null, searches for matching employee by phone & secondary_phone variants and auto-links.
+   * 2. If role_id is null or missing permissions, resolves from roles table and persists to DB.
+   * 3. If phone_number is non-standard format, standardizes and persists to DB.
+   */
+  public async healUserAccount(user: UserRow): Promise<UserRow> {
+    const updates: Record<string, any> = {};
+
+    // 1. Employee auto-reconciliation
+    if (!user.employee_id && user.phone_number) {
+      const variants = getPhoneVariants(user.phone_number);
+      const employee = await this.knex<EmployeeRow>('employees')
+        .where((builder) => {
+          buildPhoneMatchCondition(builder, variants);
+        })
+        .orderBy('is_active', 'desc')
+        .first();
+
+      if (employee) {
+        // Safe unique check: check if another user row already holds this employee_id
+        const existingHolder = await this.knex<UserRow>('users')
+          .where('employee_id', employee.id)
+          .whereNot('id', user.id)
+          .first();
+
+        if (existingHolder) {
+          if (
+            (!existingHolder.password_hash ||
+              existingHolder.status === 'Pending' ||
+              existingHolder.status === 'Deleted') &&
+            (user.password_hash || user.status === 'Open')
+          ) {
+            this.logger.warn(
+              `[Auth Self-Healing] Reassigning employee ${employee.id} from inactive holder ${existingHolder.id} to user ${user.id}.`,
+            );
+            await this.knex('users').where('id', existingHolder.id).update({
+              employee_id: null,
+              updated_at: this.knex.fn.now(),
+            });
+            updates.employee_id = employee.id;
+            user.employee_id = employee.id;
+          } else {
+            this.logger.warn(
+              `[Auth Conflict] Employee ${employee.id} is already linked to user ${existingHolder.id}. Cannot auto-link to user ${user.id}.`,
+            );
+          }
+        } else {
+          updates.employee_id = employee.id;
+          user.employee_id = employee.id;
+          this.logger.log(
+            `[Auth Self-Healing] Auto-linked user ${user.id} (${user.phone_number}) to employee ${employee.id} (${employee.first_name || ''} ${employee.last_name || ''}).`,
+          );
+        }
+      } else {
+        this.logger.warn(
+          `[Auth Diagnostics] User ${user.id} (${user.phone_number}) has no linked employee profile in the system.`,
+        );
+      }
+    }
+
+    // 2. Role & role_id synchronization & persistent repair
+    if (!user.role_id || !user.role_permissions) {
+      const targetRoleName = (user.role || 'EMPLOYEE').toLowerCase();
+      let roleRecord = (await this.knex('roles')
+        .whereRaw('LOWER(name) = ?', [targetRoleName])
+        .first()) as
+        | {
+            id: string;
+            name: string;
+            display_name: string | null;
+            description: string | null;
+            permissions:
+              Record<string, Record<string, boolean>> | string | null;
+            is_system: boolean | null;
+          }
+        | undefined;
+
+      if (!roleRecord) {
+        roleRecord = await this.knex('roles')
+          .whereRaw('LOWER(name) = ?', ['employee'])
+          .first();
+      }
+
+      if (roleRecord) {
+        user.role_id = roleRecord.id;
+        user.role_name = roleRecord.name;
+        user.role_display_name = roleRecord.display_name;
+        user.role_description = roleRecord.description;
+        user.role_permissions = roleRecord.permissions;
+        user.role_is_system = roleRecord.is_system;
+        updates.role_id = roleRecord.id;
+        updates.role = roleRecord.name;
+        this.logger.log(
+          `[Auth Self-Healing] Resolved and persisted role_id ${roleRecord.id} (${roleRecord.name}) for user ${user.id}.`,
+        );
+      }
+    }
+
+    // 3. Phone number format standardization
+    if (user.phone_number) {
+      const standardPhone = normalizePhone(user.phone_number);
+      if (standardPhone && standardPhone !== user.phone_number) {
+        const phoneHolder = await this.knex('users')
+          .where('phone_number', standardPhone)
+          .whereNot('id', user.id)
+          .first();
+        if (!phoneHolder) {
+          updates.phone_number = standardPhone;
+          user.phone_number = standardPhone;
+        }
+      }
+    }
+
+    // 4. Check if Deleted status is anomalous
+    if (user.status === 'Deleted' && user.employee_id) {
+      const activeEmployee = await this.knex('employees')
+        .where('id', user.employee_id)
+        .where('is_active', true)
+        .first();
+      if (activeEmployee) {
+        this.logger.warn(
+          `[Auth Diagnostics] User ${user.id} has status 'Deleted' but is associated with active employee ${user.employee_id}. Re-registration is required.`,
+        );
+      }
+    }
+
+    // Persist any updates to database
+    if (Object.keys(updates).length > 0) {
+      updates.updated_at = this.knex.fn.now();
+      await this.knex('users').where('id', user.id).update(updates);
+    }
+
+    return user;
   }
 
   /**
    * Helper to verify if the phone is registered in the Telegram Bot.
+   * If not directly registered, checks if the phone belongs to an employee whose alternate phone is registered.
    */
   private async checkTelegramRegistration(phone: string): Promise<void> {
-    const contact = await this.knex<TelegramContact>('telegram_contacts')
-      .where('phone_number', phone)
+    const variants = getPhoneVariants(phone);
+    let contact = await this.knex<TelegramContact>('telegram_contacts')
+      .whereIn('phone_number', variants)
       .first();
+
+    if (!contact) {
+      // Secondary phone support (Issue 4): Check if an employee exists with this phone or secondary phone
+      const employee = await this.knex<EmployeeRow>('employees')
+        .where((builder) => {
+          buildPhoneMatchCondition(builder, variants);
+        })
+        .first();
+
+      if (employee) {
+        const empVariants: string[] = [];
+        if (employee.phone)
+          empVariants.push(...getPhoneVariants(employee.phone));
+        if (employee.secondary_phone)
+          empVariants.push(...getPhoneVariants(employee.secondary_phone));
+        const uniqueEmpVariants = [...new Set(empVariants)];
+        contact = await this.knex<TelegramContact>('telegram_contacts')
+          .whereIn('phone_number', uniqueEmpVariants)
+          .first();
+      }
+    }
 
     if (!contact) {
       const botUsername = this.telegramBotService.getBotUsername();
@@ -109,10 +275,31 @@ export class AuthService {
       });
     }
 
-    const phone = this.normalizePhone(phoneNumber);
-    const contact = await this.knex<TelegramContact>('telegram_contacts')
-      .where('phone_number', phone)
+    const phone = normalizePhone(phoneNumber);
+    const variants = getPhoneVariants(phoneNumber);
+    let contact = await this.knex<TelegramContact>('telegram_contacts')
+      .whereIn('phone_number', variants)
       .first();
+
+    if (!contact) {
+      const employee = await this.knex<EmployeeRow>('employees')
+        .where((builder) => {
+          buildPhoneMatchCondition(builder, variants);
+        })
+        .first();
+
+      if (employee) {
+        const empVariants: string[] = [];
+        if (employee.phone)
+          empVariants.push(...getPhoneVariants(employee.phone));
+        if (employee.secondary_phone)
+          empVariants.push(...getPhoneVariants(employee.secondary_phone));
+        const uniqueEmpVariants = [...new Set(empVariants)];
+        contact = await this.knex<TelegramContact>('telegram_contacts')
+          .whereIn('phone_number', uniqueEmpVariants)
+          .first();
+      }
+    }
 
     const botUsername = this.telegramBotService.getBotUsername();
     const botUrl = this.telegramBotService.getBotUrl(phone);
@@ -252,10 +439,11 @@ export class AuthService {
    * Get user profile details & permissions for current session ("Get me").
    */
   async getMe(userId: string) {
-    const user = (await this.knex<UserRow>('users as u')
+    let user = (await this.knex<UserRow>('users as u')
       .leftJoin('roles as r', 'u.role_id', 'r.id')
       .select(
         'u.id',
+        'u.employee_id',
         'u.phone_number',
         'u.username',
         'u.role',
@@ -280,35 +468,14 @@ export class AuthService {
       });
     }
 
-    if (!user.role_permissions && user.role) {
-      const fallbackRole = (await this.knex('roles')
-        .whereRaw('LOWER(name) = ?', [user.role.toLowerCase()])
-        .first()) as
-        | {
-            id: string;
-            name: string;
-            display_name: string | null;
-            description: string | null;
-            permissions:
-              Record<string, Record<string, boolean>> | string | null;
-            is_system: boolean | null;
-          }
-        | undefined;
-      if (fallbackRole) {
-        user.role_name = fallbackRole.name;
-        user.role_display_name = fallbackRole.display_name;
-        user.role_description = fallbackRole.description;
-        user.role_permissions = fallbackRole.permissions;
-        user.role_is_system = fallbackRole.is_system;
-        user.role_id = fallbackRole.id;
-      }
-    }
+    user = await this.healUserAccount(user);
 
     const permissions = this.getUserPermissions(user);
     const roleName = user.role_name || user.role;
 
     return {
       id: user.id,
+      employee_id: user.employee_id || null,
       phone_number: user.phone_number,
       username: user.username,
       role: roleName,
@@ -335,10 +502,10 @@ export class AuthService {
    * Login endpoint logic.
    */
   async login(dto: LoginDto) {
-    const phone = this.normalizePhone(dto.phone_number);
+    const variants = getPhoneVariants(dto.phone_number);
 
     // Look up user with role
-    const user = (await this.knex<UserRow>('users as u')
+    let user = (await this.knex<UserRow>('users as u')
       .leftJoin('roles as r', 'u.role_id', 'r.id')
       .select(
         'u.*',
@@ -348,21 +515,49 @@ export class AuthService {
         'r.permissions as role_permissions',
         'r.is_system as role_is_system',
       )
-      .where('u.phone_number', phone)
+      .whereIn('u.phone_number', variants)
       .first()) as UserRow | undefined;
+
+    if (!user) {
+      // Secondary phone support (Issue 4): Check if phone belongs to an employee whose user account is linked
+      const employee = await this.knex<EmployeeRow>('employees')
+        .where((builder) => {
+          buildPhoneMatchCondition(builder, variants);
+        })
+        .first();
+
+      if (employee) {
+        user = (await this.knex<UserRow>('users as u')
+          .leftJoin('roles as r', 'u.role_id', 'r.id')
+          .select(
+            'u.*',
+            'r.name as role_name',
+            'r.display_name as role_display_name',
+            'r.description as role_description',
+            'r.permissions as role_permissions',
+            'r.is_system as role_is_system',
+          )
+          .where('u.employee_id', employee.id)
+          .first()) as UserRow | undefined;
+      }
+    }
 
     if (!user) {
       throw new UnauthorizedException({
         message: 'Invalid credentials',
         location: 'invalid_login',
+        hint: 'No user account found matching this phone number.',
       });
     }
+
+    user = await this.healUserAccount(user);
 
     // Check account status
     if (user.status === 'Banned') {
       throw new UnauthorizedException({
         message: 'Account has been banned',
         location: 'account_banned',
+        hint: 'Your account has been deactivated by an administrator.',
       });
     }
 
@@ -370,6 +565,7 @@ export class AuthService {
       throw new UnauthorizedException({
         message: 'Account has been deleted',
         location: 'account_deleted',
+        hint: 'This account was deleted. If you were re-hired, please complete registration again.',
       });
     }
 
@@ -377,6 +573,7 @@ export class AuthService {
       throw new UnauthorizedException({
         message: 'Account registration has not been completed',
         location: 'account_pending',
+        hint: 'Please complete registration using the OTP verification flow first.',
       });
     }
 
@@ -385,6 +582,7 @@ export class AuthService {
       throw new UnauthorizedException({
         message: 'Invalid credentials',
         location: 'invalid_login',
+        hint: 'Account has no password set. Please complete registration or reset your password.',
       });
     }
 
@@ -397,30 +595,6 @@ export class AuthService {
         message: 'Invalid credentials',
         location: 'invalid_login',
       });
-    }
-
-    if (!user.role_permissions && user.role) {
-      const fallbackRole = (await this.knex('roles')
-        .whereRaw('LOWER(name) = ?', [user.role.toLowerCase()])
-        .first()) as
-        | {
-            id: string;
-            name: string;
-            display_name: string | null;
-            description: string | null;
-            permissions:
-              Record<string, Record<string, boolean>> | string | null;
-            is_system: boolean | null;
-          }
-        | undefined;
-      if (fallbackRole) {
-        user.role_name = fallbackRole.name;
-        user.role_display_name = fallbackRole.display_name;
-        user.role_description = fallbackRole.description;
-        user.role_permissions = fallbackRole.permissions;
-        user.role_is_system = fallbackRole.is_system;
-        user.role_id = fallbackRole.id;
-      }
     }
 
     const activeRoleName = user.role_name || user.role;
@@ -463,6 +637,7 @@ export class AuthService {
       refreshToken: refreshToken,
       user: {
         id: user.id,
+        employee_id: user.employee_id || null,
         phone_number: user.phone_number,
         role: activeRoleName,
         role_id: user.role_id,
@@ -486,68 +661,157 @@ export class AuthService {
    * Registration Stage 1: Send OTP.
    */
   async registerSendOtp(dto: SendOtpDto) {
-    const phone = this.normalizePhone(dto.phone_number);
+    const phone = normalizePhone(dto.phone_number);
+    const variants = getPhoneVariants(dto.phone_number);
 
     // 1. Verify Telegram registration
     await this.checkTelegramRegistration(phone);
 
-    // 2. Query user account
-    let user = await this.knex<UserRow>('users')
-      .where('phone_number', phone)
+    // 2. Query employee account by phone or secondary_phone
+    const employee = await this.knex<EmployeeRow>('employees')
+      .where((builder) => {
+        buildPhoneMatchCondition(builder, variants);
+      })
+      .orderBy('is_active', 'desc')
       .first();
 
-    // 3. Fallback: If user account does not exist, check if an employee exists with this phone number
-    if (!user) {
-      const employee = await this.knex<EmployeeRow>('employees')
-        .whereRaw("regexp_replace(phone, '[^0-9]', '', 'g') = ?", [phone])
+    // STRICT CHECK (Issue 2): Registration is forbidden without an associated employee profile
+    if (!employee) {
+      throw new BadRequestException({
+        message:
+          'No associated employee account found with this phone number. Please contact your administrator to create your employee profile first.',
+        location: 'account_not_found',
+        hint: 'An employee profile matching this phone number or secondary phone number must be created by an administrator before registering.',
+      });
+    }
+
+    // 3. Query or create user account linked to this employee
+    const empVariants = new Set<string>(variants);
+    if (employee.phone)
+      getPhoneVariants(employee.phone).forEach((v) => empVariants.add(v));
+    if (employee.secondary_phone)
+      getPhoneVariants(employee.secondary_phone).forEach((v) =>
+        empVariants.add(v),
+      );
+    const allEmpVariants = Array.from(empVariants);
+
+    const linkedUser = await this.knex<UserRow>('users')
+      .where('employee_id', employee.id)
+      .first();
+
+    const userByPhone = await this.knex<UserRow>('users')
+      .whereIn('phone_number', allEmpVariants)
+      .first();
+
+    // Helper to resolve role record based on user's role name
+    const resolveRole = async (preferredRoleName?: string | null) => {
+      const name = preferredRoleName || 'EMPLOYEE';
+      const roleRec = await this.knex('roles')
+        .whereRaw('LOWER(name) = ?', [name.toLowerCase()])
         .first();
+      if (roleRec) return roleRec;
+      return await this.knex('roles')
+        .whereRaw('LOWER(name) = ?', ['employee'])
+        .first();
+    };
+    const defaultRole = await resolveRole('EMPLOYEE');
 
-      if (!employee) {
-        throw new BadRequestException({
-          message:
-            'No associated employee account found with this phone number.',
-          location: 'account_not_found',
-        });
+    let user: UserRow | undefined;
+    if (linkedUser && userByPhone && linkedUser.id !== userByPhone.id) {
+      if (!userByPhone.employee_id) {
+        if (
+          (userByPhone.status === 'Open' || userByPhone.password_hash) &&
+          (!linkedUser.password_hash ||
+            linkedUser.status === 'Pending' ||
+            linkedUser.status === 'Deleted')
+        ) {
+          await this.knex('users').where('id', linkedUser.id).del();
+          user = userByPhone;
+        } else {
+          await this.knex('users').where('id', userByPhone.id).del();
+          user = linkedUser;
+        }
+      } else {
+        user = linkedUser;
       }
+    } else {
+      user = linkedUser || userByPhone;
+    }
 
-      // Create a pending user account mapped to this employee
+    if (!user) {
+      // Create a pending user account mapped to this employee with proper role_id
       const [newUser] = await this.knex<UserRow>('users')
         .insert({
           employee_id: employee.id,
           phone_number: phone,
-          username: phone, // default username to phone
-          password_hash: '', // no password yet
-          role: 'EMPLOYEE', // default role
+          username: phone,
+          password_hash: '',
+          role: defaultRole?.name || 'EMPLOYEE',
+          role_id: defaultRole?.id || null,
           status: 'Pending',
+          is_active: true,
         })
         .returning('*');
 
       user = newUser;
-    } else if (!user.employee_id) {
-      const employee = await this.knex<EmployeeRow>('employees')
-        .whereRaw("regexp_replace(phone, '[^0-9]', '', 'g') = ?", [phone])
-        .first();
+    } else {
+      // Re-hiring / Deleted employee re-creation fix (Issue 3):
+      // If user status is Deleted, but employee exists and is active, revive to Pending
+      const resolvedRole = user.role_id ? null : await resolveRole(user.role);
+      const targetRoleId =
+        user.role_id || resolvedRole?.id || defaultRole?.id || null;
+      const targetRoleName =
+        user.role || resolvedRole?.name || defaultRole?.name || 'EMPLOYEE';
 
-      if (employee) {
+      if (user.status === 'Deleted') {
+        await this.knex('users').where('id', user.id).update({
+          status: 'Pending',
+          is_active: true,
+          password_hash: '',
+          employee_id: employee.id,
+          role_id: targetRoleId,
+          role: targetRoleName,
+          phone_number: phone,
+          updated_at: this.knex.fn.now(),
+        });
+        user.status = 'Pending';
+        user.is_active = true;
+        user.password_hash = '';
+        user.employee_id = employee.id;
+        user.phone_number = phone;
+        user.role_id = targetRoleId;
+        user.role = targetRoleName;
+        this.logger.log(
+          `[Registration Self-Healing] Revived deleted user ${user.id} to Pending for employee ${employee.id}`,
+        );
+      } else if (!user.employee_id) {
         await this.knex('users').where('id', user.id).update({
           employee_id: employee.id,
+          role_id: targetRoleId,
+          role: targetRoleName,
+          phone_number: phone,
           updated_at: this.knex.fn.now(),
         });
         user.employee_id = employee.id;
+        user.phone_number = phone;
+        user.role_id = targetRoleId;
+        user.role = targetRoleName;
       }
+      user = await this.healUserAccount(user);
     }
 
     // 4. Validate user status
     if (user.status === 'Open') {
       throw new BadRequestException({
-        message: 'Account is already registered.',
+        message:
+          'Account is already registered. Please log in or reset your password.',
         location: 'already_registered',
       });
     }
 
     if (user.status === 'Banned') {
       throw new BadRequestException({
-        message: 'Account has been banned.',
+        message: 'Account has been banned. Please contact your administrator.',
         location: 'account_banned',
       });
     }
@@ -568,7 +832,6 @@ export class AuthService {
     // 7. Send OTP via Telegram
     const sent = await this.telegramBotService.sendOtp(phone, otp);
 
-    // Always log OTP to console as fallback for development testing
     this.logger.log(
       `[Registration OTP] Phone: +${phone} | OTP: ${otp} | Sent to Telegram: ${sent}`,
     );
@@ -582,7 +845,7 @@ export class AuthService {
    * Registration Stage 2: Verify OTP.
    */
   async registerVerifyOtp(dto: VerifyOtpDto) {
-    const phone = this.normalizePhone(dto.phone_number);
+    const phone = normalizePhone(dto.phone_number);
 
     // 1. Get OTP from Redis
     const cachedOtp = await this.redisService.get(`otp:register:${phone}`);
@@ -620,24 +883,45 @@ export class AuthService {
     }
 
     // 2. Validate token from Redis
-    const phone = await this.redisService.get(`token:register:${dto.token}`);
-    if (!phone) {
+    const rawPhone = await this.redisService.get(`token:register:${dto.token}`);
+    if (!rawPhone) {
       throw new BadRequestException({
         message: 'Invalid or expired temporary registration token.',
         location: 'invalid_token',
       });
     }
 
+    const phone = normalizePhone(rawPhone);
+    const variants = getPhoneVariants(phone);
+
     // 3. Find pending user
-    const user = await this.knex<UserRow>('users')
-      .where('phone_number', phone)
+    let user = await this.knex<UserRow>('users')
+      .whereIn('phone_number', variants)
       .first();
+
+    if (!user) {
+      // Secondary phone support (Issue 4): check if phone belongs to an employee whose linked user exists
+      const employee = await this.knex<EmployeeRow>('employees')
+        .where((builder) => {
+          buildPhoneMatchCondition(builder, variants);
+        })
+        .first();
+
+      if (employee) {
+        user = await this.knex<UserRow>('users')
+          .where('employee_id', employee.id)
+          .first();
+      }
+    }
+
     if (!user) {
       throw new BadRequestException({
         message: 'Account not found.',
         location: 'account_not_found',
       });
     }
+
+    user = await this.healUserAccount(user);
 
     if (user.status !== 'Pending') {
       throw new BadRequestException({
@@ -649,12 +933,26 @@ export class AuthService {
     // 4. Hash password and update status to Open
     const passwordHash = await bcrypt.hash(dto.password, 10);
 
-    await this.knex('users').where('id', user.id).update({
+    // Clean up any stale unlinked placeholder holding this phone number
+    const otherUser = await this.knex<UserRow>('users')
+      .where('phone_number', phone)
+      .whereNot('id', user.id)
+      .first();
+    if (otherUser && !otherUser.employee_id && !otherUser.password_hash) {
+      await this.knex('users').where('id', otherUser.id).del();
+    }
+
+    const updatePayload: Record<string, any> = {
       password_hash: passwordHash,
       status: 'Open',
       is_active: true,
       updated_at: this.knex.fn.now(),
-    });
+    };
+    if (!otherUser || otherUser.id === user.id) {
+      updatePayload.phone_number = phone;
+    }
+
+    await this.knex('users').where('id', user.id).update(updatePayload);
 
     // 5. Clean up the temp token
     await this.redisService.del(`token:register:${dto.token}`);
@@ -669,27 +967,55 @@ export class AuthService {
    * Password Update Stage 1: Send OTP.
    */
   async resetPasswordSendOtp(dto: SendOtpDto) {
-    const phone = this.normalizePhone(dto.phone_number);
+    const phone = normalizePhone(dto.phone_number);
+    const variants = getPhoneVariants(dto.phone_number);
 
     // 1. Verify Telegram registration
     await this.checkTelegramRegistration(phone);
 
     // 2. Look up user account
-    const user = await this.knex<UserRow>('users')
-      .where('phone_number', phone)
+    let user = await this.knex<UserRow>('users')
+      .whereIn('phone_number', variants)
       .first();
+
     if (!user) {
-      throw new BadRequestException({
-        message: 'No account found with this phone number.',
-        location: 'account_not_found',
-      });
+      // Check if employee exists by phone or secondary phone
+      const employee = await this.knex<EmployeeRow>('employees')
+        .where((builder) => {
+          buildPhoneMatchCondition(builder, variants);
+        })
+        .orderBy('is_active', 'desc')
+        .first();
+
+      if (employee) {
+        user = await this.knex<UserRow>('users')
+          .where('employee_id', employee.id)
+          .first();
+
+        if (!user) {
+          throw new BadRequestException({
+            message:
+              'No registered user account found for this employee yet. Please complete registration first.',
+            location: 'account_pending',
+            hint: 'Your employee profile exists. Please use the registration flow to set your initial password.',
+          });
+        }
+      } else {
+        throw new BadRequestException({
+          message: 'No account found with this phone number.',
+          location: 'account_not_found',
+        });
+      }
     }
+
+    user = await this.healUserAccount(user);
 
     // 3. Verify status
     if (user.status === 'Pending') {
       throw new BadRequestException({
         message: 'Account has not been registered yet.',
         location: 'account_pending',
+        hint: 'Please complete registration first.',
       });
     }
 
@@ -701,6 +1027,20 @@ export class AuthService {
     }
 
     if (user.status === 'Deleted') {
+      // Check if active employee exists
+      if (user.employee_id) {
+        const emp = await this.knex('employees')
+          .where({ id: user.employee_id, is_active: true })
+          .first();
+        if (emp) {
+          throw new BadRequestException({
+            message:
+              'Account was previously deleted. Please register again to reactivate your account.',
+            location: 'account_pending',
+            hint: 'Use the registration flow to reactivate your account and set a new password.',
+          });
+        }
+      }
       throw new BadRequestException({
         message: 'Account has been deleted.',
         location: 'account_deleted',
@@ -716,7 +1056,6 @@ export class AuthService {
     // 6. Send OTP via Telegram
     const sent = await this.telegramBotService.sendOtp(phone, otp);
 
-    // Always log OTP to console as fallback for development testing
     this.logger.log(
       `[Password Reset OTP] Phone: +${phone} | OTP: ${otp} | Sent to Telegram: ${sent}`,
     );
@@ -730,7 +1069,7 @@ export class AuthService {
    * Password Update Stage 2: Verify OTP.
    */
   async resetPasswordVerifyOtp(dto: VerifyOtpDto) {
-    const phone = this.normalizePhone(dto.phone_number);
+    const phone = normalizePhone(dto.phone_number);
 
     // 1. Get OTP from Redis
     const cachedOtp = await this.redisService.get(`otp:reset:${phone}`);
@@ -768,24 +1107,45 @@ export class AuthService {
     }
 
     // 2. Validate token from Redis
-    const phone = await this.redisService.get(`token:reset:${dto.token}`);
-    if (!phone) {
+    const rawPhone = await this.redisService.get(`token:reset:${dto.token}`);
+    if (!rawPhone) {
       throw new BadRequestException({
         message: 'Invalid or expired temporary password reset token.',
         location: 'invalid_token',
       });
     }
 
+    const phone = normalizePhone(rawPhone);
+    const variants = getPhoneVariants(phone);
+
     // 3. Find user
-    const user = await this.knex<UserRow>('users')
-      .where('phone_number', phone)
+    let user = await this.knex<UserRow>('users')
+      .whereIn('phone_number', variants)
       .first();
+
+    if (!user) {
+      // Secondary phone support (Issue 4)
+      const employee = await this.knex<EmployeeRow>('employees')
+        .where((builder) => {
+          buildPhoneMatchCondition(builder, variants);
+        })
+        .first();
+
+      if (employee) {
+        user = await this.knex<UserRow>('users')
+          .where('employee_id', employee.id)
+          .first();
+      }
+    }
+
     if (!user) {
       throw new BadRequestException({
         message: 'Account not found.',
         location: 'account_not_found',
       });
     }
+
+    user = await this.healUserAccount(user);
 
     if (user.status === 'Banned') {
       throw new BadRequestException({
@@ -811,10 +1171,24 @@ export class AuthService {
     // 4. Hash password and update database
     const passwordHash = await bcrypt.hash(dto.password, 10);
 
-    await this.knex('users').where('id', user.id).update({
+    // Clean up any stale unlinked placeholder holding this phone number
+    const otherUser = await this.knex<UserRow>('users')
+      .where('phone_number', phone)
+      .whereNot('id', user.id)
+      .first();
+    if (otherUser && !otherUser.employee_id && !otherUser.password_hash) {
+      await this.knex('users').where('id', otherUser.id).del();
+    }
+
+    const updatePayload: Record<string, any> = {
       password_hash: passwordHash,
       updated_at: this.knex.fn.now(),
-    });
+    };
+    if (!otherUser || otherUser.id === user.id) {
+      updatePayload.phone_number = phone;
+    }
+
+    await this.knex('users').where('id', user.id).update(updatePayload);
 
     // 5. Clean up the temp token
     await this.redisService.del(`token:reset:${dto.token}`);
@@ -868,7 +1242,7 @@ export class AuthService {
     const payload = JSON.parse(dataStr) as RefreshTokenPayload;
 
     // 2. Query user from database to ensure status is still Open
-    const user = await this.knex<UserRow>('users')
+    let user = await this.knex<UserRow>('users')
       .where('id', payload.userId)
       .first();
     if (!user) {
@@ -877,6 +1251,8 @@ export class AuthService {
         location: 'user_not_found',
       });
     }
+
+    user = await this.healUserAccount(user);
 
     if (user.status === 'Banned') {
       throw new UnauthorizedException({

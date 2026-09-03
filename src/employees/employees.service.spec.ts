@@ -1,4 +1,5 @@
 import { Test, TestingModule } from '@nestjs/testing';
+import { BadRequestException } from '@nestjs/common';
 import { EmployeesService } from './employees.service';
 import { KNEX_CONNECTION } from '../database/database.module';
 import { MinioService } from '../minio/minio.service';
@@ -10,8 +11,39 @@ describe('EmployeesService', () => {
   let mockMinioService: any;
   let mockRedisService: any;
 
+  const createQB = (overrides: Record<string, any> = {}): any => ({
+    leftJoin: jest.fn().mockReturnThis(),
+    select: jest.fn().mockReturnThis(),
+    where: jest.fn((...args: any[]) => {
+      if (typeof args[0] === 'function') {
+        const sub = createQB();
+        args[0](sub);
+      }
+      return createQB(overrides);
+    }),
+    whereIn: jest.fn().mockReturnThis(),
+    whereRaw: jest.fn().mockReturnThis(),
+    orWhere: jest.fn().mockReturnThis(),
+    orWhereIn: jest.fn().mockReturnThis(),
+    orWhereRaw: jest.fn().mockReturnThis(),
+    whereNot: jest.fn().mockReturnThis(),
+    orderBy: jest.fn().mockReturnThis(),
+    count: jest.fn().mockReturnThis(),
+    sum: jest.fn().mockReturnThis(),
+    groupBy: jest.fn().mockResolvedValue([]),
+    first: jest.fn().mockResolvedValue(null),
+    update: jest.fn().mockResolvedValue(1),
+    insert: jest.fn().mockReturnValue({
+      returning: jest.fn().mockResolvedValue([]),
+    }),
+    returning: jest.fn().mockResolvedValue([]),
+    del: jest.fn().mockResolvedValue(1),
+    ...overrides,
+  });
+
   beforeEach(async () => {
-    mockKnex = jest.fn();
+    mockKnex = jest.fn(() => createQB());
+    mockKnex.fn = { now: jest.fn() };
     mockKnex.schema = {
       hasColumn: jest.fn().mockResolvedValue(true),
     };
@@ -671,6 +703,409 @@ describe('EmployeesService', () => {
         delete: false,
         assign_cargo: true,
       });
+    });
+
+    it('should auto-heal employee_id when missing if employee matches phone variants', async () => {
+      const createQB = (overrides: Record<string, any> = {}): any => ({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn((...args: any[]) => {
+          if (typeof args[0] === 'function') {
+            const sub = createQB();
+            args[0](sub);
+          }
+          return createQB(overrides);
+        }),
+        whereIn: jest.fn().mockReturnThis(),
+        whereRaw: jest.fn().mockReturnThis(),
+        orWhere: jest.fn().mockReturnThis(),
+        orWhereIn: jest.fn().mockReturnThis(),
+        orWhereRaw: jest.fn().mockReturnThis(),
+        whereNot: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        count: jest.fn().mockReturnThis(),
+        sum: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockResolvedValue([]),
+        first: jest.fn().mockResolvedValue(null),
+        update: jest.fn().mockResolvedValue(1),
+        insert: jest.fn().mockReturnValue({
+          returning: jest.fn().mockResolvedValue([]),
+        }),
+        del: jest.fn().mockResolvedValue(1),
+        ...overrides,
+      });
+
+      const userWithoutEmp: any = {
+        user_id: 'u-unlinked',
+        user_phone: '901234567',
+        role: 'EMPLOYEE',
+        role_id: 'r-1',
+        employee_id: null,
+      };
+
+      const matchedEmp = {
+        id: 'emp-found',
+        first_name: 'Auto',
+        last_name: 'Linked',
+        phone: '998901234567',
+        is_active: true,
+      };
+
+      const userWithEmp: any = {
+        user_id: 'u-unlinked',
+        user_phone: '901234567',
+        role: 'EMPLOYEE',
+        role_id: 'r-1',
+        employee_id: 'emp-found',
+        first_name: 'Auto',
+        last_name: 'Linked',
+      };
+
+      let userQueryCount = 0;
+      const customKnex: any = jest.fn((table: string) => {
+        if (table.startsWith('users')) {
+          userQueryCount++;
+          return createQB({
+            first: jest
+              .fn()
+              .mockResolvedValue(
+                userQueryCount === 1 ? userWithoutEmp : userWithEmp,
+              ),
+            update: jest.fn().mockResolvedValue(1),
+          });
+        }
+        if (table === 'employees') {
+          return createQB({
+            first: jest.fn().mockResolvedValue(matchedEmp),
+          });
+        }
+        return createQB();
+      });
+      customKnex.fn = { now: jest.fn() };
+      customKnex.schema = {
+        hasTable: jest.fn().mockResolvedValue(false),
+        hasColumn: jest.fn().mockResolvedValue(true),
+      };
+
+      const customModule: TestingModule = await Test.createTestingModule({
+        providers: [
+          EmployeesService,
+          { provide: KNEX_CONNECTION, useValue: customKnex },
+          { provide: MinioService, useValue: mockMinioService },
+          { provide: RedisService, useValue: mockRedisService },
+        ],
+      }).compile();
+
+      const customService =
+        customModule.get<EmployeesService>(EmployeesService);
+      const res = await customService.findEmployeeByUserId('u-unlinked');
+
+      expect(res.id).toBe('emp-found');
+    });
+  });
+
+  describe('createEmployee', () => {
+    it('should revive Deleted user account to Pending and active on employee creation', async () => {
+      const createQB = (overrides: Record<string, any> = {}): any => ({
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn((...args: any[]) => {
+          if (typeof args[0] === 'function') {
+            const sub = createQB();
+            args[0](sub);
+          }
+          return createQB(overrides);
+        }),
+        whereIn: jest.fn().mockReturnThis(),
+        whereRaw: jest.fn().mockReturnThis(),
+        orWhere: jest.fn().mockReturnThis(),
+        orWhereIn: jest.fn().mockReturnThis(),
+        orWhereRaw: jest.fn().mockReturnThis(),
+        whereNot: jest.fn().mockReturnThis(),
+        orderBy: jest.fn().mockReturnThis(),
+        count: jest.fn().mockReturnThis(),
+        sum: jest.fn().mockReturnThis(),
+        groupBy: jest.fn().mockResolvedValue([]),
+        first: jest.fn().mockResolvedValue(null),
+        update: jest.fn().mockResolvedValue(1),
+        insert: jest.fn().mockReturnValue({
+          returning: jest.fn().mockResolvedValue([]),
+        }),
+        del: jest.fn().mockResolvedValue(1),
+        ...overrides,
+      });
+
+      const deletedUser = {
+        id: 'u-del',
+        phone_number: '998901234567',
+        status: 'Deleted',
+        is_active: false,
+        password_hash: 'old_pw',
+      };
+
+      const userUpdateMock = jest.fn().mockResolvedValue(1);
+
+      const customKnex: any = jest.fn((table: string) => {
+        if (table === 'departments') {
+          return createQB({
+            first: jest.fn().mockResolvedValue({ id: 'dep-1' }),
+          });
+        }
+        if (table === 'roles') {
+          return createQB({
+            first: jest
+              .fn()
+              .mockResolvedValue({ id: 'role-1', name: 'EMPLOYEE' }),
+          });
+        }
+        if (table === 'employees') {
+          return createQB({
+            first: jest.fn().mockResolvedValue(null),
+            insert: jest.fn().mockReturnValue({
+              returning: jest
+                .fn()
+                .mockResolvedValue([{ id: 'emp-new', phone: '998901234567' }]),
+            }),
+          });
+        }
+        if (table === 'users') {
+          return createQB({
+            first: jest.fn().mockResolvedValue(deletedUser),
+            update: userUpdateMock,
+          });
+        }
+        return createQB();
+      });
+      customKnex.fn = { now: jest.fn() };
+      customKnex.transaction = jest.fn(async (cb: any) => {
+        return await cb(customKnex);
+      });
+
+      const customModule: TestingModule = await Test.createTestingModule({
+        providers: [
+          EmployeesService,
+          { provide: KNEX_CONNECTION, useValue: customKnex },
+          { provide: MinioService, useValue: mockMinioService },
+          { provide: RedisService, useValue: mockRedisService },
+        ],
+      }).compile();
+
+      const customService =
+        customModule.get<EmployeesService>(EmployeesService);
+      await customService.createEmployee({
+        first_name: 'John',
+        last_name: 'Rehired',
+        phone: '901234567',
+        department_id: 'dep-1',
+        role_id: 'role-1',
+      });
+
+      expect(userUpdateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          status: 'Pending',
+          is_active: true,
+          password_hash: '',
+        }),
+      );
+    });
+
+    it('should reject employee creation when primary and secondary phone are identical', async () => {
+      mockKnex.mockImplementation((table: string) => {
+        if (table === 'departments') {
+          return createQB({
+            first: jest.fn().mockResolvedValue({ id: 'dep-1' }),
+          });
+        }
+        if (table === 'roles') {
+          return createQB({
+            first: jest
+              .fn()
+              .mockResolvedValue({ id: 'role-1', name: 'EMPLOYEE' }),
+          });
+        }
+        return createQB();
+      });
+
+      let error: any;
+      try {
+        await service.createEmployee({
+          first_name: 'Identical',
+          last_name: 'Phones',
+          phone: '+998901234567',
+          secondary_phone: '901234567', // Same number in different format
+          department_id: 'dep-1',
+          role_id: 'role-1',
+        });
+      } catch (err) {
+        error = err;
+      }
+
+      expect(error).toBeInstanceOf(BadRequestException);
+    });
+
+    it('should link user when user exists matching secondary_phone', async () => {
+      const userUpdateMock = jest.fn().mockResolvedValue(1);
+      const customKnex: any = jest.fn((table: string) => {
+        if (table === 'departments') {
+          return createQB({
+            first: jest.fn().mockResolvedValue({ id: 'dep-1' }),
+          });
+        }
+        if (table === 'roles') {
+          return createQB({
+            first: jest
+              .fn()
+              .mockResolvedValue({ id: 'role-1', name: 'EMPLOYEE' }),
+          });
+        }
+        if (table === 'employees') {
+          return createQB({
+            first: jest.fn().mockResolvedValue(null),
+            insert: jest.fn().mockReturnValue({
+              returning: jest
+                .fn()
+                .mockResolvedValue([
+                  { id: 'emp-sec-linked', phone: '998901111111' },
+                ]),
+            }),
+          });
+        }
+        if (table === 'users') {
+          return createQB({
+            first: jest.fn().mockResolvedValue({
+              id: 'u-sec-user',
+              phone_number: '998902222222',
+              status: 'Pending',
+              is_active: true,
+            }),
+            update: userUpdateMock,
+          });
+        }
+        return createQB();
+      });
+      customKnex.fn = { now: jest.fn() };
+      customKnex.transaction = jest.fn((cb: any) => cb(customKnex));
+
+      const customModule: TestingModule = await Test.createTestingModule({
+        providers: [
+          EmployeesService,
+          { provide: KNEX_CONNECTION, useValue: customKnex },
+          { provide: MinioService, useValue: mockMinioService },
+          { provide: RedisService, useValue: mockRedisService },
+        ],
+      }).compile();
+
+      const customService =
+        customModule.get<EmployeesService>(EmployeesService);
+      await customService.createEmployee({
+        first_name: 'Secondary',
+        last_name: 'User',
+        phone: '998901111111',
+        secondary_phone: '998902222222',
+        department_id: 'dep-1',
+        role_id: 'role-1',
+      });
+
+      expect(userUpdateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          employee_id: 'emp-sec-linked',
+        }),
+      );
+    });
+  });
+
+  describe('updateEmployee', () => {
+    it('should preserve Pending status and not set Open when activating employee with unregistered user', async () => {
+      const userUpdateMock = jest.fn().mockResolvedValue(1);
+      const pendingUnregisteredUser = {
+        id: 'u-unregistered',
+        employee_id: 'emp-1',
+        phone_number: '998901234567',
+        password_hash: '', // No password yet!
+        status: 'Pending',
+        is_active: false,
+      };
+
+      const customKnex: any = jest.fn((table: string) => {
+        if (table === 'employees') {
+          return createQB({
+            first: jest
+              .fn()
+              .mockResolvedValue({ id: 'emp-1', phone: '998901234567' }),
+            update: jest.fn().mockReturnValue({
+              returning: jest
+                .fn()
+                .mockResolvedValue([{ id: 'emp-1', is_active: true }]),
+            }),
+          });
+        }
+        if (table === 'users') {
+          return createQB({
+            first: jest.fn().mockResolvedValue(pendingUnregisteredUser),
+            update: userUpdateMock,
+          });
+        }
+        return createQB();
+      });
+      customKnex.fn = { now: jest.fn() };
+      customKnex.transaction = jest.fn((cb: any) => cb(customKnex));
+
+      const customModule: TestingModule = await Test.createTestingModule({
+        providers: [
+          EmployeesService,
+          { provide: KNEX_CONNECTION, useValue: customKnex },
+          { provide: MinioService, useValue: mockMinioService },
+          { provide: RedisService, useValue: mockRedisService },
+        ],
+      }).compile();
+
+      const customService =
+        customModule.get<EmployeesService>(EmployeesService);
+      await customService.updateEmployee('emp-1', { is_active: true });
+
+      expect(userUpdateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          is_active: true,
+          status: 'Pending', // Must NOT be 'Open' because user has no password!
+        }),
+      );
+    });
+
+    it('should reject updating secondary phone if it already belongs to another employee', async () => {
+      let callCount = 0;
+      mockKnex.mockImplementation((table: string) => {
+        if (table === 'employees') {
+          callCount++;
+          // First call: find employee by id -> returns current employee
+          // Second call: check if existing employee has secondary phone -> returns collision
+          if (callCount === 1) {
+            return createQB({
+              first: jest.fn().mockResolvedValue({
+                id: 'emp-1',
+                phone: '998901111111',
+                secondary_phone: null,
+              }),
+            });
+          }
+          return createQB({
+            first: jest
+              .fn()
+              .mockResolvedValue({ id: 'emp-2', phone: '998903333333' }),
+          });
+        }
+        return createQB();
+      });
+
+      let error: any;
+      try {
+        await service.updateEmployee('emp-1', {
+          secondary_phone: '998903333333',
+        });
+      } catch (err) {
+        error = err;
+      }
+
+      expect(error).toBeInstanceOf(BadRequestException);
     });
   });
 });
