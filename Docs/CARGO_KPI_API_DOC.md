@@ -718,6 +718,12 @@ This sub-module provides complete management for Sales Manager career tiers, ave
 | **SENIOR**   | $700         | $6,001 - $8,000    | **$250 / $500**             | $\ge 1$ Mentee (_shogird_)  | 4 consecutive months KPI met $\to$ EXPERT | 2 consecutive months failed $\to$ MID    |
 | **EXPERT**   | $1,000       | $8,001 - $10,000   | **$300 / $600**             | $\ge 3$ Mentees (_shogird_) | -                                         | 3 consecutive months failed $\to$ SENIOR |
 
+> [!NOTE]
+> **Settled Fixed Salary & Level Ceiling Rule**:
+> The `Fixed Salary` in the table above represents the **maximum ceiling (cap)** for each career tier. The employee's actual fixed salary is respected from `employees.fixed_salary` in the database, but capped at the tier maximum:
+> $$\text{Effective Fixed Salary} = \min(\text{employees.fixed\_salary}, \text{Tier Max Salary})$$
+> E.g., a Junior employee can have a fixed salary as much as $300, but not more (if settled at $200, it is $200; if settled at $350, it is capped at $300). Both evaluation `fixed_salary` and `total_earnings` respect this settled salary.
+
 #### SR Check (Средний чек) Rule:
 
 $$\text{Average Check} = \frac{\text{Total Net Margin (Profit)}}{\text{Total Deals (Cargos)}}$$
@@ -966,7 +972,7 @@ Lists evaluations with filters. The `fixed_salary` field in each row is **source
       "employee_last_name": "Yoldoshev",
       "month": "2026-08",
       "career_level": "SENIOR",
-      "fixed_salary": 1200,
+      "fixed_salary": 700,
       "total_sales": 7500,
       "deal_count": 15,
       "average_check": 500,
@@ -977,11 +983,11 @@ Lists evaluations with filters. The `fixed_salary` field in each row is **source
 }
 ```
 
-> **Note:** `fixed_salary` in the response equals `employees.fixed_salary` (e.g. `1200`), not `sales_manager_evaluations.fixed_salary`/`CAREER_LEVEL_CONFIG.fixedSalary`. `GET /api/v1/sales-manager-kpi/evaluations/:id` applies the same override.
+> **Note:** `fixed_salary` in the response respects the employee's settled salary in `employees.fixed_salary`, capped at the career level maximum defined in `CAREER_LEVEL_CONFIG` (e.g. up to $300 for Junior, $500 for Mid, $700 for Senior, $1,000 for Expert). Both `fixed_salary` and `total_earnings` strictly reflect this effective capped salary. `GET /api/v1/sales-manager-kpi/evaluations/:id` applies the same logic.
 
 #### `GET /api/v1/sales-manager-kpi/evaluations/:id`
 
-Returns single evaluation by ID; `fixed_salary` is likewise resolved from `employees.fixed_salary`.
+Returns single evaluation by ID; `fixed_salary` is likewise resolved from `employees.fixed_salary` capped at the level maximum.
 
 #### `POST /api/v1/sales-manager-kpi/evaluations/:id/approve-sr-check`
 

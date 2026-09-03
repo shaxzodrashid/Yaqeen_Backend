@@ -116,6 +116,34 @@ export class SalesManagerKpiService {
   }
 
   /**
+   * Calculate effective fixed salary respecting the employee's settled salary
+   * in the `employees` table, capped at the career level's maximum fixed salary.
+   * E.g., for Junior, fixed salary can be as much as $300, but not more.
+   */
+  getEffectiveFixedSalary(
+    employeeFixedSalary: number | string | null | undefined,
+    careerLevel: CareerLevel,
+  ): number {
+    const levelConfig =
+      CAREER_LEVEL_CONFIG[careerLevel] ||
+      CAREER_LEVEL_CONFIG[CareerLevel.JUNIOR];
+    const maxSalary = levelConfig.fixedSalary;
+
+    if (
+      employeeFixedSalary !== undefined &&
+      employeeFixedSalary !== null &&
+      employeeFixedSalary !== ''
+    ) {
+      const settled = Number(employeeFixedSalary);
+      if (!isNaN(settled) && settled > 0) {
+        return Math.min(settled, maxSalary);
+      }
+    }
+
+    return maxSalary;
+  }
+
+  /**
    * Helper to normalize payment status input into canonical enum string.
    */
   normalizePaymentStatus(status?: string | null): CargoPaymentStatus {
@@ -561,6 +589,11 @@ export class SalesManagerKpiService {
         CAREER_LEVEL_CONFIG[currentLevel] ||
         CAREER_LEVEL_CONFIG[CareerLevel.JUNIOR];
 
+      const effectiveFixedSalary = this.getEffectiveFixedSalary(
+        emp.fixed_salary,
+        currentLevel,
+      );
+
       const salesData = await this.calculateEmployeeMonthlySales(emp.id, month);
       const totalSales = salesData.totalSales; // Total Net Margin Sum in USD
       const dealCount = salesData.dealCount;
@@ -632,9 +665,7 @@ export class SalesManagerKpiService {
 
       const totalEarnings =
         Math.round(
-          (levelConfig.fixedSalary +
-            salesBonusAmount +
-            additional_bonus_amount) *
+          (effectiveFixedSalary + salesBonusAmount + additional_bonus_amount) *
             100,
         ) / 100;
 
@@ -642,7 +673,7 @@ export class SalesManagerKpiService {
         employee_id: emp.id,
         month,
         career_level: newLevel,
-        fixed_salary: levelConfig.fixedSalary,
+        fixed_salary: effectiveFixedSalary,
         total_sales: totalSales,
         deal_count: dealCount,
         average_check: roundedAverageCheck,
@@ -728,6 +759,11 @@ export class SalesManagerKpiService {
     const levelConfig =
       CAREER_LEVEL_CONFIG[currentLevel] ||
       CAREER_LEVEL_CONFIG[CareerLevel.JUNIOR];
+
+    const effectiveFixedSalary = this.getEffectiveFixedSalary(
+      employee.fixed_salary,
+      currentLevel,
+    );
 
     const rates = this.currencyService
       ? await this.currencyService.getLatestRates()
@@ -1061,7 +1097,7 @@ export class SalesManagerKpiService {
         department_name: employee.department_name || 'Sales',
         career_level: currentLevel,
         month,
-        fixed_salary: levelConfig.fixedSalary,
+        fixed_salary: effectiveFixedSalary,
         total_cargos: totalCargosCount,
         total_buy_price: Math.round(totalBuyPrice * 100) / 100,
         total_sell_price: Math.round(totalSellPrice * 100) / 100,
@@ -1082,10 +1118,10 @@ export class SalesManagerKpiService {
         kpi_confirmed_cargos_count: kpiConfirmedCargos.length,
         real_kpi_expense: totalPaidKpiBonus,
         total_earnings_estimated:
-          Math.round((levelConfig.fixedSalary + totalPotentialKpiBonus) * 100) /
+          Math.round((effectiveFixedSalary + totalPotentialKpiBonus) * 100) /
           100,
         total_earnings_realized:
-          Math.round((levelConfig.fixedSalary + totalPaidKpiBonus) * 100) / 100,
+          Math.round((effectiveFixedSalary + totalPaidKpiBonus) * 100) / 100,
       },
       pagination: {
         total: filteredCargos.length,
@@ -1393,12 +1429,23 @@ export class SalesManagerKpiService {
     }
 
     const { employee_fixed_salary, ...rest } = record;
+    const careerLevel =
+      (rest.career_level as CareerLevel) || CareerLevel.JUNIOR;
+    const effectiveSalary = this.getEffectiveFixedSalary(
+      employee_fixed_salary != null ? employee_fixed_salary : rest.fixed_salary,
+      careerLevel,
+    );
+    const totalEarnings =
+      Math.round(
+        (effectiveSalary +
+          Number(rest.sales_bonus_amount || 0) +
+          Number(rest.additional_bonus_amount || 0)) *
+          100,
+      ) / 100;
     return {
       ...rest,
-      fixed_salary:
-        employee_fixed_salary != null
-          ? Number(employee_fixed_salary)
-          : Number(rest.fixed_salary),
+      fixed_salary: effectiveSalary,
+      total_earnings: totalEarnings,
       employee_name: `${record.employee_first_name} ${record.employee_last_name}`,
     };
   }
@@ -1470,12 +1517,25 @@ export class SalesManagerKpiService {
 
     const data = rows.map((r) => {
       const { employee_fixed_salary, ...rest } = r;
+      const careerLevel =
+        (rest.career_level as CareerLevel) || CareerLevel.JUNIOR;
+      const effectiveSalary = this.getEffectiveFixedSalary(
+        employee_fixed_salary != null
+          ? employee_fixed_salary
+          : rest.fixed_salary,
+        careerLevel,
+      );
+      const totalEarnings =
+        Math.round(
+          (effectiveSalary +
+            Number(rest.sales_bonus_amount || 0) +
+            Number(rest.additional_bonus_amount || 0)) *
+            100,
+        ) / 100;
       return {
         ...rest,
-        fixed_salary:
-          employee_fixed_salary != null
-            ? Number(employee_fixed_salary)
-            : Number(rest.fixed_salary),
+        fixed_salary: effectiveSalary,
+        total_earnings: totalEarnings,
         employee_name: `${r.employee_first_name} ${r.employee_last_name}`,
       };
     });

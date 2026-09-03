@@ -99,6 +99,70 @@ describe('SalesManagerKpiService', () => {
     });
   });
 
+  describe('getEffectiveFixedSalary', () => {
+    it('respects settled salary for Junior when <= $300 cap', () => {
+      expect(service.getEffectiveFixedSalary(200, CareerLevel.JUNIOR)).toBe(
+        200,
+      );
+      expect(service.getEffectiveFixedSalary('250', CareerLevel.JUNIOR)).toBe(
+        250,
+      );
+      expect(service.getEffectiveFixedSalary(300, CareerLevel.JUNIOR)).toBe(
+        300,
+      );
+    });
+
+    it('caps settled salary for Junior at $300 when exceeding cap', () => {
+      expect(service.getEffectiveFixedSalary(350, CareerLevel.JUNIOR)).toBe(
+        300,
+      );
+      expect(service.getEffectiveFixedSalary(500, CareerLevel.JUNIOR)).toBe(
+        300,
+      );
+    });
+
+    it('respects and caps settled salary for Mid ($500 cap)', () => {
+      expect(service.getEffectiveFixedSalary(400, CareerLevel.MID)).toBe(400);
+      expect(service.getEffectiveFixedSalary(500, CareerLevel.MID)).toBe(500);
+      expect(service.getEffectiveFixedSalary(650, CareerLevel.MID)).toBe(500);
+    });
+
+    it('respects and caps settled salary for Senior ($700 cap)', () => {
+      expect(service.getEffectiveFixedSalary(600, CareerLevel.SENIOR)).toBe(
+        600,
+      );
+      expect(service.getEffectiveFixedSalary(700, CareerLevel.SENIOR)).toBe(
+        700,
+      );
+      expect(service.getEffectiveFixedSalary(900, CareerLevel.SENIOR)).toBe(
+        700,
+      );
+    });
+
+    it('respects and caps settled salary for Expert ($1000 cap)', () => {
+      expect(service.getEffectiveFixedSalary(900, CareerLevel.EXPERT)).toBe(
+        900,
+      );
+      expect(service.getEffectiveFixedSalary(1000, CareerLevel.EXPERT)).toBe(
+        1000,
+      );
+      expect(service.getEffectiveFixedSalary(1500, CareerLevel.EXPERT)).toBe(
+        1000,
+      );
+    });
+
+    it('falls back to level max fixedSalary when employee fixed_salary is null, undefined, or 0', () => {
+      expect(service.getEffectiveFixedSalary(null, CareerLevel.JUNIOR)).toBe(
+        300,
+      );
+      expect(
+        service.getEffectiveFixedSalary(undefined, CareerLevel.JUNIOR),
+      ).toBe(300);
+      expect(service.getEffectiveFixedSalary(0, CareerLevel.JUNIOR)).toBe(300);
+      expect(service.getEffectiveFixedSalary('0', CareerLevel.MID)).toBe(500);
+    });
+  });
+
   describe('normalizePaymentStatus and getPaymentStatusLabel', () => {
     it('should normalize paid statuses correctly', () => {
       expect(service.normalizePaymentStatus('paid')).toBe(
@@ -616,6 +680,204 @@ describe('SalesManagerKpiService', () => {
       expect(res.meta.total_buy_price).toBe(300);
       expect(res.meta.total_sell_price).toBe(2000);
       expect(res.meta.total_profit).toBe(1700);
+    });
+  });
+
+  describe('Settled Fixed Salary & Career Level Cap in Evaluations & Monitoring', () => {
+    it('uses settled salary for Junior when settled < $300 cap (e.g. $200)', async () => {
+      const empId = 'emp-junior-custom';
+      const month = '2026-08';
+
+      const mockEmployee = {
+        id: empId,
+        first_name: 'Bobur',
+        last_name: 'Karimov',
+        career_level: CareerLevel.JUNIOR,
+        fixed_salary: 200, // Settled at $200 in database
+        is_active: true,
+      };
+
+      const mockDb: Record<string, any> = {
+        sales_manager_evaluations: [],
+      };
+
+      const createQueryBuilder = (resultData: any) => ({
+        where: jest.fn().mockReturnThis(),
+        first: jest
+          .fn()
+          .mockImplementation(() =>
+            Promise.resolve(mockDb.sales_manager_evaluations[0] || null),
+          ),
+        insert: jest.fn().mockImplementation((data) => {
+          mockDb.sales_manager_evaluations.push(data);
+          return Promise.resolve([data]);
+        }),
+        update: jest.fn().mockImplementation((data) => {
+          if (mockDb.sales_manager_evaluations[0]) {
+            Object.assign(mockDb.sales_manager_evaluations[0], data);
+          }
+          return Promise.resolve(1);
+        }),
+        then: jest.fn((resolve) => resolve(resultData)),
+      });
+
+      const customKnex: any = jest.fn((table: string) => {
+        if (table === 'employees') return createQueryBuilder([mockEmployee]);
+        if (table === 'sales_manager_evaluations')
+          return createQueryBuilder(mockDb.sales_manager_evaluations);
+        return createQueryBuilder([]);
+      });
+      customKnex.fn = { now: jest.fn() };
+
+      const testService = new SalesManagerKpiService(customKnex);
+      jest
+        .spyOn(testService, 'calculateEmployeeMonthlySales')
+        .mockResolvedValue({
+          totalSales: 2500, // Sales bonus = 2500 * 10% = $250
+          paidSales: 2500,
+          unpaidSales: 0,
+          dealCount: 10,
+          paidDealCount: 10,
+          unpaidDealCount: 0,
+          waitingDealCount: 0,
+          kpiConfirmedCount: 10,
+          totalBuyPriceUsd: 20000,
+          totalSellPriceUsd: 22500,
+        });
+
+      const result = await testService.calculateEvaluation({
+        month,
+        employee_id: empId,
+      });
+
+      const evalRow = result.evaluations[0];
+      expect(evalRow.fixed_salary).toBe(200);
+      expect(evalRow.sales_bonus_amount).toBe(250);
+      // Total earnings = 200 (settled fixed) + 250 (sales bonus) = 450
+      expect(evalRow.total_earnings).toBe(450);
+    });
+
+    it('caps settled salary at $300 for Junior when settled > $300 cap (e.g. $400)', async () => {
+      const empId = 'emp-junior-overcapped';
+      const month = '2026-08';
+
+      const mockEmployee = {
+        id: empId,
+        first_name: 'Bobur',
+        last_name: 'Karimov',
+        career_level: CareerLevel.JUNIOR,
+        fixed_salary: 400, // Settled at $400, but Junior cap is $300
+        is_active: true,
+      };
+
+      const mockDb: Record<string, any> = {
+        sales_manager_evaluations: [],
+      };
+
+      const createQueryBuilder = (resultData: any) => ({
+        where: jest.fn().mockReturnThis(),
+        first: jest
+          .fn()
+          .mockImplementation(() =>
+            Promise.resolve(mockDb.sales_manager_evaluations[0] || null),
+          ),
+        insert: jest.fn().mockImplementation((data) => {
+          mockDb.sales_manager_evaluations.push(data);
+          return Promise.resolve([data]);
+        }),
+        update: jest.fn().mockImplementation((data) => {
+          if (mockDb.sales_manager_evaluations[0]) {
+            Object.assign(mockDb.sales_manager_evaluations[0], data);
+          }
+          return Promise.resolve(1);
+        }),
+        then: jest.fn((resolve) => resolve(resultData)),
+      });
+
+      const customKnex: any = jest.fn((table: string) => {
+        if (table === 'employees') return createQueryBuilder([mockEmployee]);
+        if (table === 'sales_manager_evaluations')
+          return createQueryBuilder(mockDb.sales_manager_evaluations);
+        return createQueryBuilder([]);
+      });
+      customKnex.fn = { now: jest.fn() };
+
+      const testService = new SalesManagerKpiService(customKnex);
+      jest
+        .spyOn(testService, 'calculateEmployeeMonthlySales')
+        .mockResolvedValue({
+          totalSales: 2500, // Sales bonus = 2500 * 10% = $250
+          paidSales: 2500,
+          unpaidSales: 0,
+          dealCount: 10,
+          paidDealCount: 10,
+          unpaidDealCount: 0,
+          waitingDealCount: 0,
+          kpiConfirmedCount: 10,
+          totalBuyPriceUsd: 20000,
+          totalSellPriceUsd: 22500,
+        });
+
+      const result = await testService.calculateEvaluation({
+        month,
+        employee_id: empId,
+      });
+
+      const evalRow = result.evaluations[0];
+      // Capped at $300
+      expect(evalRow.fixed_salary).toBe(300);
+      expect(evalRow.sales_bonus_amount).toBe(250);
+      // Total earnings = 300 (capped) + 250 (sales bonus) = 550
+      expect(evalRow.total_earnings).toBe(550);
+    });
+
+    it('cargos-monitoring respects settled salary and caps at career level max', async () => {
+      const customKnex: any = jest.fn((table: string) => {
+        if (table === 'employees') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'emp-j-1',
+              first_name: 'Sardor',
+              last_name: 'Aliyev',
+              career_level: CareerLevel.JUNIOR,
+              fixed_salary: '250.00', // settled at $250
+            }),
+          };
+        }
+        if (table === 'cargo_registrations as cr') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            select: jest.fn().mockResolvedValue([]),
+          };
+        }
+        if (table === 'cargo_transactions as ct') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            select: jest.fn().mockResolvedValue([]),
+          };
+        }
+        return {
+          where: jest.fn().mockReturnThis(),
+          first: jest.fn().mockResolvedValue(null),
+        };
+      });
+      customKnex.schema = { hasTable: jest.fn().mockResolvedValue(true) };
+      customKnex.fn = { now: jest.fn() };
+
+      const testService = new SalesManagerKpiService(customKnex);
+      const res = await testService.getCargosMonitoring({
+        employee_id: 'emp-j-1',
+        month: '2026-08',
+      });
+
+      expect(res.meta.fixed_salary).toBe(250);
+      expect(res.meta.total_earnings_estimated).toBe(250);
+      expect(res.meta.total_earnings_realized).toBe(250);
     });
   });
 });
