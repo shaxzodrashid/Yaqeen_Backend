@@ -49,6 +49,10 @@ export class SalesProgressQueryDto {
   client_id?: string;
 
   @IsOptional()
+  @IsUUID('4', { message: 'agent_id must be a valid UUID' })
+  agent_id?: string;
+
+  @IsOptional()
   @IsString()
   status?: string;
 
@@ -113,6 +117,10 @@ export class DashboardSummaryQueryDto {
   @IsOptional()
   @IsUUID('4')
   client_id?: string;
+
+  @IsOptional()
+  @IsUUID('4')
+  agent_id?: string;
 
   @IsOptional()
   @IsString()

@@ -231,6 +231,43 @@ export interface ModulePermissions {
   assign_cargo?: boolean;
   register_for_everyone?: boolean;
   can_work_with_all_clients?: boolean;
+  plan_settable?: boolean;
+}
+
+export interface PlanSettableEmployeeItem {
+  id: string;
+  first_name: string;
+  last_name: string;
+  full_name: string;
+  phone: string;
+  secondary_phone: string | null;
+  address: string | null;
+  department_id: string;
+  department_name: string | null;
+  department_display_name: string | null;
+  color: string;
+  picture_url: string | null;
+  is_active: boolean;
+  user_id: string | null;
+  username: string | null;
+  role_id: string | null;
+  role_name: string | null;
+  role_display_name: string | null;
+  is_plan_settable: boolean;
+  created_at: Date | string;
+  updated_at: Date | string;
+}
+
+export interface PlanSettableEmployeesResponse {
+  meta: {
+    total: number;
+    count: number;
+    page: number;
+    limit: number;
+    offset: number;
+  };
+  data: PlanSettableEmployeeItem[];
+  items: PlanSettableEmployeeItem[];
 }
 
 export interface UserEmployeeResponse {
@@ -1593,6 +1630,181 @@ export class EmployeesService implements OnModuleInit {
     };
   }
 
+  /**
+   * Dedicated method to return only employees who are eligible to receive plans.
+   * Matches employees whose role allows plans (is_plan_settable = true or cargo_kpi.plan_settable = true).
+   */
+  async findPlanSettableEmployees(filters?: {
+    department_id?: string;
+    search?: string;
+    page?: number;
+    limit?: number;
+    offset?: number;
+  }): Promise<PlanSettableEmployeesResponse> {
+    const page = filters?.page && filters.page > 0 ? filters.page : 1;
+    const hasPagination = filters?.limit !== undefined && filters.limit > 0;
+    const limit = hasPagination ? filters.limit! : 1000;
+    const offset =
+      filters?.offset !== undefined && filters.offset >= 0
+        ? filters.offset
+        : (page - 1) * limit;
+
+    const hasPlanSettableCol = this.knex.schema?.hasColumn
+      ? await this.knex.schema.hasColumn('roles', 'is_plan_settable')
+      : false;
+
+    const applyEligibleCondition = (qb: Knex.QueryBuilder) => {
+      qb.where('e.is_active', true);
+
+      qb.where((roleSub) => {
+        if (hasPlanSettableCol) {
+          roleSub.where('r.is_plan_settable', true);
+        }
+        roleSub
+          .orWhereRaw(
+            "r.permissions -> 'cargo_kpi' ->> 'plan_settable' = 'true'",
+          )
+          .orWhereRaw("r.permissions -> 'cargo_kpi' ->> 'set_plan' = 'true'")
+          .orWhere((legacySub) => {
+            legacySub
+              .whereNull('u.role_id')
+              .whereIn('u.role', [
+                'EMPLOYEE',
+                'ROP',
+                'Sales Manager',
+                'SALES_MANAGER',
+                'sales_manager',
+              ]);
+          });
+      });
+
+      if (filters?.department_id) {
+        qb.where('e.department_id', filters.department_id);
+      }
+
+      if (filters?.search && filters.search.trim()) {
+        const searchPattern = `%${filters.search.trim()}%`;
+        qb.where((sub) => {
+          sub
+            .where('e.first_name', 'ilike', searchPattern)
+            .orWhere('e.last_name', 'ilike', searchPattern)
+            .orWhere('e.phone', 'like', searchPattern)
+            .orWhere('d.name', 'ilike', searchPattern)
+            .orWhere('d.display_name', 'ilike', searchPattern);
+        });
+      }
+    };
+
+    // 1. Count query
+    const countQuery = this.knex('employees as e')
+      .leftJoin('departments as d', 'e.department_id', 'd.id')
+      .leftJoin('users as u', 'e.id', 'u.employee_id')
+      .leftJoin('roles as r', 'u.role_id', 'r.id');
+    applyEligibleCondition(countQuery);
+
+    const countRes = (await countQuery
+      .select(this.knex.raw('COUNT(DISTINCT e.id) as total'))
+      .first()) as unknown as { total?: string | number } | undefined;
+    const total = parseInt(String(countRes?.total || '0'), 10);
+
+    // 2. Fetch rows
+    const query = this.knex('employees as e')
+      .leftJoin('departments as d', 'e.department_id', 'd.id')
+      .leftJoin('users as u', 'e.id', 'u.employee_id')
+      .leftJoin('roles as r', 'u.role_id', 'r.id')
+      .select(
+        'e.id',
+        'e.first_name',
+        'e.last_name',
+        'e.phone',
+        'e.secondary_phone',
+        'e.address',
+        'e.department_id',
+        'e.color',
+        'e.picture_url as _raw_picture_path',
+        'e.is_active',
+        'e.created_at',
+        'e.updated_at',
+        'd.name as department_name',
+        'd.display_name as department_display_name',
+        'u.id as user_id',
+        'u.username',
+        'u.role as user_role',
+        'r.id as role_id',
+        'r.name as role_name',
+        'r.display_name as role_display_name',
+      );
+
+    if (hasPlanSettableCol) {
+      query.select('r.is_plan_settable');
+    }
+
+    applyEligibleCondition(query);
+
+    query
+      .orderByRaw(
+        "COALESCE(e.first_name, '') ASC, COALESCE(e.last_name, '') ASC",
+      )
+      .limit(limit)
+      .offset(offset);
+
+    const rows = (await query) as any[];
+
+    const items: PlanSettableEmployeeItem[] = await Promise.all(
+      rows.map(async (row: any) => {
+        const presignedUrl = await this.resolvePictureUrl(
+          row.id,
+          row._raw_picture_path,
+        );
+        const fullName =
+          `${row.first_name || ''} ${row.last_name || ''}`.trim() ||
+          'Unnamed Employee';
+        const roleDisplayName =
+          row.role_display_name ||
+          row.role_name ||
+          row.user_role ||
+          'Standard Employee';
+
+        return {
+          id: row.id,
+          first_name: row.first_name || '',
+          last_name: row.last_name || '',
+          full_name: fullName,
+          phone: row.phone || '',
+          secondary_phone: row.secondary_phone || null,
+          address: row.address || null,
+          department_id: row.department_id,
+          department_name: row.department_name || null,
+          department_display_name:
+            row.department_display_name || row.department_name || null,
+          color: row.color || '#CCCCCC',
+          picture_url: presignedUrl,
+          is_active: Boolean(row.is_active),
+          user_id: row.user_id || null,
+          username: row.username || null,
+          role_id: row.role_id || null,
+          role_name: row.role_name || row.user_role || null,
+          role_display_name: roleDisplayName,
+          is_plan_settable: true,
+          created_at: row.created_at,
+          updated_at: row.updated_at,
+        };
+      }),
+    );
+
+    return {
+      meta: {
+        total,
+        count: items.length,
+        page,
+        limit,
+        offset,
+      },
+      data: items,
+      items,
+    };
+  }
+
   async findEmployeeById(id: string): Promise<EmployeeWithMetrics> {
     const employee = (await this.knex('employees as e')
       .leftJoin('departments as d', 'e.department_id', 'd.id')
@@ -1914,6 +2126,10 @@ export class EmployeesService implements OnModuleInit {
         permissions[mod].can_work_with_all_clients = isCeoOrRop
           ? true
           : Boolean(rawMod.can_work_with_all_clients);
+      }
+
+      if (mod === 'cargo_kpi') {
+        permissions[mod].plan_settable = Boolean(rawMod.plan_settable);
       }
     }
     const defaultCurrency = user.currency || 'UZS';

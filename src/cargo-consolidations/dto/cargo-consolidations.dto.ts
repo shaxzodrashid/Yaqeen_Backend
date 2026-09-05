@@ -79,6 +79,10 @@ export class CreateCargoConsolidationDto {
   max_weight_capacity?: number;
 
   @IsOptional()
+  @IsUUID('4', { message: 'agent_id must be a valid UUID' })
+  agent_id?: string;
+
+  @IsOptional()
   @IsString()
   carrier_name?: string;
 
@@ -289,6 +293,10 @@ export class UpdateCargoConsolidationDto {
   @IsNumber()
   @Min(0)
   max_weight_capacity?: number;
+
+  @IsOptional()
+  @IsUUID('4', { message: 'agent_id must be a valid UUID' })
+  agent_id?: string | null;
 
   @IsOptional()
   @IsString()
@@ -504,6 +512,10 @@ export class QueryCargoConsolidationDto {
   destination_place?: string;
 
   @IsOptional()
+  @IsUUID('4')
+  agent_id?: string;
+
+  @IsOptional()
   @IsString()
   carrier_name?: string;
 
@@ -582,6 +594,10 @@ export class CreateConsolidationInlineDto {
   @IsNumber()
   @Min(0)
   max_weight_capacity?: number;
+
+  @IsOptional()
+  @IsUUID('4', { message: 'agent_id must be a valid UUID' })
+  agent_id?: string;
 
   @IsOptional()
   @IsString()

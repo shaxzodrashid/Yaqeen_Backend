@@ -1108,4 +1108,81 @@ describe('EmployeesService', () => {
       expect(error).toBeInstanceOf(BadRequestException);
     });
   });
+
+  describe('findPlanSettableEmployees', () => {
+    it('should return eligible employees who have plan-settable roles', async () => {
+      const mockRawEmployee = {
+        id: 'emp-uuid-1',
+        first_name: 'Jasur',
+        last_name: 'Yoldoshev',
+        phone: '+998901234567',
+        secondary_phone: null,
+        address: 'Tashkent',
+        department_id: 'dept-1',
+        department_name: 'sales',
+        department_display_name: 'Sales',
+        role_id: 'role-1',
+        role_name: 'Sales Manager',
+        role_display_name: 'Sales Manager',
+        user_id: 'user-1',
+        username: 'jasur',
+        user_role: 'Sales Manager',
+        is_plan_settable: true,
+        is_active: true,
+        color: '#336699',
+        _raw_picture_path: null,
+        created_at: new Date(),
+        updated_at: new Date(),
+      };
+
+      const qb: any = {
+        leftJoin: jest.fn().mockReturnThis(),
+        select: jest.fn().mockReturnThis(),
+        where: jest.fn((...args: any[]) => {
+          if (typeof args[0] === 'function') {
+            const sub = {
+              where: jest.fn().mockReturnThis(),
+              orWhereRaw: jest.fn().mockReturnThis(),
+              orWhere: jest.fn((cb: any) => {
+                if (typeof cb === 'function') cb(sub);
+                return sub;
+              }),
+              whereNull: jest.fn().mockReturnThis(),
+              whereIn: jest.fn().mockReturnThis(),
+            };
+            args[0](sub);
+          }
+          return qb;
+        }),
+        whereIn: jest.fn().mockReturnThis(),
+        whereRaw: jest.fn().mockReturnThis(),
+        orWhere: jest.fn().mockReturnThis(),
+        orderByRaw: jest.fn().mockReturnThis(),
+        limit: jest.fn().mockReturnThis(),
+        offset: jest.fn().mockReturnThis(),
+        first: jest.fn().mockResolvedValue({ total: 1 }),
+        then: jest.fn((resolve: any) => resolve([mockRawEmployee])),
+      };
+
+      mockKnex.mockReturnValue(qb);
+      mockKnex.raw = jest.fn((sql: string) => sql);
+      mockKnex.schema = {
+        hasColumn: jest.fn().mockResolvedValue(true),
+      };
+
+      const result = await service.findPlanSettableEmployees({
+        search: 'Jasur',
+        page: 1,
+        limit: 10,
+      });
+
+      expect(result.meta.total).toBe(1);
+      expect(result.meta.count).toBe(1);
+      expect(result.items).toHaveLength(1);
+      expect(result.items[0].id).toBe('emp-uuid-1');
+      expect(result.items[0].full_name).toBe('Jasur Yoldoshev');
+      expect(result.items[0].is_plan_settable).toBe(true);
+      expect(result.data).toEqual(result.items);
+    });
+  });
 });

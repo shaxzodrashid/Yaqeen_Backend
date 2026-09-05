@@ -190,6 +190,10 @@ export class CreateCargoRegistrationDto {
   container_truck_id?: string;
 
   @IsOptional()
+  @IsUUID('4', { message: 'agent_id must be a valid UUID' })
+  agent_id?: string;
+
+  @IsOptional()
   @IsString()
   agent_name?: string;
 
@@ -476,6 +480,10 @@ export class UpdateCargoRegistrationDto {
   container_truck_id?: string;
 
   @IsOptional()
+  @IsUUID('4', { message: 'agent_id must be a valid UUID' })
+  agent_id?: string | null;
+
+  @IsOptional()
   @IsString()
   agent_name?: string;
 
@@ -712,6 +720,14 @@ export class QueryCargoRegistrationDto {
   @IsOptional()
   @IsUUID('4')
   client_id?: string;
+
+  @IsOptional()
+  @IsUUID('4')
+  agent_id?: string;
+
+  @IsOptional()
+  @IsString()
+  agent_name?: string;
 
   @IsOptional()
   @Transform(({ value }) =>

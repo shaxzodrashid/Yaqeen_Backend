@@ -25,6 +25,8 @@ import { CargoConsolidationsModule } from './cargo-consolidations/cargo-consolid
 import { DashboardModule } from './dashboard/dashboard.module';
 import { KpiSummaryModule } from './kpi-summary/kpi-summary.module';
 import { LocationsModule } from './locations/locations.module';
+import { AgentsModule } from './agents/agents.module';
+import { KpiAlertsModule } from './kpi-alerts/kpi-alerts.module';
 
 @Module({
   imports: [
@@ -83,6 +85,8 @@ import { LocationsModule } from './locations/locations.module';
     DashboardModule,
     KpiSummaryModule,
     LocationsModule,
+    AgentsModule,
+    KpiAlertsModule,
   ],
   controllers: [AppController],
   providers: [AppService],

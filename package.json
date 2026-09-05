@@ -23,7 +23,9 @@
     "db:migrate": "knex migrate:latest --knexfile knexfile.ts",
     "db:rollback": "knex migrate:rollback --knexfile knexfile.ts",
     "db:seed": "knex seed:run --knexfile knexfile.ts",
-    "db:migrate:make": "knex migrate:make --knexfile knexfile.ts"
+    "db:migrate:make": "knex migrate:make --knexfile knexfile.ts",
+    "agents:deduplicate": "ts-node scripts/deduplicate-and-migrate-agents.ts --dry-run",
+    "agents:migrate": "ts-node scripts/deduplicate-and-migrate-agents.ts --apply"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

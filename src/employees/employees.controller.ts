@@ -84,6 +84,27 @@ export class EmployeesController {
     });
   }
 
+  @Get(['plan-settable', 'plan-eligible', 'for-plan'])
+  async getPlanSettableEmployees(
+    @Query('department_id') departmentId?: string,
+    @Query('search') search?: string,
+    @Query('page') page?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+  ) {
+    const pageNum = page ? parseInt(page, 10) : undefined;
+    const limitNum = limit ? parseInt(limit, 10) : undefined;
+    const offsetNum = offset ? parseInt(offset, 10) : undefined;
+
+    return this.employeesService.findPlanSettableEmployees({
+      department_id: departmentId,
+      search,
+      page: pageNum,
+      limit: limitNum,
+      offset: offsetNum,
+    });
+  }
+
   @Get(':id')
   async findOne(
     @Param('id', ParseUUIDPipe) id: string,

@@ -20,6 +20,7 @@ import {
   CalculateEvaluationDto,
   ApproveSrCheckDto,
   ReviewDemotionDto,
+  ReviewPromotionDto,
   QueryEvaluationDto,
   UpdateCareerLevelDto,
   QueryCargosMonitoringDto,
@@ -128,6 +129,18 @@ export class SalesManagerKpiController {
   ) {
     const reviewerUserId = user?.id || user?.userId;
     return this.salesManagerKpiService.reviewDemotion(id, reviewerUserId, dto);
+  }
+
+  @Post('evaluations/:id/review-promotion')
+  @RequirePermission('cargo_kpi', 'update')
+  @HttpCode(HttpStatus.OK)
+  reviewPromotion(
+    @Param('id') id: string,
+    @Body() dto: ReviewPromotionDto,
+    @CurrentUser() user: any,
+  ) {
+    const reviewerUserId = user?.id || user?.userId;
+    return this.salesManagerKpiService.reviewPromotion(id, reviewerUserId, dto);
   }
 
   @Put('employee-level/:employeeId')

@@ -24,7 +24,13 @@ export const DEFAULT_SYSTEM_PERMISSIONS: Record<string, any> = {
     },
     employees: { create: false, read: true, update: true, delete: false },
     departments: { create: false, read: true, update: false, delete: false },
-    cargo_kpi: { create: true, read: true, update: true, delete: true },
+    cargo_kpi: {
+      create: true,
+      read: true,
+      update: true,
+      delete: true,
+      plan_settable: true,
+    },
     cargo_registrations: {
       create: true,
       read: true,
@@ -45,6 +51,7 @@ export const DEFAULT_SYSTEM_PERMISSIONS: Record<string, any> = {
     currency: { create: false, read: true, update: false, delete: false },
     attachments: { create: true, read: true, update: true, delete: true },
     roles: { create: false, read: true, update: false, delete: false },
+    agents: { create: true, read: true, update: true, delete: true },
   },
   EMPLOYEE: {
     clients: {
@@ -56,7 +63,13 @@ export const DEFAULT_SYSTEM_PERMISSIONS: Record<string, any> = {
     },
     employees: { create: false, read: true, update: false, delete: false },
     departments: { create: false, read: true, update: false, delete: false },
-    cargo_kpi: { create: false, read: true, update: false, delete: false },
+    cargo_kpi: {
+      create: false,
+      read: true,
+      update: false,
+      delete: false,
+      plan_settable: true,
+    },
     cargo_registrations: {
       create: true,
       read: true,
@@ -82,6 +95,7 @@ export const DEFAULT_SYSTEM_PERMISSIONS: Record<string, any> = {
     currency: { create: false, read: true, update: false, delete: false },
     attachments: { create: true, read: true, update: false, delete: false },
     roles: { create: false, read: false, update: false, delete: false },
+    agents: { create: true, read: true, update: true, delete: false },
   },
 };
 

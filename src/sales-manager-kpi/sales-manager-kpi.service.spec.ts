@@ -6,6 +6,8 @@ import {
   CareerLevel,
   CargoPaymentStatus,
   EvaluationApprovalStatus,
+  PromotionReviewAction,
+  DemotionReviewAction,
 } from './dto/sales-manager-kpi.dto';
 
 describe('SalesManagerKpiService', () => {
@@ -878,6 +880,228 @@ describe('SalesManagerKpiService', () => {
       expect(res.meta.fixed_salary).toBe(250);
       expect(res.meta.total_earnings_estimated).toBe(250);
       expect(res.meta.total_earnings_realized).toBe(250);
+    });
+  });
+
+  describe('Executive Reviews: reviewPromotion and reviewDemotion with Salary Updates', () => {
+    it('reviewPromotion: approves promotion, updates employee level to MID and salary to $500', async () => {
+      const evalId = 'eval-promo-1';
+      const empId = 'emp-promo-1';
+      const reviewerId = 'user-ceo-1';
+
+      const employeeUpdateMock = jest.fn().mockResolvedValue(1);
+      const evalUpdateMock = jest.fn().mockResolvedValue(1);
+
+      const customKnex: any = jest.fn((table: string) => {
+        if (table === 'sales_manager_evaluations') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: evalId,
+              employee_id: empId,
+              career_level: CareerLevel.JUNIOR,
+              fixed_salary: 300,
+              sales_bonus_amount: 250,
+              additional_bonus_amount: 0,
+              approval_status:
+                EvaluationApprovalStatus.PROMOTION_PENDING_REVIEW,
+              consecutive_successes: 2,
+            }),
+            update: evalUpdateMock,
+            join: jest.fn().mockReturnThis(),
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+          };
+        }
+        if (table === 'employees') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            update: employeeUpdateMock,
+            first: jest.fn().mockResolvedValue({
+              id: empId,
+              career_level: CareerLevel.MID,
+              fixed_salary: 500,
+            }),
+          };
+        }
+        if (table === 'kpi_alerts') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            update: jest.fn().mockResolvedValue(1),
+          };
+        }
+        return {
+          where: jest.fn().mockReturnThis(),
+          first: jest.fn().mockResolvedValue(null),
+        };
+      });
+      customKnex.fn = { now: jest.fn() };
+      customKnex.raw = jest.fn().mockReturnValue('');
+      customKnex.schema = { hasTable: jest.fn().mockResolvedValue(true) };
+
+      const testService = new SalesManagerKpiService(customKnex);
+      jest.spyOn(testService, 'getEvaluationById').mockResolvedValue({
+        id: evalId,
+        career_level: CareerLevel.MID,
+        fixed_salary: 500,
+        approval_status: EvaluationApprovalStatus.PROMOTION_APPROVED,
+      } as any);
+
+      const result = await testService.reviewPromotion(evalId, reviewerId, {
+        action: PromotionReviewAction.APPROVE_PROMOTION,
+        update_salary: true,
+      });
+
+      expect(employeeUpdateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          career_level: CareerLevel.MID,
+          fixed_salary: 500, // Standard salary for MID level
+        }),
+      );
+      expect(evalUpdateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          career_level: CareerLevel.MID,
+          fixed_salary: 500,
+          approval_status: EvaluationApprovalStatus.PROMOTION_APPROVED,
+          consecutive_successes: 0, // Reset counter
+          reviewed_by: reviewerId,
+        }),
+      );
+      expect(result.approval_status).toBe(
+        EvaluationApprovalStatus.PROMOTION_APPROVED,
+      );
+    });
+
+    it('reviewPromotion: rejects promotion and maintains current level and salary', async () => {
+      const evalId = 'eval-promo-2';
+      const empId = 'emp-promo-2';
+      const reviewerId = 'user-ceo-1';
+
+      const employeeUpdateMock = jest.fn().mockResolvedValue(1);
+      const evalUpdateMock = jest.fn().mockResolvedValue(1);
+
+      const customKnex: any = jest.fn((table: string) => {
+        if (table === 'sales_manager_evaluations') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: evalId,
+              employee_id: empId,
+              career_level: CareerLevel.JUNIOR,
+              fixed_salary: 300,
+              approval_status:
+                EvaluationApprovalStatus.PROMOTION_PENDING_REVIEW,
+            }),
+            update: evalUpdateMock,
+          };
+        }
+        if (table === 'employees') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            update: employeeUpdateMock,
+          };
+        }
+        return {
+          where: jest.fn().mockReturnThis(),
+          update: jest.fn().mockResolvedValue(1),
+        };
+      });
+      customKnex.fn = { now: jest.fn() };
+      customKnex.schema = { hasTable: jest.fn().mockResolvedValue(true) };
+
+      const testService = new SalesManagerKpiService(customKnex);
+      jest.spyOn(testService, 'getEvaluationById').mockResolvedValue({
+        id: evalId,
+        career_level: CareerLevel.JUNIOR,
+        approval_status: EvaluationApprovalStatus.PROMOTION_REJECTED,
+      } as any);
+
+      const result = await testService.reviewPromotion(evalId, reviewerId, {
+        action: PromotionReviewAction.REJECT_PROMOTION,
+        review_notes: 'Needs more consistent performance.',
+      });
+
+      expect(employeeUpdateMock).not.toHaveBeenCalled();
+      expect(evalUpdateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          approval_status: EvaluationApprovalStatus.PROMOTION_REJECTED,
+          reviewed_by: reviewerId,
+        }),
+      );
+      expect(result.approval_status).toBe(
+        EvaluationApprovalStatus.PROMOTION_REJECTED,
+      );
+    });
+
+    it('reviewDemotion: approves demotion, updates employee level to JUNIOR and adjusts salary to $300', async () => {
+      const evalId = 'eval-demo-1';
+      const empId = 'emp-demo-1';
+      const reviewerId = 'user-ceo-1';
+
+      const employeeUpdateMock = jest.fn().mockResolvedValue(1);
+      const evalUpdateMock = jest.fn().mockResolvedValue(1);
+
+      const customKnex: any = jest.fn((table: string) => {
+        if (table === 'sales_manager_evaluations') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: evalId,
+              employee_id: empId,
+              career_level: CareerLevel.MID,
+              fixed_salary: 500,
+              sales_bonus_amount: 0,
+              additional_bonus_amount: 0,
+              approval_status: EvaluationApprovalStatus.DEMOTION_PENDING_REVIEW,
+              consecutive_failures: 2,
+            }),
+            update: evalUpdateMock,
+          };
+        }
+        if (table === 'employees') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            update: employeeUpdateMock,
+          };
+        }
+        return {
+          where: jest.fn().mockReturnThis(),
+          update: jest.fn().mockResolvedValue(1),
+        };
+      });
+      customKnex.fn = { now: jest.fn() };
+      customKnex.schema = { hasTable: jest.fn().mockResolvedValue(true) };
+
+      const testService = new SalesManagerKpiService(customKnex);
+      jest.spyOn(testService, 'getEvaluationById').mockResolvedValue({
+        id: evalId,
+        career_level: CareerLevel.JUNIOR,
+        fixed_salary: 300,
+        approval_status: EvaluationApprovalStatus.DEMOTION_APPROVED,
+      } as any);
+
+      const result = await testService.reviewDemotion(evalId, reviewerId, {
+        action: DemotionReviewAction.APPROVE_DEMOTION,
+        update_salary: true,
+      });
+
+      expect(employeeUpdateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          career_level: CareerLevel.JUNIOR,
+          fixed_salary: 300, // Standard salary for JUNIOR level
+        }),
+      );
+      expect(evalUpdateMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          career_level: CareerLevel.JUNIOR,
+          fixed_salary: 300,
+          approval_status: EvaluationApprovalStatus.DEMOTION_APPROVED,
+          consecutive_failures: 0,
+        }),
+      );
+      expect(result.approval_status).toBe(
+        EvaluationApprovalStatus.DEMOTION_APPROVED,
+      );
     });
   });
 });

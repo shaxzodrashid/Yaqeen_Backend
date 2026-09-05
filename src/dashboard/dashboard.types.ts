@@ -97,7 +97,11 @@ export interface DebtorClientItem {
 }
 
 export interface CreditorCarrierItem {
+  agentId?: string;
   agentName: string;
+  companyName?: string;
+  phoneNumber?: string;
+  email?: string;
   amount: number;
   orderCount: number;
 }

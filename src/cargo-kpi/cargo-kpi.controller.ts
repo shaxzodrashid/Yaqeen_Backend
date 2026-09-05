@@ -210,6 +210,22 @@ export class CargoKpiController {
     return this.cargoKpiService.getEmployeePlansStatistics(query);
   }
 
+  @Get([
+    'plans/eligible-employees',
+    'plans/plan-settable-employees',
+    'eligible-employees',
+  ])
+  @RequirePermission('cargo_kpi', 'read')
+  getPlanEligibleEmployees(
+    @Query('department_id') departmentId?: string,
+    @Query('search') search?: string,
+  ) {
+    return this.cargoKpiService.getPlanEligibleEmployees({
+      department_id: departmentId,
+      search,
+    });
+  }
+
   @Get('plans/employee/:id/stats')
   @RequirePermission('cargo_kpi', 'read')
   getEmployeePlanPersonalStats(

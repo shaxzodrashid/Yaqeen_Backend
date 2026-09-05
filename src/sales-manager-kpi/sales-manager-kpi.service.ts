@@ -13,10 +13,12 @@ import {
   CareerLevel,
   EvaluationApprovalStatus,
   DemotionReviewAction,
+  PromotionReviewAction,
   CargoPaymentStatus,
   CalculateEvaluationDto,
   ApproveSrCheckDto,
   ReviewDemotionDto,
+  ReviewPromotionDto,
   QueryEvaluationDto,
   UpdateCareerLevelDto,
   QueryCargosMonitoringDto,
@@ -622,9 +624,9 @@ export class SalesManagerKpiService {
       }
 
       let approvalStatus = EvaluationApprovalStatus.APPROVED;
-      let newLevel = currentLevel;
+      const newLevel = currentLevel;
 
-      // Check promotion requirement
+      // Check promotion requirement - requires CEO review and approval
       const hasEnoughMentees =
         (emp.mentees_count || 0) >= levelConfig.menteeRequirement;
       if (
@@ -635,12 +637,7 @@ export class SalesManagerKpiService {
         consecutiveSuccesses >= levelConfig.promotionConsecutiveMonths &&
         levelConfig.nextLevel
       ) {
-        // Promoted automatically!
-        newLevel = levelConfig.nextLevel;
-        await this.knex('employees')
-          .where({ id: emp.id })
-          .update({ career_level: newLevel });
-        consecutiveSuccesses = 0; // Reset after promotion
+        approvalStatus = EvaluationApprovalStatus.PROMOTION_PENDING_REVIEW;
       }
 
       // Check demotion escalation requirement
@@ -705,6 +702,20 @@ export class SalesManagerKpiService {
         .first();
 
       if (existing) {
+        if (
+          existing.approval_status ===
+            EvaluationApprovalStatus.PROMOTION_APPROVED ||
+          existing.approval_status ===
+            EvaluationApprovalStatus.PROMOTION_REJECTED ||
+          existing.approval_status ===
+            EvaluationApprovalStatus.DEMOTION_APPROVED ||
+          existing.approval_status ===
+            EvaluationApprovalStatus.DEMOTION_REJECTED
+        ) {
+          evalData.approval_status = existing.approval_status;
+          evalData.career_level = existing.career_level;
+          evalData.fixed_salary = existing.fixed_salary;
+        }
         await this.knex('sales_manager_evaluations')
           .where({ id: existing.id })
           .update(evalData);
@@ -1360,16 +1371,53 @@ export class SalesManagerKpiService {
 
     if (dto.action === DemotionReviewAction.APPROVE_DEMOTION) {
       const prevLevel = levelConfig.prevLevel || CareerLevel.JUNIOR;
+      const prevLevelConfig = CAREER_LEVEL_CONFIG[prevLevel];
 
-      // Update employee level to lower rank
+      const empUpdate: Record<string, any> = { career_level: prevLevel };
+      let effectiveFixedSalary = evalRecord.fixed_salary;
+
+      if (dto.update_salary !== false) {
+        const targetSalary =
+          dto.new_salary !== undefined && dto.new_salary !== null
+            ? Number(dto.new_salary)
+            : prevLevelConfig.fixedSalary;
+        const cappedSalary = Math.min(
+          targetSalary,
+          prevLevelConfig.fixedSalary,
+        );
+        empUpdate.fixed_salary = cappedSalary;
+        effectiveFixedSalary = cappedSalary;
+      } else {
+        effectiveFixedSalary = this.getEffectiveFixedSalary(
+          evalRecord.fixed_salary,
+          prevLevel,
+        );
+      }
+
+      // Update employee level and salary in employees table
       await this.knex('employees')
         .where({ id: evalRecord.employee_id })
-        .update({ career_level: prevLevel });
+        .update(empUpdate);
+
+      const salesBonusAmount = Number(evalRecord.sales_bonus_amount || 0);
+      const additionalBonusAmount = Number(
+        evalRecord.additional_bonus_amount || 0,
+      );
+      const totalEarnings =
+        Math.round(
+          (Number(effectiveFixedSalary) +
+            salesBonusAmount +
+            additionalBonusAmount) *
+            100,
+        ) / 100;
 
       // Update evaluation record
       await this.knex('sales_manager_evaluations')
         .where({ id })
         .update({
+          career_level: prevLevel,
+          fixed_salary: effectiveFixedSalary,
+          total_earnings: totalEarnings,
           approval_status: EvaluationApprovalStatus.DEMOTION_APPROVED,
           consecutive_failures: 0, // reset counter after demotion
           reviewed_by: reviewerUserId,
@@ -1377,6 +1425,21 @@ export class SalesManagerKpiService {
             dto.review_notes || `Demotion to ${prevLevel} approved by ROP/CEO`,
           updated_at: this.knex.fn.now(),
         });
+
+      // Update any matching kpi_alerts record if exists
+      const hasAlertsTable = await this.knex.schema.hasTable('kpi_alerts');
+      if (hasAlertsTable) {
+        await this.knex('kpi_alerts')
+          .where({ evaluation_id: id })
+          .update({
+            status: 'APPROVED',
+            approved_salary: empUpdate.fixed_salary ?? null,
+            reviewed_by: reviewerUserId,
+            review_notes: dto.review_notes || 'Demotion approved',
+            reviewed_at: this.knex.fn.now(),
+            updated_at: this.knex.fn.now(),
+          });
+      }
     } else {
       // Maintain level
       await this.knex('sales_manager_evaluations')
@@ -1389,6 +1452,154 @@ export class SalesManagerKpiService {
             'Demotion rejected by ROP/CEO. Career level maintained.',
           updated_at: this.knex.fn.now(),
         });
+
+      const hasAlertsTable = await this.knex.schema.hasTable('kpi_alerts');
+      if (hasAlertsTable) {
+        await this.knex('kpi_alerts')
+          .where({ evaluation_id: id })
+          .update({
+            status: 'MAINTAINED',
+            reviewed_by: reviewerUserId,
+            review_notes: dto.review_notes || 'Level maintained',
+            reviewed_at: this.knex.fn.now(),
+            updated_at: this.knex.fn.now(),
+          });
+      }
+    }
+
+    return this.getEvaluationById(id);
+  }
+
+  /**
+   * ROP/CEO reviews promotion escalation.
+   */
+  async reviewPromotion(
+    id: string,
+    reviewerUserId: string,
+    dto: ReviewPromotionDto,
+  ) {
+    const evalRecord = await this.knex('sales_manager_evaluations')
+      .where({ id })
+      .first();
+    if (!evalRecord) {
+      throw new NotFoundException('Evaluation record not found');
+    }
+
+    if (
+      evalRecord.approval_status !==
+      EvaluationApprovalStatus.PROMOTION_PENDING_REVIEW
+    ) {
+      throw new BadRequestException(
+        `Evaluation status is '${evalRecord.approval_status}', not pending promotion review`,
+      );
+    }
+
+    const currentLevel = evalRecord.career_level as CareerLevel;
+    const levelConfig =
+      CAREER_LEVEL_CONFIG[currentLevel] ||
+      CAREER_LEVEL_CONFIG[CareerLevel.JUNIOR];
+
+    const nextLevel = levelConfig.nextLevel;
+    if (!nextLevel) {
+      throw new BadRequestException(
+        `Cannot promote employee from level '${currentLevel}' (highest level reached)`,
+      );
+    }
+    const nextLevelConfig = CAREER_LEVEL_CONFIG[nextLevel];
+
+    if (dto.action === PromotionReviewAction.APPROVE_PROMOTION) {
+      const empUpdate: Record<string, any> = { career_level: nextLevel };
+      let effectiveFixedSalary = evalRecord.fixed_salary;
+
+      if (dto.update_salary !== false) {
+        const targetSalary =
+          dto.new_salary !== undefined && dto.new_salary !== null
+            ? Number(dto.new_salary)
+            : nextLevelConfig.fixedSalary;
+        const cappedSalary = Math.min(
+          targetSalary,
+          nextLevelConfig.fixedSalary,
+        );
+        empUpdate.fixed_salary = cappedSalary;
+        effectiveFixedSalary = cappedSalary;
+      } else {
+        effectiveFixedSalary = this.getEffectiveFixedSalary(
+          evalRecord.fixed_salary,
+          nextLevel,
+        );
+      }
+
+      // Update employee level and salary in employees table
+      await this.knex('employees')
+        .where({ id: evalRecord.employee_id })
+        .update(empUpdate);
+
+      const salesBonusAmount = Number(evalRecord.sales_bonus_amount || 0);
+      const additionalBonusAmount = Number(
+        evalRecord.additional_bonus_amount || 0,
+      );
+      const totalEarnings =
+        Math.round(
+          (Number(effectiveFixedSalary) +
+            salesBonusAmount +
+            additionalBonusAmount) *
+            100,
+        ) / 100;
+
+      // Update evaluation record
+      await this.knex('sales_manager_evaluations')
+        .where({ id })
+        .update({
+          career_level: nextLevel,
+          fixed_salary: effectiveFixedSalary,
+          total_earnings: totalEarnings,
+          approval_status: EvaluationApprovalStatus.PROMOTION_APPROVED,
+          consecutive_successes: 0, // reset counter after promotion
+          reviewed_by: reviewerUserId,
+          review_notes:
+            dto.review_notes || `Promotion to ${nextLevel} approved by ROP/CEO`,
+          updated_at: this.knex.fn.now(),
+        });
+
+      // Update any matching kpi_alerts record if exists
+      const hasAlertsTable = await this.knex.schema.hasTable('kpi_alerts');
+      if (hasAlertsTable) {
+        await this.knex('kpi_alerts')
+          .where({ evaluation_id: id })
+          .update({
+            status: 'APPROVED',
+            approved_salary: empUpdate.fixed_salary ?? null,
+            reviewed_by: reviewerUserId,
+            review_notes: dto.review_notes || 'Promotion approved',
+            reviewed_at: this.knex.fn.now(),
+            updated_at: this.knex.fn.now(),
+          });
+      }
+    } else {
+      // Reject promotion
+      await this.knex('sales_manager_evaluations')
+        .where({ id })
+        .update({
+          approval_status: EvaluationApprovalStatus.PROMOTION_REJECTED,
+          reviewed_by: reviewerUserId,
+          review_notes:
+            dto.review_notes ||
+            'Promotion rejected by ROP/CEO. Career level maintained.',
+          updated_at: this.knex.fn.now(),
+        });
+
+      const hasAlertsTable = await this.knex.schema.hasTable('kpi_alerts');
+      if (hasAlertsTable) {
+        await this.knex('kpi_alerts')
+          .where({ evaluation_id: id })
+          .update({
+            status: 'REJECTED',
+            reviewed_by: reviewerUserId,
+            review_notes: dto.review_notes || 'Promotion rejected',
+            reviewed_at: this.knex.fn.now(),
+            updated_at: this.knex.fn.now(),
+          });
+      }
     }
 
     return this.getEvaluationById(id);

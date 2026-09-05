@@ -19,6 +19,7 @@ import {
   CheckDuplicateCargoDto,
   ALLOWED_CONTAINER_TYPES,
   TransportType,
+  CargoCurrency,
   CARGO_STATUSES,
 } from './dto/cargo-registrations.dto';
 
@@ -177,6 +178,29 @@ export class CargoRegistrationsService {
   }
 
   /**
+   * Helper to format display name from first_name, last_name, and company_name.
+   */
+  private getAgentDisplayName(agent: {
+    first_name?: string | null;
+    last_name?: string | null;
+    company_name?: string | null;
+  }): string {
+    const nameParts = [agent.first_name, agent.last_name]
+      .filter((p) => p && p.trim().length > 0)
+      .map((p) => p!.trim());
+    const fullName = nameParts.join(' ');
+
+    if (fullName && agent.company_name && agent.company_name.trim()) {
+      return `${fullName} (${agent.company_name.trim()})`;
+    }
+    if (fullName) return fullName;
+    if (agent.company_name && agent.company_name.trim()) {
+      return agent.company_name.trim();
+    }
+    return 'Unnamed Agent';
+  }
+
+  /**
    * Validate LTL / FTL specific fields.
    */
   private validateCargoTypeRules(data: {
@@ -185,6 +209,7 @@ export class CargoRegistrationsService {
     weight?: number | null;
     container_type?: string | null;
     container_truck_id?: string | null;
+    agent_id?: string | null;
     agent_name?: string | null;
     purchase_price?: number | null;
     purchase_currency?: string | null;
@@ -246,9 +271,13 @@ export class CargoRegistrationsService {
         });
       }
 
-      if (!data.agent_name || !data.agent_name.trim()) {
+      if (
+        (!data.agent_id || !data.agent_id.trim()) &&
+        (!data.agent_name || !data.agent_name.trim())
+      ) {
         throw new BadRequestException({
-          message: 'Agent / Carrier name is required for FTL cargo',
+          message:
+            'Agent selection or Agent / Carrier name is required for FTL cargo',
           location: 'agent_name_required',
         });
       }
@@ -560,6 +589,7 @@ export class CargoRegistrationsService {
       weight: dto.weight,
       container_type: dto.container_type,
       container_truck_id: dto.container_truck_id,
+      agent_id: dto.agent_id,
       agent_name: dto.agent_name,
       purchase_price: dto.purchase_price,
       purchase_currency: dto.purchase_currency,
@@ -578,6 +608,7 @@ export class CargoRegistrationsService {
     let finalConsolidationId: string | null = null;
     let finalContainerTruckId = '';
     let finalContainerType: string | null = null;
+    let finalAgentId: string | null = null;
     let finalAgentName = '';
     let finalTransportTypes: string[] = ['auto'];
     let finalOriginPlace = {
@@ -792,6 +823,7 @@ export class CargoRegistrationsService {
           });
         }
         finalConsolidationId = consolidation.id;
+        finalAgentId = consolidation.agent_id || null;
         finalContainerTruckId = consolidation.container_truck_id;
         finalAgentName =
           consolidation.carrier_name || consolidation.container_truck_id;
@@ -808,19 +840,19 @@ export class CargoRegistrationsService {
               ];
         finalOriginPlace = {
           city: consolidation.origin_place || null,
-          country: consolidation.origin_country || null,
-          country_code: consolidation.origin_country_code || null,
-          geoname_id: consolidation.origin_geoname_id || null,
-          lat: consolidation.origin_lat || null,
-          lng: consolidation.origin_lng || null,
+          country: null,
+          country_code: null,
+          geoname_id: null,
+          lat: null,
+          lng: null,
         };
         finalDestPlace = {
           city: consolidation.destination_place || null,
-          country: consolidation.destination_country || null,
-          country_code: consolidation.destination_country_code || null,
-          geoname_id: consolidation.destination_geoname_id || null,
-          lat: consolidation.destination_lat || null,
-          lng: consolidation.destination_lng || null,
+          country: null,
+          country_code: null,
+          geoname_id: null,
+          lat: null,
+          lng: null,
         };
         finalLoadedDate = this.formatDateStr(
           consolidation.load_date || consolidation.loaded_date,
@@ -828,7 +860,8 @@ export class CargoRegistrationsService {
         finalArrivedDate = this.formatDateStr(consolidation.arrived_date);
         finalStatus = consolidation.status || 'Waiting';
         finalPurchasePrice = 0;
-        finalPurchaseCurrency = consolidation.carrier_cost_currency || 'USD';
+        finalPurchaseCurrency =
+          (consolidation.carrier_cost_currency as CargoCurrency) || 'USD';
         finalPurchaseDate = this.formatDateStr(
           consolidation.load_date ||
             consolidation.departure_date ||
@@ -842,7 +875,24 @@ export class CargoRegistrationsService {
       // FTL flow
       finalContainerTruckId = dto.container_truck_id!.trim();
       finalContainerType = dto.container_type!.trim();
-      finalAgentName = dto.agent_name!.trim();
+
+      if (dto.agent_id) {
+        const agent = await this.knex('agents')
+          .where('id', dto.agent_id)
+          .first();
+        if (!agent) {
+          throw new NotFoundException({
+            message: 'Selected agent not found',
+            location: 'agent_not_found',
+          });
+        }
+        finalAgentId = agent.id;
+        finalAgentName =
+          dto.agent_name?.trim() || this.getAgentDisplayName(agent);
+      } else {
+        finalAgentName = dto.agent_name!.trim();
+        finalAgentId = null;
+      }
       finalStatus = dto.status || 'Waiting';
       finalLoadedDate = dto.loaded_date
         ? this.formatDateStr(dto.loaded_date)
@@ -1036,6 +1086,7 @@ export class CargoRegistrationsService {
         transport_types: finalTransportTypes,
         container_truck_id: finalContainerTruckId,
         consolidation_id: finalConsolidationId,
+        agent_id: finalAgentId,
         agent_name: finalAgentName,
         cargo: dto.cargo.trim(),
         origin_city: finalOriginPlace.city,
@@ -1319,6 +1370,26 @@ export class CargoRegistrationsService {
 
     if (dto.container_truck_id !== undefined)
       updatePayload.container_truck_id = dto.container_truck_id.trim();
+
+    if (dto.agent_id !== undefined) {
+      if (!dto.agent_id) {
+        updatePayload.agent_id = null;
+      } else {
+        const agent = await this.knex('agents')
+          .where('id', dto.agent_id)
+          .first();
+        if (!agent) {
+          throw new NotFoundException({
+            message: 'Selected agent not found',
+            location: 'agent_not_found',
+          });
+        }
+        updatePayload.agent_id = agent.id;
+        if (dto.agent_name === undefined) {
+          updatePayload.agent_name = this.getAgentDisplayName(agent);
+        }
+      }
+    }
     if (dto.agent_name !== undefined)
       updatePayload.agent_name = dto.agent_name.trim();
     if (dto.cargo !== undefined) updatePayload.cargo = dto.cargo.trim();
@@ -1600,6 +1671,7 @@ export class CargoRegistrationsService {
           });
         }
         updatePayload.consolidation_id = dto.consolidation_id;
+        updatePayload.agent_id = consExists.agent_id || null;
         updatePayload.container_truck_id = consExists.container_truck_id;
         updatePayload.agent_name =
           consExists.carrier_name || consExists.container_truck_id;
@@ -1837,6 +1909,13 @@ export class CargoRegistrationsService {
         'cr.destination_geoname_id',
         Number(query.destination_geoname_id),
       );
+    }
+
+    if (query.agent_id) {
+      baseQuery.where('cr.agent_id', query.agent_id);
+    }
+    if (query.agent_name && query.agent_name.trim()) {
+      baseQuery.where('cr.agent_name', 'ILIKE', `%${query.agent_name.trim()}%`);
     }
 
     // Search filter across container_truck_id, cargo, agent_name, origin_city, destination_city
@@ -2084,6 +2163,7 @@ export class CargoRegistrationsService {
         .leftJoin('clients as c', 'cr.client_id', 'c.id')
         .leftJoin('employees as e', 'cr.employee_id', 'e.id')
         .leftJoin('cargo_consolidations as cc', 'cr.consolidation_id', 'cc.id')
+        .leftJoin('agents as ag', 'cr.agent_id', 'ag.id')
         .select(
           'cr.id',
           'cr.cargo_type',
@@ -2104,7 +2184,14 @@ export class CargoRegistrationsService {
           'cr.transport_types',
           'cr.container_truck_id',
           'cr.consolidation_id',
+          'cr.agent_id',
           'cr.agent_name',
+          'ag.first_name as agent_first_name',
+          'ag.last_name as agent_last_name',
+          'ag.company_name as agent_company_name',
+          'ag.company_names as agent_company_names',
+          'ag.phone_number as agent_phone_number',
+          'ag.email as agent_email',
           'cr.origin_city',
           'cr.origin_country',
           'cr.origin_country_code',
@@ -2411,7 +2498,32 @@ export class CargoRegistrationsService {
                   carrier_name: r.consolidation_carrier_name,
                 }
               : null,
+            agent_id: r.agent_id || null,
             agent_name: r.agent_name,
+            agent: r.agent_id
+              ? {
+                  id: r.agent_id,
+                  first_name: r.agent_first_name || null,
+                  last_name: r.agent_last_name || null,
+                  display_name: this.getAgentDisplayName({
+                    first_name: r.agent_first_name,
+                    last_name: r.agent_last_name,
+                    company_name: r.agent_company_name,
+                  }),
+                  company_name: r.agent_company_name || null,
+                  company_names: (() => {
+                    try {
+                      return typeof r.agent_company_names === 'string'
+                        ? JSON.parse(r.agent_company_names)
+                        : r.agent_company_names || [];
+                    } catch {
+                      return [];
+                    }
+                  })(),
+                  phone_number: r.agent_phone_number || null,
+                  email: r.agent_email || null,
+                }
+              : null,
             client_full_name: clientName,
             cargo: r.cargo,
             origin: {
@@ -2706,6 +2818,7 @@ export class CargoRegistrationsService {
       .leftJoin('clients as c', 'cr.client_id', 'c.id')
       .leftJoin('employees as e', 'cr.employee_id', 'e.id')
       .leftJoin('cargo_consolidations as cc', 'cr.consolidation_id', 'cc.id')
+      .leftJoin('agents as ag', 'cr.agent_id', 'ag.id')
       .select(
         'cr.*',
         'c.first_name as client_first_name',
@@ -2714,6 +2827,12 @@ export class CargoRegistrationsService {
         'c.phone as client_phone',
         'e.first_name as emp_first_name',
         'e.last_name as emp_last_name',
+        'ag.first_name as agent_first_name',
+        'ag.last_name as agent_last_name',
+        'ag.company_name as agent_company_name',
+        'ag.company_names as agent_company_names',
+        'ag.phone_number as agent_phone_number',
+        'ag.email as agent_email',
         'cc.consolidation_code',
         'cc.status as consolidation_status',
         'cc.carrier_name as consolidation_carrier_name',
@@ -2948,7 +3067,32 @@ export class CargoRegistrationsService {
               : null,
           }
         : null,
+      agent_id: row.agent_id || null,
       agent_name: row.agent_name,
+      agent: row.agent_id
+        ? {
+            id: row.agent_id,
+            first_name: row.agent_first_name || null,
+            last_name: row.agent_last_name || null,
+            display_name: this.getAgentDisplayName({
+              first_name: row.agent_first_name,
+              last_name: row.agent_last_name,
+              company_name: row.agent_company_name,
+            }),
+            company_name: row.agent_company_name || null,
+            company_names: (() => {
+              try {
+                return typeof row.agent_company_names === 'string'
+                  ? JSON.parse(row.agent_company_names)
+                  : row.agent_company_names || [];
+              } catch {
+                return [];
+              }
+            })(),
+            phone_number: row.agent_phone_number || null,
+            email: row.agent_email || null,
+          }
+        : null,
       cargo: row.cargo,
       origin: {
         city: row.origin_city || null,
@@ -3165,6 +3309,8 @@ export class CargoRegistrationsService {
       case 'agent_name':
       case 'agent':
         return queryBuilder.orderBy('cr.agent_name', sortOrder);
+      case 'agent_id':
+        return queryBuilder.orderBy('cr.agent_id', sortOrder);
       case 'cargo_type':
         return queryBuilder.orderBy('cr.cargo_type', sortOrder);
       case 'container_type':

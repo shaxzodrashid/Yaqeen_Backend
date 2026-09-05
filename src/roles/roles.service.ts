@@ -19,6 +19,7 @@ export interface ModulePermissionAction {
   assign_cargo?: boolean;
   register_for_everyone?: boolean;
   can_work_with_all_clients?: boolean;
+  plan_settable?: boolean;
 }
 
 export type RolePermissions = Record<string, ModulePermissionAction>;
@@ -48,7 +49,7 @@ export const SYSTEM_MODULES = [
   {
     module: 'cargo_kpi',
     label: 'Cargo KPI',
-    actions: ['create', 'read', 'update', 'delete'],
+    actions: ['create', 'read', 'update', 'delete', 'plan_settable'],
   },
   {
     module: 'cargo_registrations',
@@ -90,6 +91,11 @@ export const SYSTEM_MODULES = [
     label: 'Role & Permissions Management',
     actions: ['create', 'read', 'update', 'delete'],
   },
+  {
+    module: 'agents',
+    label: 'Agents Management',
+    actions: ['create', 'read', 'update', 'delete'],
+  },
 ];
 
 @Injectable()
@@ -107,6 +113,7 @@ export class RolesService implements OnModuleInit {
           description:
             'Full administrative access to all modules and system settings',
           is_system: true,
+          is_plan_settable: false,
           permissions: {
             clients: {
               create: true,
@@ -122,7 +129,13 @@ export class RolesService implements OnModuleInit {
               update: true,
               delete: true,
             },
-            cargo_kpi: { create: true, read: true, update: true, delete: true },
+            cargo_kpi: {
+              create: true,
+              read: true,
+              update: true,
+              delete: true,
+              plan_settable: false,
+            },
             cargo_registrations: {
               create: true,
               read: true,
@@ -153,6 +166,7 @@ export class RolesService implements OnModuleInit {
               delete: true,
             },
             roles: { create: true, read: true, update: true, delete: true },
+            agents: { create: true, read: true, update: true, delete: true },
           },
         },
         {
@@ -160,6 +174,7 @@ export class RolesService implements OnModuleInit {
           display_name: 'Head of Sales / Operations',
           description: 'Department head level access for operations and sales',
           is_system: true,
+          is_plan_settable: true,
           permissions: {
             clients: {
               create: true,
@@ -180,7 +195,13 @@ export class RolesService implements OnModuleInit {
               update: false,
               delete: false,
             },
-            cargo_kpi: { create: true, read: true, update: true, delete: true },
+            cargo_kpi: {
+              create: true,
+              read: true,
+              update: true,
+              delete: true,
+              plan_settable: true,
+            },
             cargo_registrations: {
               create: true,
               read: true,
@@ -221,6 +242,7 @@ export class RolesService implements OnModuleInit {
               delete: true,
             },
             roles: { create: false, read: true, update: false, delete: false },
+            agents: { create: true, read: true, update: true, delete: true },
           },
         },
         {
@@ -228,6 +250,7 @@ export class RolesService implements OnModuleInit {
           display_name: 'Standard Employee',
           description: 'Standard operational user access',
           is_system: true,
+          is_plan_settable: true,
           permissions: {
             clients: {
               create: false,
@@ -253,6 +276,7 @@ export class RolesService implements OnModuleInit {
               read: true,
               update: false,
               delete: false,
+              plan_settable: true,
             },
             cargo_registrations: {
               create: true,
@@ -294,9 +318,14 @@ export class RolesService implements OnModuleInit {
               delete: false,
             },
             roles: { create: false, read: false, update: false, delete: false },
+            agents: { create: true, read: true, update: true, delete: false },
           },
         },
       ];
+
+      const hasPlanSettableCol = this.knex.schema?.hasColumn
+        ? await this.knex.schema.hasColumn('roles', 'is_plan_settable')
+        : false;
 
       for (const roleDef of defaultRoles) {
         const existing = await this.knex('roles')
@@ -307,19 +336,28 @@ export class RolesService implements OnModuleInit {
           this.normalizePermissions(roleDef.permissions),
         );
 
+        const rolePayload: Record<string, any> = {
+          permissions: normalizedPerms,
+        };
+        if (hasPlanSettableCol && roleDef.is_plan_settable !== undefined) {
+          rolePayload.is_plan_settable = roleDef.is_plan_settable;
+        }
+
         if (!existing) {
           await this.knex('roles').insert({
             name: roleDef.name,
             display_name: roleDef.display_name,
             description: roleDef.description,
             is_system: true,
-            permissions: normalizedPerms,
+            ...rolePayload,
           });
         } else if (existing.is_system) {
-          await this.knex('roles').where('id', existing.id).update({
-            permissions: normalizedPerms,
-            updated_at: this.knex.fn.now(),
-          });
+          await this.knex('roles')
+            .where('id', existing.id)
+            .update({
+              ...rolePayload,
+              updated_at: this.knex.fn.now(),
+            });
         }
       }
     } catch (err) {
@@ -374,6 +412,16 @@ export class RolesService implements OnModuleInit {
           rawModule.can_work_with_all_clients,
         );
       }
+
+      if (item.actions.includes('plan_settable')) {
+        normalized[moduleKey].plan_settable = Boolean(
+          rawModule.plan_settable !== undefined
+            ? rawModule.plan_settable
+            : rawModule.set_plan !== undefined
+              ? rawModule.set_plan
+              : false,
+        );
+      }
     }
 
     return normalized;
@@ -383,40 +431,51 @@ export class RolesService implements OnModuleInit {
    * List all roles with employee user count assigned.
    */
   async findAllRoles() {
+    const hasPlanSettableCol = this.knex.schema?.hasColumn
+      ? await this.knex.schema.hasColumn('roles', 'is_plan_settable')
+      : false;
+
+    const selectCols = [
+      'r.id',
+      'r.name',
+      'r.display_name',
+      'r.description',
+      'r.permissions',
+      'r.is_system',
+      'r.created_at',
+      'r.updated_at',
+    ];
+    if (hasPlanSettableCol) {
+      selectCols.push('r.is_plan_settable');
+    }
+
     const roles = await this.knex('roles as r')
       .leftJoin('users as u', 'r.id', 'u.role_id')
-      .select(
-        'r.id',
-        'r.name',
-        'r.display_name',
-        'r.description',
-        'r.permissions',
-        'r.is_system',
-        'r.created_at',
-        'r.updated_at',
-      )
+      .select(selectCols)
       .count('u.id as user_count')
-      .groupBy(
-        'r.id',
-        'r.name',
-        'r.display_name',
-        'r.description',
-        'r.permissions',
-        'r.is_system',
-        'r.created_at',
-        'r.updated_at',
-      )
+      .groupBy(selectCols)
       .orderBy('r.is_system', 'desc')
       .orderBy('r.created_at', 'asc');
 
-    return roles.map((role) => ({
-      ...role,
-      user_count: parseInt((role.user_count as string) || '0', 10),
-      permissions:
+    return roles.map((role: any) => {
+      const perms =
         typeof role.permissions === 'string'
           ? this.normalizePermissions(JSON.parse(role.permissions))
-          : this.normalizePermissions(role.permissions as any),
-    }));
+          : this.normalizePermissions(role.permissions);
+
+      const isPlanSettable = Boolean(
+        role.is_plan_settable !== undefined
+          ? role.is_plan_settable
+          : perms?.cargo_kpi?.plan_settable,
+      );
+
+      return {
+        ...role,
+        is_plan_settable: isPlanSettable,
+        user_count: parseInt((role.user_count as string) || '0', 10),
+        permissions: perms,
+      };
+    });
   }
 
   /**
@@ -436,13 +495,22 @@ export class RolesService implements OnModuleInit {
       .count('id as count')
       .first();
 
+    const perms =
+      typeof role.permissions === 'string'
+        ? this.normalizePermissions(JSON.parse(role.permissions))
+        : this.normalizePermissions(role.permissions);
+
+    const isPlanSettable = Boolean(
+      role.is_plan_settable !== undefined
+        ? role.is_plan_settable
+        : perms?.cargo_kpi?.plan_settable,
+    );
+
     return {
       ...role,
+      is_plan_settable: isPlanSettable,
       user_count: parseInt((userCountResult?.count as string) || '0', 10),
-      permissions:
-        typeof role.permissions === 'string'
-          ? this.normalizePermissions(JSON.parse(role.permissions))
-          : this.normalizePermissions(role.permissions),
+      permissions: perms,
     };
   }
 
@@ -458,12 +526,21 @@ export class RolesService implements OnModuleInit {
       return null;
     }
 
+    const perms =
+      typeof role.permissions === 'string'
+        ? this.normalizePermissions(JSON.parse(role.permissions))
+        : this.normalizePermissions(role.permissions);
+
+    const isPlanSettable = Boolean(
+      role.is_plan_settable !== undefined
+        ? role.is_plan_settable
+        : perms?.cargo_kpi?.plan_settable,
+    );
+
     return {
       ...role,
-      permissions:
-        typeof role.permissions === 'string'
-          ? this.normalizePermissions(JSON.parse(role.permissions))
-          : this.normalizePermissions(role.permissions),
+      is_plan_settable: isPlanSettable,
+      permissions: perms,
     };
   }
 
@@ -479,20 +556,38 @@ export class RolesService implements OnModuleInit {
       });
     }
 
+    const isPlanSettable =
+      dto.is_plan_settable !== undefined
+        ? Boolean(dto.is_plan_settable)
+        : Boolean(dto.permissions?.cargo_kpi?.plan_settable);
+
     const normalizedPermissions = this.normalizePermissions(dto.permissions);
+    if (normalizedPermissions.cargo_kpi) {
+      normalizedPermissions.cargo_kpi.plan_settable = isPlanSettable;
+    }
+
+    const insertPayload: Record<string, any> = {
+      name: dto.name.trim(),
+      display_name: dto.display_name.trim(),
+      description: dto.description || null,
+      permissions: JSON.stringify(normalizedPermissions),
+      is_system: false,
+    };
+
+    const hasPlanSettableCol = this.knex.schema?.hasColumn
+      ? await this.knex.schema.hasColumn('roles', 'is_plan_settable')
+      : false;
+    if (hasPlanSettableCol) {
+      insertPayload.is_plan_settable = isPlanSettable;
+    }
 
     const [role] = await this.knex('roles')
-      .insert({
-        name: dto.name.trim(),
-        display_name: dto.display_name.trim(),
-        description: dto.description || null,
-        permissions: JSON.stringify(normalizedPermissions),
-        is_system: false,
-      })
+      .insert(insertPayload)
       .returning('*');
 
     return {
       ...role,
+      is_plan_settable: isPlanSettable,
       user_count: 0,
       permissions: normalizedPermissions,
     };
@@ -534,11 +629,32 @@ export class RolesService implements OnModuleInit {
     if (dto.description !== undefined) {
       updatePayload.description = dto.description || null;
     }
-    if (dto.permissions) {
+
+    let isPlanSettable: boolean | undefined = undefined;
+    if (dto.is_plan_settable !== undefined) {
+      isPlanSettable = Boolean(dto.is_plan_settable);
+    } else if (dto.permissions?.cargo_kpi?.plan_settable !== undefined) {
+      isPlanSettable = Boolean(dto.permissions.cargo_kpi.plan_settable);
+    }
+
+    const hasPlanSettableCol = this.knex.schema?.hasColumn
+      ? await this.knex.schema.hasColumn('roles', 'is_plan_settable')
+      : false;
+    if (hasPlanSettableCol && isPlanSettable !== undefined) {
+      updatePayload.is_plan_settable = isPlanSettable;
+    }
+
+    if (dto.permissions || isPlanSettable !== undefined) {
       const mergedPermissions = {
         ...role.permissions,
-        ...dto.permissions,
+        ...(dto.permissions || {}),
       };
+      if (isPlanSettable !== undefined) {
+        if (!mergedPermissions.cargo_kpi) {
+          mergedPermissions.cargo_kpi = {};
+        }
+        mergedPermissions.cargo_kpi.plan_settable = isPlanSettable;
+      }
       updatePayload.permissions = JSON.stringify(
         this.normalizePermissions(mergedPermissions),
       );

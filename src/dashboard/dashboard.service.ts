@@ -1799,7 +1799,15 @@ export class DashboardService {
     >();
     const creditorMap = new Map<
       string,
-      { agentName: string; amountUzs: number; orderCount: number }
+      {
+        agentId?: string;
+        agentName: string;
+        companyName?: string;
+        phoneNumber?: string;
+        email?: string;
+        amountUzs: number;
+        orderCount: number;
+      }
     >();
 
     for (const r of effectiveRecords) {
@@ -1826,10 +1834,17 @@ export class DashboardService {
         debtorMap.set(r.client_id, d);
       }
 
-      if (r.agent_name) {
-        const agentKey = r.agent_name.trim();
+      const agentKey = r.agent_id
+        ? `id:${r.agent_id}`
+        : r.agent_name
+          ? `name:${r.agent_name.trim()}`
+          : null;
+
+      if (agentKey) {
+        const fallbackName = r.agent_name ? r.agent_name.trim() : 'Carrier';
         const c = creditorMap.get(agentKey) || {
-          agentName: agentKey,
+          agentId: r.agent_id || undefined,
+          agentName: fallbackName,
           amountUzs: 0,
           orderCount: 0,
         };
@@ -1860,6 +1875,40 @@ export class DashboardService {
       }
     }
 
+    const agentIds = Array.from(creditorMap.values())
+      .map((c) => c.agentId)
+      .filter((id): id is string => Boolean(id));
+
+    if (agentIds.length > 0) {
+      try {
+        const agents = await this.knex('agents')
+          .select(
+            'id',
+            'first_name',
+            'last_name',
+            'company_name',
+            'phone_number',
+            'email',
+          )
+          .whereIn('id', agentIds);
+        for (const ag of agents) {
+          const item = creditorMap.get(`id:${ag.id}`);
+          if (item) {
+            const nameParts = [ag.first_name, ag.last_name]
+              .filter(Boolean)
+              .map((s: string) => s.trim());
+            const fullName = nameParts.join(' ');
+            item.agentName = fullName || ag.company_name || item.agentName;
+            item.companyName = ag.company_name || undefined;
+            item.phoneNumber = ag.phone_number || undefined;
+            item.email = ag.email || undefined;
+          }
+        }
+      } catch {
+        // Safe fallback
+      }
+    }
+
     const topDebtorClients: DebtorClientItem[] = Array.from(debtorMap.values())
       .sort((a, b) => b.amountUzs - a.amountUzs)
       .slice(0, 5)
@@ -1881,7 +1930,11 @@ export class DashboardService {
       .sort((a, b) => b.amountUzs - a.amountUzs)
       .slice(0, 5)
       .map((c) => ({
+        agentId: c.agentId,
         agentName: c.agentName,
+        companyName: c.companyName,
+        phoneNumber: c.phoneNumber,
+        email: c.email,
         amount: this.convertFromUzsFast(
           c.amountUzs,
           targetCurrency,
@@ -2288,6 +2341,7 @@ export class DashboardService {
     query: {
       employee_id?: string;
       client_id?: string;
+      agent_id?: string;
       status?: string;
       cargo_type?: string;
       transport_type?: TransportType;
@@ -2306,6 +2360,9 @@ export class DashboardService {
     }
     if (query.client_id) {
       dbQuery.where('client_id', query.client_id);
+    }
+    if (query.agent_id) {
+      dbQuery.where('agent_id', query.agent_id);
     }
     if (query.status) {
       dbQuery.where('status', query.status);

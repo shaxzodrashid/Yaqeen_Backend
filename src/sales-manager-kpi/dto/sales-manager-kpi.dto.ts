@@ -24,11 +24,19 @@ export enum EvaluationApprovalStatus {
   DEMOTION_PENDING_REVIEW = 'DEMOTION_PENDING_REVIEW',
   DEMOTION_APPROVED = 'DEMOTION_APPROVED',
   DEMOTION_REJECTED = 'DEMOTION_REJECTED',
+  PROMOTION_PENDING_REVIEW = 'PROMOTION_PENDING_REVIEW',
+  PROMOTION_APPROVED = 'PROMOTION_APPROVED',
+  PROMOTION_REJECTED = 'PROMOTION_REJECTED',
 }
 
 export enum DemotionReviewAction {
   APPROVE_DEMOTION = 'APPROVE_DEMOTION',
   MAINTAIN_LEVEL = 'MAINTAIN_LEVEL',
+}
+
+export enum PromotionReviewAction {
+  APPROVE_PROMOTION = 'APPROVE_PROMOTION',
+  REJECT_PROMOTION = 'REJECT_PROMOTION',
 }
 
 export enum CargoPaymentStatus {
@@ -93,6 +101,33 @@ export class ApproveSrCheckDto {
 export class ReviewDemotionDto {
   @IsEnum(DemotionReviewAction)
   action: DemotionReviewAction;
+
+  @IsOptional()
+  @IsBoolean()
+  update_salary?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  new_salary?: number;
+
+  @IsOptional()
+  @IsString()
+  review_notes?: string;
+}
+
+export class ReviewPromotionDto {
+  @IsEnum(PromotionReviewAction)
+  action: PromotionReviewAction;
+
+  @IsOptional()
+  @IsBoolean()
+  update_salary?: boolean;
+
+  @IsOptional()
+  @IsNumber()
+  @Min(0)
+  new_salary?: number;
 
   @IsOptional()
   @IsString()

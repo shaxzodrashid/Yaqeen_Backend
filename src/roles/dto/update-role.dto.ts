@@ -2,6 +2,7 @@ import {
   IsOptional,
   IsString,
   IsObject,
+  IsBoolean,
   Length,
   Matches,
 } from 'class-validator';
@@ -26,6 +27,10 @@ export class UpdateRoleDto {
   description?: string;
 
   @IsOptional()
+  @IsBoolean()
+  is_plan_settable?: boolean;
+
+  @IsOptional()
   @IsObject()
   permissions?: Record<
     string,
@@ -38,6 +43,7 @@ export class UpdateRoleDto {
       assign_cargo?: boolean;
       register_for_everyone?: boolean;
       can_work_with_all_clients?: boolean;
+      plan_settable?: boolean;
     }
   >;
 }

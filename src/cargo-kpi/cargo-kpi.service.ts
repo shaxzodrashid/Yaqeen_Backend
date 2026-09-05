@@ -854,6 +854,82 @@ export class CargoKpiService {
       });
     }
 
+    // Verify employee has a plan-settable role
+    const hasPlanSettableCol = this.knex.schema?.hasColumn
+      ? await this.knex.schema.hasColumn('roles', 'is_plan_settable')
+      : false;
+
+    const userRoleQuery = this.knex('users as u')
+      .leftJoin('roles as r', 'u.role_id', 'r.id')
+      .where('u.employee_id', dto.employee_id)
+      .select(
+        'u.role as legacy_role',
+        'r.name as role_name',
+        'r.display_name as role_display_name',
+        'r.permissions as role_permissions',
+      );
+
+    if (hasPlanSettableCol) {
+      userRoleQuery.select('r.is_plan_settable');
+    }
+
+    const userRole = (await userRoleQuery.first()) as
+      | {
+          legacy_role?: string;
+          role_name?: string;
+          role_display_name?: string;
+          is_plan_settable?: boolean;
+          role_permissions?: any;
+        }
+      | undefined;
+
+    if (
+      userRole &&
+      (userRole.role_name ||
+        userRole.legacy_role ||
+        userRole.is_plan_settable !== undefined ||
+        userRole.role_permissions)
+    ) {
+      let perms: Record<string, any> = {};
+      if (typeof userRole.role_permissions === 'string') {
+        try {
+          perms = JSON.parse(userRole.role_permissions);
+        } catch {
+          perms = {};
+        }
+      } else if (
+        userRole.role_permissions &&
+        typeof userRole.role_permissions === 'object'
+      ) {
+        perms = userRole.role_permissions;
+      }
+
+      const isPlanSettable =
+        userRole.is_plan_settable === true ||
+        perms?.cargo_kpi?.plan_settable === true ||
+        perms?.cargo_kpi?.set_plan === true ||
+        (!userRole.role_name &&
+          [
+            'EMPLOYEE',
+            'ROP',
+            'Sales Manager',
+            'SALES_MANAGER',
+            'sales_manager',
+          ].includes(userRole.legacy_role || ''));
+
+      if (!isPlanSettable) {
+        const roleLabel =
+          userRole.role_display_name ||
+          userRole.role_name ||
+          userRole.legacy_role ||
+          'Unknown';
+        throw new BadRequestException({
+          message: `Cannot set plan for employee with role "${roleLabel}": role is not eligible to receive plans.`,
+          location: 'role_not_plan_settable',
+        });
+      }
+    }
+
     const planCurrency = dto.currency || dto.ftl_currency || Currency.USD;
     const ltlTargetVolume = Number(
       dto.ltl_target_volume !== undefined
@@ -934,6 +1010,117 @@ export class CargoKpiService {
       });
     }
     return this.getEmployeePlansProgress();
+  }
+
+  /**
+   * Return eligible employees who can receive plans.
+   */
+  async getPlanEligibleEmployees(filters?: {
+    department_id?: string;
+    search?: string;
+  }) {
+    const hasPlanSettableCol = this.knex.schema?.hasColumn
+      ? await this.knex.schema.hasColumn('roles', 'is_plan_settable')
+      : false;
+
+    const query = this.knex('employees as e')
+      .leftJoin('departments as d', 'e.department_id', 'd.id')
+      .leftJoin('users as u', 'e.id', 'u.employee_id')
+      .leftJoin('roles as r', 'u.role_id', 'r.id')
+      .select(
+        'e.id',
+        'e.first_name',
+        'e.last_name',
+        'e.phone',
+        'e.secondary_phone',
+        'e.department_id',
+        'e.color',
+        'e.picture_url',
+        'e.is_active',
+        'd.name as department_name',
+        'd.display_name as department_display_name',
+        'u.id as user_id',
+        'u.username',
+        'u.role as user_role',
+        'r.id as role_id',
+        'r.name as role_name',
+        'r.display_name as role_display_name',
+      )
+      .where('e.is_active', true)
+      .where((roleSub) => {
+        if (hasPlanSettableCol) {
+          roleSub.where('r.is_plan_settable', true);
+        }
+        roleSub
+          .orWhereRaw(
+            "r.permissions -> 'cargo_kpi' ->> 'plan_settable' = 'true'",
+          )
+          .orWhereRaw("r.permissions -> 'cargo_kpi' ->> 'set_plan' = 'true'")
+          .orWhere((legacySub) => {
+            legacySub
+              .whereNull('u.role_id')
+              .whereIn('u.role', [
+                'EMPLOYEE',
+                'ROP',
+                'Sales Manager',
+                'SALES_MANAGER',
+                'sales_manager',
+              ]);
+          });
+      });
+
+    if (filters?.department_id) {
+      query.where('e.department_id', filters.department_id);
+    }
+    if (filters?.search && filters.search.trim()) {
+      const searchPattern = `%${filters.search.trim()}%`;
+      query.where((sub) => {
+        sub
+          .where('e.first_name', 'ilike', searchPattern)
+          .orWhere('e.last_name', 'ilike', searchPattern)
+          .orWhere('e.phone', 'like', searchPattern)
+          .orWhere('d.name', 'ilike', searchPattern)
+          .orWhere('d.display_name', 'ilike', searchPattern);
+      });
+    }
+
+    const rows = await query.orderByRaw(
+      "COALESCE(e.first_name, '') ASC, COALESCE(e.last_name, '') ASC",
+    );
+
+    const items = rows.map((row: any) => ({
+      id: row.id,
+      first_name: row.first_name || '',
+      last_name: row.last_name || '',
+      full_name:
+        `${row.first_name || ''} ${row.last_name || ''}`.trim() ||
+        'Unnamed Employee',
+      phone: row.phone || '',
+      secondary_phone: row.secondary_phone || null,
+      department_id: row.department_id,
+      department_name: row.department_name || null,
+      department_display_name:
+        row.department_display_name || row.department_name || null,
+      color: row.color || '#CCCCCC',
+      picture_url: row.picture_url || null,
+      is_active: Boolean(row.is_active),
+      user_id: row.user_id || null,
+      username: row.username || null,
+      role_id: row.role_id || null,
+      role_name: row.role_name || row.user_role || null,
+      role_display_name:
+        row.role_display_name || row.role_name || row.user_role || 'EMPLOYEE',
+      is_plan_settable: true,
+    }));
+
+    return {
+      meta: {
+        total: items.length,
+        count: items.length,
+      },
+      data: items,
+      items,
+    };
   }
 
   private getMonthDateRange(

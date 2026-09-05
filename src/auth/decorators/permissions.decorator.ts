@@ -11,6 +11,7 @@ export type PermissionAction =
   | 'assign_cargo'
   | 'register_for_everyone'
   | 'can_work_with_all_clients'
+  | 'plan_settable'
   | (string & {});
 
 export interface RequiredPermission {

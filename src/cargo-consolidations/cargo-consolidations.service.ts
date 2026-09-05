@@ -527,6 +527,7 @@ export class CargoConsolidationsService {
           dto.max_weight_capacity !== undefined
             ? dto.max_weight_capacity
             : null,
+        agent_id: dto.agent_id || null,
         carrier_name: dto.carrier_name ? dto.carrier_name.trim() : null,
         carrier_phone: dto.carrier_phone ? dto.carrier_phone.trim() : null,
         origin_place: dto.origin_place ? dto.origin_place.trim() : null,
@@ -569,6 +570,7 @@ export class CargoConsolidationsService {
         .update({
           consolidation_id: consolidationId,
           container_truck_id: dto.container_truck_id.trim(),
+          agent_id: dto.agent_id || null,
           agent_name: dto.carrier_name
             ? dto.carrier_name.trim()
             : dto.container_truck_id.trim(),
@@ -631,6 +633,9 @@ export class CargoConsolidationsService {
         'cc.destination_place',
         `%${query.destination_place.trim()}%`,
       );
+    }
+    if (query.agent_id) {
+      baseWhere.where('cc.agent_id', query.agent_id);
     }
     if (query.carrier_name) {
       baseWhere.whereILike('cc.carrier_name', `%${query.carrier_name.trim()}%`);
@@ -1422,6 +1427,8 @@ export class CargoConsolidationsService {
       updatePayload.max_volume_capacity = dto.max_volume_capacity;
     if (dto.max_weight_capacity !== undefined)
       updatePayload.max_weight_capacity = dto.max_weight_capacity;
+    if (dto.agent_id !== undefined)
+      updatePayload.agent_id = dto.agent_id || null;
     if (dto.carrier_name !== undefined)
       updatePayload.carrier_name = dto.carrier_name
         ? dto.carrier_name.trim()
@@ -1523,6 +1530,9 @@ export class CargoConsolidationsService {
 
     if (dto.container_truck_id !== undefined) {
       cargoUpdates.container_truck_id = dto.container_truck_id.trim();
+    }
+    if (dto.agent_id !== undefined) {
+      cargoUpdates.agent_id = dto.agent_id || null;
     }
     if (dto.carrier_name !== undefined) {
       cargoUpdates.agent_name = dto.carrier_name

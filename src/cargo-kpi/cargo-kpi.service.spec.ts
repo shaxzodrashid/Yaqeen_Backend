@@ -1247,4 +1247,117 @@ describe('CargoKpiService', () => {
       expect(personal.totals.total_ftl_sales_achieved).toBe(15000);
     });
   });
+
+  describe('Plan-settable role enforcement & eligible employees', () => {
+    it('should reject setting plan for an employee with non-plan-settable role (e.g. Accountant)', async () => {
+      mockKnex.schema = {
+        hasColumn: jest.fn().mockResolvedValue(true),
+      };
+
+      mockKnex.mockImplementation((table: string) => {
+        const qb = { ...mockQueryBuilder };
+        if (table === 'employees') {
+          qb.first = jest
+            .fn()
+            .mockResolvedValue({ id: 'emp-accountant', first_name: 'Olim' });
+        } else if (table === 'users as u') {
+          qb.first = jest.fn().mockResolvedValue({
+            legacy_role: 'Accountant',
+            role_name: 'Accountant',
+            role_display_name: 'Accountant',
+            is_plan_settable: false,
+            role_permissions: { cargo_kpi: { plan_settable: false } },
+          });
+        }
+        return qb;
+      });
+
+      await expect(
+        service.createEmployeePlan({
+          employee_id: 'emp-accountant',
+          ltl_target_volume: 100,
+          period: '2026-09-01',
+        }),
+      ).rejects.toThrow('role is not eligible to receive plans');
+    });
+
+    it('should allow setting plan for an employee with plan-settable role (e.g. Sales Manager)', async () => {
+      mockKnex.schema = {
+        hasColumn: jest.fn().mockResolvedValue(true),
+      };
+
+      mockKnex.mockImplementation((table: string) => {
+        const qb = { ...mockQueryBuilder };
+        if (table === 'employees') {
+          qb.first = jest
+            .fn()
+            .mockResolvedValue({ id: 'emp-sales', first_name: 'Jasur' });
+        } else if (table === 'users as u') {
+          qb.first = jest.fn().mockResolvedValue({
+            legacy_role: 'Sales Manager',
+            role_name: 'Sales Manager',
+            role_display_name: 'Sales Manager',
+            is_plan_settable: true,
+            role_permissions: { cargo_kpi: { plan_settable: true } },
+          });
+        } else if (table === 'employee_plans') {
+          qb.first = jest.fn().mockResolvedValue(null);
+          qb.insert = jest.fn().mockReturnValue({
+            returning: jest.fn().mockResolvedValue([{ id: 'plan-new' }]),
+          });
+          qb.then = jest.fn((resolve: any) => resolve([]));
+        } else {
+          qb.then = jest.fn((resolve: any) => resolve([]));
+        }
+        return qb;
+      });
+
+      const result = await service.createEmployeePlan({
+        employee_id: 'emp-sales',
+        ltl_target_volume: 150,
+        period: '2026-09-01',
+      });
+
+      expect(result).toBeDefined();
+    });
+
+    it('should return plan-eligible employees in getPlanEligibleEmployees', async () => {
+      mockKnex.schema = {
+        hasColumn: jest.fn().mockResolvedValue(true),
+      };
+
+      const mockEmployee = {
+        id: 'emp-sales-1',
+        first_name: 'Jasur',
+        last_name: 'Yoldoshev',
+        phone: '+998901234567',
+        secondary_phone: null,
+        department_id: 'dept-1',
+        department_name: 'Sales',
+        department_display_name: 'Sales Dept',
+        color: '#336699',
+        picture_url: null,
+        is_active: true,
+        user_id: 'user-1',
+        username: 'jasur',
+        user_role: 'Sales Manager',
+        role_id: 'role-1',
+        role_name: 'Sales Manager',
+        role_display_name: 'Sales Manager',
+        is_plan_settable: true,
+      };
+
+      mockKnex.mockImplementation(() => {
+        const qb = { ...mockQueryBuilder };
+        qb.orderByRaw = jest.fn().mockResolvedValue([mockEmployee]);
+        return qb;
+      });
+
+      const res = await service.getPlanEligibleEmployees();
+      expect(res.meta.total).toBe(1);
+      expect(res.items[0].id).toBe('emp-sales-1');
+      expect(res.items[0].full_name).toBe('Jasur Yoldoshev');
+      expect(res.items[0].is_plan_settable).toBe(true);
+    });
+  });
 });
