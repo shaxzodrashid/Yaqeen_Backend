@@ -458,13 +458,17 @@ export class AgentsService {
     query.orderByRaw("COALESCE(first_name, company_name, '') ASC");
 
     const rows = await query;
-    return rows.map((r) => ({
-      id: r.id,
-      name: this.getAgentDisplayName(r),
-      first_name: r.first_name,
-      last_name: r.last_name,
-      company_name: r.company_name,
-      phone_number: r.phone_number,
-    }));
+    return rows.map((r) => {
+      const displayName = this.getAgentDisplayName(r);
+      return {
+        id: r.id,
+        name: displayName,
+        display_name: displayName,
+        first_name: r.first_name,
+        last_name: r.last_name,
+        company_name: r.company_name,
+        phone_number: r.phone_number,
+      };
+    });
   }
 }

@@ -26,8 +26,8 @@ export class AgentsController {
 
   @Get('dropdown')
   @RequirePermission('agents', 'read')
-  async getDropdown(@Query('search') search?: string) {
-    return this.agentsService.getDropdownAgents(search);
+  async getDropdown(@Query('search') search?: string, @Query('q') q?: string) {
+    return this.agentsService.getDropdownAgents(search || q);
   }
 
   @Get()
