@@ -54,6 +54,8 @@ Authorization: Bearer <your_access_token>
 | `DELETE` | **`/cargo-kpi/plans/:id`**                | Deletes an employee plan.                                                            |
 | `GET`    | **`/cargo-kpi/plans/stats`**              | Returns aggregated organizational plan statistics and department breakdown.          |
 | `GET`    | **`/cargo-kpi/plans/employee/:id/stats`** | Returns personal plan statistics, lifetime totals, and month-by-month history.       |
+| `GET`    | **`/employees/plan-settable`**            | Returns only active employees eligible to receive plans (Sales Manager, ROP, etc.).  |
+| `GET`    | **`/cargo-kpi/plans/eligible-employees`** | Alias endpoint returning plan-settable employees.                                    |
 | `GET`    | **`/cargo-registrations/stats`**          | Returns summary statistics for cargo registrations (LTL, FTL, financials, managers). |
 
 ---
@@ -145,6 +147,18 @@ Authorization: Bearer <your_access_token>
 - `ftl_target_amount` (number, optional, $\ge 0$): Financial sales target for FTL cargos (default `0`).
 - `currency` (string, optional, enum: `USD`, `UZS`, `RUB`, `RMB`, `CNY`): FTL financial plan currency (default `USD`).
 - `period` (string, required): Plan target month in `YYYY-MM` or `YYYY-MM-DD` format.
+
+#### Role Eligibility Validation:
+
+- The target employee **must have a role with `is_plan_settable: true`** (e.g., `Sales Manager`, `ROP`).
+- If an employee has a non-plan-settable role (e.g., `Accountant`, `HR`, `IT Support`), the endpoint rejects the request with `400 Bad Request`:
+  ```json
+  {
+    "statusCode": 400,
+    "message": "Cannot set plan for employee with role \"Accountant\": role is not eligible to receive plans.",
+    "location": "role_not_plan_settable"
+  }
+  ```
 
 #### Response (201 Created):
 
@@ -413,6 +427,64 @@ Returns the updated plans progress and leaderboard response.
       "net_yield_usd": 22000.0
     }
   ]
+}
+```
+
+---
+
+### 4.7. Get Plan-Settable Employees
+
+#### `GET /employees/plan-settable`
+
+_(Aliases: `GET /employees/plan-eligible`, `GET /employees/for-plan`, `GET /cargo-kpi/plans/eligible-employees`)_
+
+Used by the frontend plan-assignment modal, dropdowns, and employee pickers to list only active employees eligible to receive monthly plans (e.g., `Sales Manager`, `ROP`). Excludes non-plan roles like `Accountant`, `HR`, and `IT`.
+
+#### Query Parameters:
+
+- `department_id` (optional, UUID): Filter eligible employees by department.
+- `search` (optional, string): Fuzzy search by employee first name, last name, phone, or department name.
+- `page` (optional, integer, default `1`): Page number for pagination.
+- `limit` (optional, integer, default `1000`): Page size.
+- `offset` (optional, integer): Explicit offset override.
+
+#### Response (200 OK):
+
+```json
+{
+  "meta": {
+    "total": 2,
+    "count": 2,
+    "page": 1,
+    "limit": 1000,
+    "offset": 0
+  },
+  "data": [
+    {
+      "id": "a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11",
+      "first_name": "Jasur",
+      "last_name": "Yoldoshev",
+      "full_name": "Jasur Yoldoshev",
+      "phone": "+998901234567",
+      "secondary_phone": null,
+      "address": "Tashkent, Uzbekistan",
+      "department_id": "d1eebc99-9c0b-4ef8-bb6d-6bb9bd380a22",
+      "department_name": "sales",
+      "department_display_name": "Sales",
+      "color": "#336699",
+      "picture_url": "https://storage.yaqeen.uz/avatars/emp-1.jpg?token=...",
+      "is_active": true,
+      "user_id": "u1eebc99-9c0b-4ef8-bb6d-6bb9bd380a33",
+      "username": "jasur_sales",
+      "role_id": "r1eebc99-9c0b-4ef8-bb6d-6bb9bd380a44",
+      "role_name": "Sales Manager",
+      "role_display_name": "Sales Manager",
+      "is_plan_settable": true,
+      "created_at": "2026-08-01T10:00:00.000Z",
+      "updated_at": "2026-08-01T10:00:00.000Z"
+    }
+  ],
+  "items": [/* Same as data for frontend convenience */]
 }
 ```
 

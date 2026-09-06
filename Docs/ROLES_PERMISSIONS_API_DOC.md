@@ -46,16 +46,17 @@ erDiagram
 
 ### Database Schema (`roles` table)
 
-| Field          | Type           | Modifiers                                 | Description                                                                       |
-| :------------- | :------------- | :---------------------------------------- | :-------------------------------------------------------------------------------- |
-| `id`           | `uuid`         | Primary Key, default `uuid_generate_v4()` | Unique identifier for the role.                                                   |
-| `name`         | `varchar(100)` | Unique, Not Null                          | System machine name (e.g. `'CEO'`, `'ROP'`, `'EMPLOYEE'`, `'LOGISTICS_MANAGER'`). |
-| `display_name` | `varchar(100)` | Not Null                                  | Human-readable title displayed in frontend forms and tables.                      |
-| `description`  | `text`         | Nullable                                  | Description of responsibilities and scope of the role.                            |
-| `permissions`  | `jsonb`        | Not Null, default `{}`                    | Key-value store of module-level CRUD permissions.                                 |
-| `is_system`    | `boolean`      | Not Null, default `false`                 | Indicates immutable built-in system roles (`CEO`, `ROP`, `EMPLOYEE`).             |
-| `created_at`   | `timestamp`    | Default `NOW()`                           | Record creation timestamp.                                                        |
-| `updated_at`   | `timestamp`    | Default `NOW()`                           | Record last modification timestamp.                                               |
+| Field              | Type           | Modifiers                                 | Description                                                                       |
+| :----------------- | :------------- | :---------------------------------------- | :-------------------------------------------------------------------------------- |
+| `id`               | `uuid`         | Primary Key, default `uuid_generate_v4()` | Unique identifier for the role.                                                   |
+| `name`             | `varchar(100)` | Unique, Not Null                          | System machine name (e.g. `'CEO'`, `'ROP'`, `'EMPLOYEE'`, `'LOGISTICS_MANAGER'`). |
+| `display_name`     | `varchar(100)` | Not Null                                  | Human-readable title displayed in frontend forms and tables.                      |
+| `description`      | `text`         | Nullable                                  | Description of responsibilities and scope of the role.                            |
+| `permissions`      | `jsonb`        | Not Null, default `{}`                    | Key-value store of module-level CRUD permissions.                                 |
+| `is_system`        | `boolean`      | Not Null, default `false`                 | Indicates immutable built-in system roles (`CEO`, `ROP`, `EMPLOYEE`).             |
+| `is_plan_settable` | `boolean`      | Not Null, default `false`, Indexed        | Indicates whether users with this role are eligible for employee plan assignment. |
+| `created_at`       | `timestamp`    | Default `NOW()`                           | Record creation timestamp.                                                        |
+| `updated_at`       | `timestamp`    | Default `NOW()`                           | Record last modification timestamp.                                               |
 
 ---
 
@@ -91,6 +92,7 @@ Each action flag inside a module object represents an explicit authorization rul
 - **`assign_cargo` (`boolean`)**: Special permission in `cargo_consolidations` to batch assign/remove cargo registrations to/from trucks.
 - **`register_for_everyone` (`boolean`)**: Special permission in `cargo_registrations` allowing users to register cargos under other employees.
 - **`can_work_with_all_clients` (`boolean`)**: Special permission in `clients` allowing users to view and work with all clients.
+- **`plan_settable` (`boolean`)**: Special permission in `cargo_kpi` determining whether employees holding this role are eligible to have monthly plans assigned to them (e.g. Sales Managers and ROP are eligible, while Accountants, IT, HR are not). Also mirrored via top-level `is_plan_settable` on the role.
 
 ---
 
@@ -109,20 +111,21 @@ The system seeds 3 built-in **System Roles** (`is_system: true`). System roles c
 
 ### System Role Permission Matrix
 
-| Module Key                 | Action                                                   |   CEO (Chief Executive Officer)   |      ROP (Head of Sales / Ops)       |       EMPLOYEE (Standard Staff)       |
-| :------------------------- | :------------------------------------------------------- | :-------------------------------: | :----------------------------------: | :-----------------------------------: |
-| **`clients`**              | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   |  `false` / `true` / `true` / `false`  |
-| **`employees`**            | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` | `false` / `true` / `true` / `false`  | `false` / `true` / `false` / `false`  |
-| **`departments`**          | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` | `false` / `true` / `false` / `false` | `false` / `true` / `false` / `false`  |
-| **`cargo_kpi`**            | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   | `false` / `true` / `false` / `false`  |
-| **`cargo_registrations`**  | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   |  `true` / `true` / `true` / `false`   |
-| **`cargo_consolidations`** | `create` / `read` / `update` / `delete` / `assign_cargo` | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   |  `true` / `true` / `true` / `false`   |
-| **`finance`**              | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` | `false` / `true` / `false` / `false` | `false` / `false` / `false` / `false` |
-| **`commercial_offers`**    | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   |  `true` / `true` / `false` / `false`  |
-| **`tasks`**                | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   |  `true` / `true` / `true` / `false`   |
-| **`currency`**             | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` | `false` / `true` / `false` / `false` | `false` / `true` / `false` / `false`  |
-| **`attachments`**          | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` |  `true` / `true` / `true` / `true`   |  `true` / `true` / `false` / `false`  |
-| **`roles`**                | `create` / `read` / `update` / `delete`                  | `true` / `true` / `true` / `true` | `false` / `true` / `false` / `false` | `false` / `false` / `false` / `false` |
+| Module Key                 | Action                                                    |        CEO (Chief Executive Officer)        |         ROP (Head of Sales / Ops)          |           EMPLOYEE (Standard Staff)           |
+| :------------------------- | :-------------------------------------------------------- | :-----------------------------------------: | :----------------------------------------: | :-------------------------------------------: |
+| **`clients`**              | `create` / `read` / `update` / `delete`                   |      `true` / `true` / `true` / `true`      |     `true` / `true` / `true` / `true`      |      `false` / `true` / `true` / `false`      |
+| **`employees`**            | `create` / `read` / `update` / `delete`                   |      `true` / `true` / `true` / `true`      |    `false` / `true` / `true` / `false`     |     `false` / `true` / `false` / `false`      |
+| **`departments`**          | `create` / `read` / `update` / `delete`                   |      `true` / `true` / `true` / `true`      |    `false` / `true` / `false` / `false`    |     `false` / `true` / `false` / `false`      |
+| **`cargo_kpi`**            | `create` / `read` / `update` / `delete` / `plan_settable` | `true` / `true` / `true` / `true` / `false` | `true` / `true` / `true` / `true` / `true` | `false` / `true` / `false` / `false` / `true` |
+| **`cargo_registrations`**  | `create` / `read` / `update` / `delete`                   |      `true` / `true` / `true` / `true`      |     `true` / `true` / `true` / `true`      |      `true` / `true` / `true` / `false`       |
+| **`cargo_consolidations`** | `create` / `read` / `update` / `delete` / `assign_cargo`  |      `true` / `true` / `true` / `true`      |     `true` / `true` / `true` / `true`      |      `true` / `true` / `true` / `false`       |
+| **`finance`**              | `create` / `read` / `update` / `delete`                   |      `true` / `true` / `true` / `true`      |    `false` / `true` / `false` / `false`    |     `false` / `false` / `false` / `false`     |
+| **`commercial_offers`**    | `create` / `read` / `update` / `delete`                   |      `true` / `true` / `true` / `true`      |     `true` / `true` / `true` / `true`      |      `true` / `true` / `false` / `false`      |
+| **`tasks`**                | `create` / `read` / `update` / `delete`                   |      `true` / `true` / `true` / `true`      |     `true` / `true` / `true` / `true`      |      `true` / `true` / `true` / `false`       |
+| **`currency`**             | `create` / `read` / `update` / `delete`                   |      `true` / `true` / `true` / `true`      |    `false` / `true` / `false` / `false`    |     `false` / `true` / `false` / `false`      |
+| **`attachments`**          | `create` / `read` / `update` / `delete`                   |      `true` / `true` / `true` / `true`      |     `true` / `true` / `true` / `true`      |      `true` / `true` / `false` / `false`      |
+| **`roles`**                | `create` / `read` / `update` / `delete`                   |      `true` / `true` / `true` / `true`      |    `false` / `true` / `false` / `false`    |     `false` / `false` / `false` / `false`     |
+| **`is_plan_settable`**     | Role-level eligibility flag                               |                   `false`                   |                   `true`                   |                    `true`                     |
 
 > [!NOTE]
 > The **CEO** role possesses administrative superuser privileges: the backend's `PermissionsGuard` automatically bypasses all individual permission checks for users with `role: 'CEO'` or `role_name: 'CEO'`.
@@ -660,6 +663,55 @@ Deletes a custom role from the database.
 
 1. **System Protection:** Attempting to delete a built-in system role (`is_system: true`) returns `400 Bad Request` (`location: "system_role_delete_prohibited"`).
 2. **Assigned Users Guard:** Attempting to delete a role assigned to active user accounts returns `400 Bad Request` (`location: "role_has_assigned_users"`). Reassign users before deletion.
+
+---
+
+### 6.7. Plan-Settable Roles & Eligible Employees (`is_plan_settable`)
+
+The system enables marking roles as **plan-settable** (`is_plan_settable: true` and `cargo_kpi.plan_settable: true`). This ensures that only employees in revenue-generating or target-bearing roles (e.g. `Sales Manager`, `ROP`) can have monthly KPI plans assigned to them, while operational/administrative roles (e.g. `Accountant`, `HR`, `IT Support`) are excluded.
+
+#### 1. Managing `is_plan_settable` on Roles
+
+When creating (`POST /roles`) or updating (`PUT /roles/:id`) a role, provide:
+
+```json
+{
+  "name": "Sales Manager",
+  "display_name": "Sales Manager",
+  "is_plan_settable": true,
+  "permissions": {
+    "cargo_kpi": {
+      "create": true,
+      "read": true,
+      "update": true,
+      "delete": false,
+      "plan_settable": true
+    }
+  }
+}
+```
+
+Setting either top-level `is_plan_settable: true` or `permissions.cargo_kpi.plan_settable: true` automatically synchronizes both values.
+
+#### 2. Fetching Eligible Employees for Plan Assignment
+
+The frontend plan-assignment modal or dropdown should query the dedicated endpoint:
+
+- **Route:** `GET /employees/plan-settable` (Aliases: `/employees/plan-eligible`, `/employees/for-plan`, `/cargo-kpi/plans/eligible-employees`)
+- **Query Parameters:** `department_id` (UUID), `search` (string), `page` (number), `limit` (number), `offset` (number)
+- **Response:** Standardized `{ meta: { total, count, page, limit, offset }, data: [...], items: [...] }` returning only active employees whose assigned role has `is_plan_settable: true`.
+
+#### 3. Role-Level Plan Assignment Rejection
+
+Attempting to create a plan (`POST /cargo-kpi/plans`) for an employee with a non-plan-settable role (e.g., Accountant) will fail with:
+
+```json
+{
+  "statusCode": 400,
+  "message": "Cannot set plan for employee with role \"Accountant\": role is not eligible to receive plans.",
+  "location": "role_not_plan_settable"
+}
+```
 
 ---
 
