@@ -66,8 +66,8 @@ Every expense in the system is a **distinct physical record** strictly bound to 
 | `declarant`       | **Deklarant**      | Customs declaration processing and declarant fees      |
 
 > [!NOTE]
-> **Internal Logistics (`internal_logistics_cost`)**:
-> Internal logistics is **not** a general operational expense category. It is an individual, occasional expense recorded directly on specific LTL cargo registrations (e.g. factory-to-consolidation-warehouse transit). It flows directly into LTL Cost of Goods Sold (COGS) in the finance summary and reduces the net margin of that specific cargo.
+> **Internal Logistics & Certificate (`internal_logistics_cost` & `certificate_price`)**:
+> Internal logistics and certificate prices are **not** general operational expense categories. They are individual direct expenses recorded on specific LTL cargo registrations (e.g. factory-to-consolidation transit, certification paid for client's goods). They flow directly into LTL Cost of Goods Sold (COGS) in the finance summary and reduce the net profit of that specific cargo.
 
 ---
 

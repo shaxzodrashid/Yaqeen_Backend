@@ -339,6 +339,8 @@ export class SalesManagerKpiService {
           'additional_expense_currency',
           'internal_logistics_cost',
           'internal_logistics_currency',
+          'certificate_price',
+          'certificate_currency',
         );
 
       for (const reg of regRows) {
@@ -405,6 +407,12 @@ export class SalesManagerKpiService {
             rates,
             usdRmb,
           );
+        }
+
+        const certAmt = Number(reg.certificate_price || 0);
+        if (certAmt > 0) {
+          const certCurr = reg.certificate_currency || 'USD';
+          buyUsd += await this.convertToUsd(certAmt, certCurr, rates, usdRmb);
         }
 
         const profit = sellUsd - buyUsd;
@@ -827,6 +835,8 @@ export class SalesManagerKpiService {
           'cr.additional_expense_currency',
           'cr.internal_logistics_cost',
           'cr.internal_logistics_currency',
+          'cr.certificate_price',
+          'cr.certificate_currency',
           'cr.client_id',
           'c.first_name as client_first_name',
           'c.last_name as client_last_name',
@@ -898,6 +908,12 @@ export class SalesManagerKpiService {
           );
         }
 
+        const certAmt = Number(r.certificate_price || 0);
+        if (certAmt > 0) {
+          const certCurr = r.certificate_currency || 'USD';
+          buyUsd += await this.convertToUsd(certAmt, certCurr, rates, usdRmb);
+        }
+
         const profit = sellUsd - buyUsd;
 
         const normStatus = this.normalizePaymentStatus(r.payment_status);
@@ -929,6 +945,8 @@ export class SalesManagerKpiService {
           additional_expense_currency: r.additional_expense_currency || 'USD',
           internal_logistics_cost: Number(r.internal_logistics_cost || 0),
           internal_logistics_currency: r.internal_logistics_currency || 'USD',
+          certificate_price: Number(r.certificate_price || 0),
+          certificate_currency: r.certificate_currency || 'USD',
           payment_deadline_days:
             r.payment_deadline_days !== null &&
             r.payment_deadline_days !== undefined

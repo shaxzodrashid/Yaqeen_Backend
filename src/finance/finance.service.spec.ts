@@ -751,5 +751,68 @@ describe('FinanceService', () => {
       // LTL COGS should include additional_expense (100) + internal_logistics_cost (400) = 500 USD
       expect(res.summary.cost_of_goods_sold).toBe(500);
     });
+
+    it('should include certificate_price of LTL cargos in LTL COGS', async () => {
+      mockKnex.mockImplementation((table: string) => {
+        if (table === 'cargo_registrations') {
+          return {
+            select: jest.fn().mockReturnThis(),
+            whereRaw: jest.fn().mockReturnThis(),
+            then: jest.fn((callback) =>
+              callback([
+                {
+                  cargo_type: 'LTL',
+                  purchase_price: 0,
+                  purchase_currency: 'USD',
+                  purchase_date: '2026-08-10',
+                  purchase_usd_rate: 1,
+                  additional_expense: 100,
+                  additional_expense_currency: 'USD',
+                  internal_logistics_cost: 200,
+                  internal_logistics_currency: 'USD',
+                  certificate_price: 300,
+                  certificate_currency: 'USD',
+                },
+              ]),
+            ),
+          };
+        }
+        if (table === 'cargo_transactions') {
+          return {
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            then: jest.fn((callback) => callback([])),
+          };
+        }
+        if (table === 'expenses') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            whereRaw: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ total: 0 }),
+            select: jest.fn().mockReturnThis(),
+            then: jest.fn((callback) => callback([])),
+          };
+        }
+        if (table === 'employees') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ total: 0 }),
+          };
+        }
+        return {
+          where: jest.fn().mockReturnThis(),
+          then: jest.fn((callback) => callback([])),
+        };
+      });
+
+      const res = await service.getFinanceSummary({
+        section: ExpenseSection.LTL,
+        period: '2026-08',
+        currency: Currency.USD,
+      });
+
+      // LTL COGS should include additional_expense (100) + internal_logistics_cost (200) + certificate_price (300) = 600 USD
+      expect(res.summary.cost_of_goods_sold).toBe(600);
+    });
   });
 });

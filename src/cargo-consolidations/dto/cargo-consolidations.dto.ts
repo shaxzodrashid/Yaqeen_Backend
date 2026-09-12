@@ -207,32 +207,6 @@ export class CreateCargoConsolidationDto {
   tamojnya_currency?: ConsolidationCurrency;
 
   @IsOptional()
-  @Type(() => Number)
-  @IsNumber({}, { message: 'cct must be a number' })
-  @Min(0, { message: 'cct cannot be negative' })
-  cct?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber({}, { message: 'certificate must be a number' })
-  @Min(0, { message: 'certificate cannot be negative' })
-  certificate?: number;
-
-  @IsOptional()
-  @IsString()
-  @IsIn(ALLOWED_CURRENCIES, {
-    message: 'cct_currency must be UZS, RUB, USD, or RMB',
-  })
-  cct_currency?: ConsolidationCurrency;
-
-  @IsOptional()
-  @IsString()
-  @IsIn(ALLOWED_CURRENCIES, {
-    message: 'certificate_currency must be UZS, RUB, USD, or RMB',
-  })
-  certificate_currency?: ConsolidationCurrency;
-
-  @IsOptional()
   @IsString()
   @IsIn(ALLOWED_CURRENCIES, {
     message: 'carrier_cost_currency must be UZS, RUB, USD, or RMB',
@@ -398,28 +372,6 @@ export class UpdateCargoConsolidationDto {
   @IsString()
   @IsIn(ALLOWED_CURRENCIES)
   tamojnya_currency?: ConsolidationCurrency;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  cct?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  certificate?: number;
-
-  @IsOptional()
-  @IsString()
-  @IsIn(ALLOWED_CURRENCIES)
-  cct_currency?: ConsolidationCurrency;
-
-  @IsOptional()
-  @IsString()
-  @IsIn(ALLOWED_CURRENCIES)
-  certificate_currency?: ConsolidationCurrency;
 
   @IsOptional()
   @IsString()
@@ -745,28 +697,6 @@ export class CreateConsolidationInlineDto {
   @IsString()
   @IsIn(ALLOWED_CURRENCIES)
   tamojnya_currency?: ConsolidationCurrency;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  cct?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  @Min(0)
-  certificate?: number;
-
-  @IsOptional()
-  @IsString()
-  @IsIn(ALLOWED_CURRENCIES)
-  cct_currency?: ConsolidationCurrency;
-
-  @IsOptional()
-  @IsString()
-  @IsIn(ALLOWED_CURRENCIES)
-  certificate_currency?: ConsolidationCurrency;
 
   @IsOptional()
   @IsString()

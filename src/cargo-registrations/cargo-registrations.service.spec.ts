@@ -2521,5 +2521,133 @@ describe('CargoRegistrationsService', () => {
       expect(res.internal_logistics_currency).toBe('USD');
       expect(res.internal_logistics_amount_usd).toBe(200);
     });
+
+    it('should store certificate_price for LTL cargo registration and include it in total outcome and net yield', async () => {
+      const user = { id: 'user-uuid-1', role: 'admin' };
+      let insertedPayload: any = null;
+
+      knexMock.mockImplementation((table: string) => {
+        if (table === 'users as u') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ role: 'admin' }),
+          };
+        }
+        if (table === 'users') {
+          return {
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ employee_id: 'emp-uuid-1' }),
+          };
+        }
+        if (table === 'employees') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ id: 'emp-uuid-1' }),
+          };
+        }
+        if (table === 'clients') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({ id: 'client-uuid-1' }),
+          };
+        }
+        if (table === 'cargo_consolidations') {
+          return {
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'cns-1',
+              consolidation_code: 'CNS-202609-0001',
+              container_truck_id: 'TRK-999',
+              carrier_name: 'Fast Trans',
+              status: 'Waiting',
+              carrier_cost_currency: 'USD',
+              carrier_cost_usd_rate: 1.0,
+            }),
+          };
+        }
+        if (table === 'cargo_registrations as cr') {
+          return {
+            leftJoin: jest.fn().mockReturnThis(),
+            select: jest.fn().mockReturnThis(),
+            where: jest.fn().mockReturnThis(),
+            first: jest.fn().mockResolvedValue({
+              id: 'reg-ltl-cert-1',
+              cargo_type: 'LTL',
+              volume: 5,
+              weight: 600,
+              load_code: 'LOAD-CERT-1',
+              is_turnkey: false,
+              turnkey_price: 0,
+              turnkey_currency: 'USD',
+              is_speed_up: false,
+              speed_up: 0,
+              speed_up_currency: 'USD',
+              additional_expense: 50,
+              additional_expense_currency: 'USD',
+              internal_logistics_cost: 100,
+              internal_logistics_currency: 'USD',
+              certificate_price: 150,
+              certificate_currency: 'USD',
+              purchase_price: 0,
+              purchase_currency: 'USD',
+              sell_price: 1500,
+              sell_currency: 'USD',
+              client_id: 'client-uuid-1',
+              employee_id: 'emp-uuid-1',
+              consolidation_id: 'cns-1',
+            }),
+          };
+        }
+        if (table === 'cargo_registrations') {
+          return {
+            insert: jest.fn().mockImplementation((payload) => {
+              insertedPayload = payload;
+              return {
+                returning: jest.fn().mockResolvedValue(['reg-ltl-cert-1']),
+              };
+            }),
+          };
+        }
+        return {};
+      });
+
+      const res = await service.createCargoRegistration(user, {
+        cargo_type: 'LTL',
+        volume: 5,
+        weight: 600,
+        load_code: 'LOAD-CERT-1',
+        consolidation_id: 'cns-1',
+        cargo: 'Electronics',
+        certificate: 150,
+        certificate_currency: 'USD',
+        internal_logistics_cost: 100,
+        internal_logistics_currency: 'USD',
+        additional_expense: 50,
+        additional_expense_currency: 'USD',
+        sell_price: 1500,
+        sell_currency: 'USD',
+        client_id: 'client-uuid-1',
+        employee_id: 'emp-uuid-1',
+      });
+
+      expect(insertedPayload).toBeDefined();
+      expect(insertedPayload.certificate_price).toBe(150);
+      expect(insertedPayload.certificate_currency).toBe('USD');
+
+      // Income = 1500 USD
+      // Outcome = purchase(0) + additional_expense(50) + internal_logistics(100) + certificate(150) = 300 USD
+      // Net yield = 1500 - 300 = 1200 USD
+      expect(res.total_income_usd).toBe(1500);
+      expect(res.total_outcome_usd).toBe(300);
+      expect(res.net_yield).toBe(1200);
+      expect(res.net_yield_details.amount_usd).toBe(1200);
+      expect(res.certificate_price).toBe(150);
+      expect(res.certificate).toBe(150);
+      expect(res.certificate_currency).toBe('USD');
+      expect(res.certificate_amount_usd).toBe(150);
+    });
   });
 });

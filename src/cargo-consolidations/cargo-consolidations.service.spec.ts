@@ -333,7 +333,6 @@ describe('CargoConsolidationsService', () => {
           currency: 'USD',
           amount_usd: 0,
         },
-        cct: { amount: 0, currency: 'USD', amount_usd: 0 },
         total_usd: 2000,
       });
       expect(details.financials.consolidated_net_margin).toEqual({
@@ -384,7 +383,6 @@ describe('CargoConsolidationsService', () => {
             total_carrier_cost: '500.0',
             agent: '500.0',
             customs_clearance_of_goods: '0.0',
-            cct: '0.0',
             carrier_cost_currency: 'USD',
           },
         ]),
@@ -1026,14 +1024,12 @@ describe('CargoConsolidationsService', () => {
   });
 
   describe('consolidation expenses (outcomes) and LTL income calculations', () => {
-    it('should compute complete breakdown of 3 individual consolidation expenses in multi-currency: agent in USD, customs_clearance (Tomojnya) in USD, cct (Certificate) in UZS', () => {
+    it('should compute complete breakdown of 2 individual consolidation expenses in multi-currency: agent in USD, customs_clearance (Tomojnya) in USD', () => {
       const row = {
         agent: 3000,
         agent_currency: 'USD',
         customs_clearance_of_goods: 800,
         customs_clearance_of_goods_currency: 'USD',
-        cct: 1285000,
-        cct_currency: 'UZS',
         carrier_cost_currency: 'USD',
         carrier_cost_usd_rate: 1.0,
       };
@@ -1054,14 +1050,10 @@ describe('CargoConsolidationsService', () => {
       expect(exp.customs_clearance_of_goods_currency).toBe('USD');
       expect(exp.customs_clearance_of_goods_usd).toBe(800);
 
-      expect(exp.cct).toBe(1285000);
-      expect(exp.cct_currency).toBe('UZS');
-      expect(exp.cct_usd).toBe(100);
-
-      expect(exp.total_usd).toBe(3900);
+      expect(exp.total_usd).toBe(3800);
     });
 
-    it('should store and calculate 3 expenses with currencies on createConsolidation and return net margin based on LTL income sum minus outcomes sum', async () => {
+    it('should store and calculate 2 expenses with currencies on createConsolidation and return net margin based on LTL income sum minus outcomes sum', async () => {
       const user = { id: 'user-uuid-1', role: 'CEO' };
       let insertedPayload: any = null;
 
@@ -1078,8 +1070,6 @@ describe('CargoConsolidationsService', () => {
               agent_currency: 'USD',
               customs_clearance_of_goods: 800,
               customs_clearance_of_goods_currency: 'USD',
-              cct: 150,
-              cct_currency: 'USD',
               carrier_cost_currency: 'USD',
               carrier_cost_usd_rate: 1.0,
             }),
@@ -1127,27 +1117,23 @@ describe('CargoConsolidationsService', () => {
         agent_currency: 'USD',
         customs_clearance_of_goods: 800,
         customs_clearance_of_goods_currency: 'USD',
-        cct: 150,
-        cct_currency: 'USD',
       });
 
       expect(insertedPayload.agent).toBe(3000);
       expect(insertedPayload.agent_currency).toBe('USD');
       expect(insertedPayload.customs_clearance_of_goods).toBe(800);
       expect(insertedPayload.customs_clearance_of_goods_currency).toBe('USD');
-      expect(insertedPayload.cct).toBe(150);
-      expect(insertedPayload.cct_currency).toBe('USD');
 
       // Income = $6000 + $6000 = $12000
-      // Outcomes = $3000 + $800 + $150 = $3950
-      // Net Profit / Margin = $12000 - $3950 = $8050
+      // Outcomes = $3000 + $800 = $3800
+      // Net Profit / Margin = $12000 - $3800 = $8200
       expect(res.financials.income).toBe(12000);
       expect(res.financials.total_income_usd).toBe(12000);
-      expect(res.financials.outcome).toBe(3950);
-      expect(res.financials.total_outcome_usd).toBe(3950);
+      expect(res.financials.outcome).toBe(3800);
+      expect(res.financials.total_outcome_usd).toBe(3800);
       expect(res.financials.total_purchase_usd).toBe(0);
-      expect(res.financials.consolidated_net_margin.amount).toBe(8050);
-      expect(res.financials.net_profit_usd).toBe(8050);
+      expect(res.financials.consolidated_net_margin.amount).toBe(8200);
+      expect(res.financials.net_profit_usd).toBe(8200);
       expect((res as any).expenses).toBeUndefined();
       expect((res.financials as any).carrier_cost).toBeUndefined();
       expect(res.financials.expenses).toEqual({
@@ -1157,20 +1143,17 @@ describe('CargoConsolidationsService', () => {
           currency: 'USD',
           amount_usd: 800,
         },
-        cct: { amount: 150, currency: 'USD', amount_usd: 150 },
-        total_usd: 3950,
+        total_usd: 3800,
       });
     });
 
-    it('should validate DTO with expense fields (agent, customs_clearance_of_goods, tomojnya, cct, certificate) and currencies', async () => {
+    it('should validate DTO with expense fields (agent, customs_clearance_of_goods, tomojnya) and currencies', async () => {
       const payload = {
         container_truck_id: 'TRK-EXP-1',
         agent: 3000,
         agent_currency: 'USD',
         tomojnya: 800,
         tomojnya_currency: 'USD',
-        certificate: 1500000,
-        certificate_currency: 'UZS',
       };
 
       const dto = plainToInstance(CreateCargoConsolidationDto, payload);
@@ -1330,8 +1313,6 @@ describe('CargoConsolidationsService', () => {
               agent_currency: 'USD',
               customs_clearance_of_goods: 300,
               customs_clearance_of_goods_currency: 'USD',
-              cct: 100,
-              cct_currency: 'USD',
             }),
           };
         }
@@ -1355,6 +1336,8 @@ describe('CargoConsolidationsService', () => {
                 additional_expense_currency: 'USD',
                 internal_logistics_cost: 350,
                 internal_logistics_currency: 'USD',
+                certificate_price: 150,
+                certificate_currency: 'USD',
               },
             ]),
           };
@@ -1369,8 +1352,12 @@ describe('CargoConsolidationsService', () => {
       expect(cargo.internal_logistics).toBe(350);
       expect(cargo.internal_logistics_currency).toBe('USD');
       expect(cargo.internal_logistics_amount_usd).toBe(350);
-      // Cargo total outcome = purchase(0) + additional_expense(100) + internal_logistics(350) = 450 USD
-      expect(cargo.total_outcome_usd).toBe(450);
+      expect(cargo.certificate_price).toBe(150);
+      expect(cargo.certificate).toBe(150);
+      expect(cargo.certificate_currency).toBe('USD');
+      expect(cargo.certificate_amount_usd).toBe(150);
+      // Cargo total outcome = purchase(0) + additional_expense(100) + internal_logistics(350) + certificate(150) = 600 USD
+      expect(cargo.total_outcome_usd).toBe(600);
       expect(cargo.total_income_usd).toBe(2500);
     });
   });

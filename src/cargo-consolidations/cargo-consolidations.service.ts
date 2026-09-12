@@ -143,7 +143,7 @@ export class CargoConsolidationsService {
 
   /**
    * Helper to compute and breakdown consolidation expenses (outcomes) in native currency and USD.
-   * Outcomes are individual consolidation expenses: agent, customs_clearance_of_goods (Tomojnya), and cct (Certificate).
+   * Outcomes are individual consolidation expenses: agent and customs_clearance_of_goods (Tomojnya).
    */
   computeConsolidationExpenses(
     r: any,
@@ -155,9 +155,6 @@ export class CargoConsolidationsService {
     customs_clearance_of_goods: number;
     customs_clearance_of_goods_currency: string;
     customs_clearance_of_goods_usd: number;
-    cct: number;
-    cct_currency: string;
-    cct_usd: number;
     total: number;
     total_usd: number;
   } {
@@ -194,13 +191,7 @@ export class CargoConsolidationsService {
       rates,
     );
 
-    const cct = Number(
-      r.cct !== null && r.cct !== undefined ? r.cct : r.certificate || 0,
-    );
-    const cctCurrency = r.cct_currency || r.certificate_currency || 'USD';
-    const cctUsd = this.convertExpenseToUsd(cct, cctCurrency, undefined, rates);
-
-    const totalUsd = agentUsd + customsClearanceUsd + cctUsd;
+    const totalUsd = agentUsd + customsClearanceUsd;
 
     return {
       agent: Math.round(agent * 100) / 100,
@@ -210,9 +201,6 @@ export class CargoConsolidationsService {
       customs_clearance_of_goods_currency: customsClearanceCurrency,
       customs_clearance_of_goods_usd:
         Math.round(customsClearanceUsd * 100) / 100,
-      cct: Math.round(cct * 100) / 100,
-      cct_currency: cctCurrency,
-      cct_usd: Math.round(cctUsd * 100) / 100,
       total: Math.round(totalUsd * 100) / 100,
       total_usd: Math.round(totalUsd * 100) / 100,
     };
@@ -318,9 +306,29 @@ export class CargoConsolidationsService {
       );
     }
 
+    const certificateCurrency = r.certificate_currency || 'USD';
+    const certPrice = Number(
+      r.certificate_price !== undefined && r.certificate_price !== null
+        ? r.certificate_price
+        : r.certificate !== undefined && r.certificate !== null
+          ? r.certificate
+          : r.cct || 0,
+    );
+    let certificateUsd = 0;
+    if (certPrice > 0) {
+      certificateUsd = convertPrice(
+        certPrice,
+        certificateCurrency,
+        purchaseCustomRate ? Number(purchaseCustomRate) : undefined,
+      );
+    }
+
     const totalIncomeUsd = sellUsd + turnkeyUsd + speedUpUsd;
     const totalOutcomeUsd =
-      purchaseUsd + additionalExpenseUsd + internalLogisticsUsd;
+      purchaseUsd +
+      additionalExpenseUsd +
+      internalLogisticsUsd +
+      certificateUsd;
 
     const clientName = r.client_first_name
       ? `${r.client_first_name} ${r.client_last_name || ''}`.trim()
@@ -349,6 +357,10 @@ export class CargoConsolidationsService {
       internal_logistics_currency: internalLogisticsCurrency,
       internal_logistics_amount_usd:
         Math.round(internalLogisticsUsd * 100) / 100,
+      certificate_price: certPrice,
+      certificate: certPrice,
+      certificate_currency: certificateCurrency,
+      certificate_amount_usd: Math.round(certificateUsd * 100) / 100,
       total_income_usd: Math.round(totalIncomeUsd * 100) / 100,
       total_outcome_usd: Math.round(totalOutcomeUsd * 100) / 100,
       ...(isDetail
@@ -508,8 +520,6 @@ export class CargoConsolidationsService {
       dto.tomojnya_currency ||
       dto.tamojnya_currency ||
       'USD';
-    const cctCost = dto.cct !== undefined ? dto.cct : dto.certificate || 0;
-    const cctCurrency = dto.cct_currency || dto.certificate_currency || 'USD';
     const totalCarrierCost =
       dto.total_carrier_cost !== undefined ? dto.total_carrier_cost : agentCost;
 
@@ -546,8 +556,6 @@ export class CargoConsolidationsService {
         agent_currency: dto.agent_currency || carrierCurrency,
         customs_clearance_of_goods: customsClearanceCost,
         customs_clearance_of_goods_currency: customsClearanceCurrency,
-        cct: cctCost,
-        cct_currency: cctCurrency,
         carrier_cost_currency: carrierCurrency,
         carrier_cost_usd_rate: carrierCostUsdRate,
         status: dto.status || 'Waiting',
@@ -686,13 +694,6 @@ export class CargoConsolidationsService {
               WHEN COALESCE(cc.customs_clearance_of_goods_currency, 'USD') IN ('RMB', 'CNY') THEN (COALESCE(cc.customs_clearance_of_goods, 0) * ${rmbRate}) / ${usdRate}
               ELSE COALESCE(cc.customs_clearance_of_goods, 0)
             END
-            +
-            CASE
-              WHEN COALESCE(cc.cct_currency, 'USD') = 'UZS' THEN COALESCE(cc.cct, 0) / ${usdRate}
-              WHEN COALESCE(cc.cct_currency, 'USD') = 'RUB' THEN (COALESCE(cc.cct, 0) * ${rubRate}) / ${usdRate}
-              WHEN COALESCE(cc.cct_currency, 'USD') IN ('RMB', 'CNY') THEN (COALESCE(cc.cct, 0) * ${rmbRate}) / ${usdRate}
-              ELSE COALESCE(cc.cct, 0)
-            END
           ) as total_expenses_usd
         `),
         this.knex.raw(`
@@ -766,6 +767,19 @@ export class CargoConsolidationsService {
                   WHEN COALESCE(cr.internal_logistics_currency, 'USD') IN ('RMB', 'CNY') THEN (cr.internal_logistics_cost * ${rmbRate}) / ${usdRate}
                   WHEN COALESCE(cr.internal_logistics_currency, 'USD') = 'RUB' THEN (cr.internal_logistics_cost * ${rubRate}) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
                   ELSE cr.internal_logistics_cost
+                END
+              ELSE 0
+            END
+            +
+            CASE
+              WHEN cr.certificate_price > 0 THEN
+                CASE
+                  WHEN COALESCE(cr.certificate_currency, 'USD') = 'USD' THEN cr.certificate_price
+                  WHEN COALESCE(cr.certificate_currency, 'USD') = 'UZS' THEN cr.certificate_price / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
+                  WHEN COALESCE(cr.certificate_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.certificate_price / cr.usd_rmb_rate
+                  WHEN COALESCE(cr.certificate_currency, 'USD') IN ('RMB', 'CNY') THEN (cr.certificate_price * ${rmbRate}) / ${usdRate}
+                  WHEN COALESCE(cr.certificate_currency, 'USD') = 'RUB' THEN (cr.certificate_price * ${rubRate}) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
+                  ELSE cr.certificate_price
                 END
               ELSE 0
             END
@@ -845,8 +859,6 @@ export class CargoConsolidationsService {
           'cc.agent_currency',
           'cc.customs_clearance_of_goods',
           'cc.customs_clearance_of_goods_currency',
-          'cc.cct',
-          'cc.cct_currency',
           'cc.carrier_cost_currency',
           'cc.carrier_cost_usd_rate',
           'cc.status',
@@ -931,6 +943,19 @@ export class CargoConsolidationsService {
                     WHEN COALESCE(cr.internal_logistics_currency, 'USD') IN ('RMB', 'CNY') THEN (cr.internal_logistics_cost * ${rmbRate}) / ${usdRate}
                     WHEN COALESCE(cr.internal_logistics_currency, 'USD') = 'RUB' THEN (cr.internal_logistics_cost * ${rubRate}) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
                     ELSE cr.internal_logistics_cost
+                  END
+                ELSE 0
+              END
+              +
+              CASE
+                WHEN cr.certificate_price > 0 THEN
+                  CASE
+                    WHEN COALESCE(cr.certificate_currency, 'USD') = 'USD' THEN cr.certificate_price
+                    WHEN COALESCE(cr.certificate_currency, 'USD') = 'UZS' THEN cr.certificate_price / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
+                    WHEN COALESCE(cr.certificate_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.certificate_price / cr.usd_rmb_rate
+                    WHEN COALESCE(cr.certificate_currency, 'USD') IN ('RMB', 'CNY') THEN (cr.certificate_price * ${rmbRate}) / ${usdRate}
+                    WHEN COALESCE(cr.certificate_currency, 'USD') = 'RUB' THEN (cr.certificate_price * ${rubRate}) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
+                    ELSE cr.certificate_price
                   END
                 ELSE 0
               END
@@ -1042,11 +1067,6 @@ export class CargoConsolidationsService {
               amount: exp.customs_clearance_of_goods,
               currency: exp.customs_clearance_of_goods_currency,
               amount_usd: exp.customs_clearance_of_goods_usd,
-            },
-            cct: {
-              amount: exp.cct,
-              currency: exp.cct_currency,
-              amount_usd: exp.cct_usd,
             },
             total_usd: exp.total_usd,
           },
@@ -1353,11 +1373,6 @@ export class CargoConsolidationsService {
             currency: exp.customs_clearance_of_goods_currency,
             amount_usd: exp.customs_clearance_of_goods_usd,
           },
-          cct: {
-            amount: exp.cct,
-            currency: exp.cct_currency,
-            amount_usd: exp.cct_usd,
-          },
           total_usd: exp.total_usd,
         },
         consolidated_net_margin: {
@@ -1496,15 +1511,7 @@ export class CargoConsolidationsService {
         dto.tomojnya_currency ||
         dto.tamojnya_currency;
     }
-    if (dto.cct !== undefined || dto.certificate !== undefined) {
-      updatePayload.cct = dto.cct !== undefined ? dto.cct : dto.certificate;
-    }
-    if (
-      dto.cct_currency !== undefined ||
-      dto.certificate_currency !== undefined
-    ) {
-      updatePayload.cct_currency = dto.cct_currency || dto.certificate_currency;
-    }
+
     if (dto.total_carrier_cost !== undefined) {
       updatePayload.total_carrier_cost = dto.total_carrier_cost;
       if (dto.agent === undefined) {

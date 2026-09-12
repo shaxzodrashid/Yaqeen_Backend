@@ -782,8 +782,6 @@ export class CargoRegistrationsService {
               nc.tomojnya_currency ||
               nc.tamojnya_currency ||
               'USD',
-            cct: nc.cct !== undefined ? nc.cct : nc.certificate || 0,
-            cct_currency: nc.cct_currency || nc.certificate_currency || 'USD',
             carrier_cost_currency: costCurrency,
             carrier_cost_usd_rate: costUsdRate,
             status: nc.status || 'Waiting',
@@ -1060,6 +1058,16 @@ export class CargoRegistrationsService {
           : 0;
     const internalLogisticsCurrency = dto.internal_logistics_currency || 'USD';
 
+    const certificatePrice =
+      dto.certificate_price !== undefined
+        ? Number(dto.certificate_price)
+        : dto.certificate !== undefined
+          ? Number(dto.certificate)
+          : dto.cct !== undefined
+            ? Number(dto.cct)
+            : 0;
+    const certificateCurrency = dto.certificate_currency || 'USD';
+
     const [inserted] = await this.knex('cargo_registrations')
       .insert({
         cargo_type: dto.cargo_type,
@@ -1079,6 +1087,8 @@ export class CargoRegistrationsService {
         additional_expense_currency: additionalExpenseCurrency,
         internal_logistics_cost: internalLogisticsCost,
         internal_logistics_currency: internalLogisticsCurrency,
+        certificate_price: certificatePrice,
+        certificate_currency: certificateCurrency,
         container_type:
           dto.cargo_type === 'FTL' && finalContainerType
             ? finalContainerType
@@ -1363,6 +1373,22 @@ export class CargoRegistrationsService {
     if (dto.internal_logistics_currency !== undefined) {
       updatePayload.internal_logistics_currency =
         dto.internal_logistics_currency;
+    }
+
+    if (
+      dto.certificate_price !== undefined ||
+      dto.certificate !== undefined ||
+      dto.cct !== undefined
+    ) {
+      updatePayload.certificate_price =
+        dto.certificate_price !== undefined
+          ? Number(dto.certificate_price)
+          : dto.certificate !== undefined
+            ? Number(dto.certificate)
+            : Number(dto.cct);
+    }
+    if (dto.certificate_currency !== undefined) {
+      updatePayload.certificate_currency = dto.certificate_currency;
     }
 
     if (dto.transport_types !== undefined)
@@ -2084,6 +2110,19 @@ export class CargoRegistrationsService {
               END
             ELSE 0
           END
+          +
+          CASE
+            WHEN cr.certificate_price > 0 THEN
+              CASE
+                WHEN COALESCE(cr.certificate_currency, 'USD') = 'USD' THEN cr.certificate_price
+                WHEN COALESCE(cr.certificate_currency, 'USD') = 'UZS' THEN cr.certificate_price / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
+                WHEN COALESCE(cr.certificate_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN cr.certificate_price / cr.usd_rmb_rate
+                WHEN COALESCE(cr.certificate_currency, 'USD') IN ('RMB', 'CNY') THEN (cr.certificate_price * ${rmbRate}) / ${usdRate}
+                WHEN COALESCE(cr.certificate_currency, 'USD') = 'RUB' THEN (cr.certificate_price * ${rubRate}) / NULLIF(COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate}), 0)
+                ELSE cr.certificate_price
+              END
+            ELSE 0
+          END
         ), 0) as total_purchase_usd,
         COALESCE(SUM(
           CASE
@@ -2116,6 +2155,19 @@ export class CargoRegistrationsService {
                 WHEN COALESCE(cr.internal_logistics_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.internal_logistics_cost / cr.usd_rmb_rate) * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate})
                 WHEN COALESCE(cr.internal_logistics_currency, 'USD') IN ('RMB', 'CNY') THEN cr.internal_logistics_cost * ${rmbRate}
                 WHEN COALESCE(cr.internal_logistics_currency, 'USD') = 'RUB' THEN cr.internal_logistics_cost * ${rubRate}
+                ELSE 0
+              END
+            ELSE 0
+          END
+          +
+          CASE
+            WHEN cr.certificate_price > 0 THEN
+              CASE
+                WHEN COALESCE(cr.certificate_currency, 'USD') = 'UZS' THEN cr.certificate_price
+                WHEN COALESCE(cr.certificate_currency, 'USD') = 'USD' THEN cr.certificate_price * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate})
+                WHEN COALESCE(cr.certificate_currency, 'USD') IN ('RMB', 'CNY') AND cr.usd_rmb_rate > 0 THEN (cr.certificate_price / cr.usd_rmb_rate) * COALESCE(cr.purchase_custom_rate, cr.purchase_usd_rate, ${usdRate})
+                WHEN COALESCE(cr.certificate_currency, 'USD') IN ('RMB', 'CNY') THEN cr.certificate_price * ${rmbRate}
+                WHEN COALESCE(cr.certificate_currency, 'USD') = 'RUB' THEN cr.certificate_price * ${rubRate}
                 ELSE 0
               END
             ELSE 0
@@ -2180,6 +2232,8 @@ export class CargoRegistrationsService {
           'cr.additional_expense_currency',
           'cr.internal_logistics_cost',
           'cr.internal_logistics_currency',
+          'cr.certificate_price',
+          'cr.certificate_currency',
           'cr.container_type',
           'cr.transport_types',
           'cr.container_truck_id',
@@ -2371,6 +2425,22 @@ export class CargoRegistrationsService {
             r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
           );
 
+          const certificatePriceAmount = Number(
+            r.certificate_price !== undefined && r.certificate_price !== null
+              ? r.certificate_price
+              : r.certificate !== undefined && r.certificate !== null
+                ? r.certificate
+                : r.cct || 0,
+          );
+          const certificateCurrency = r.certificate_currency || 'USD';
+
+          const certificateRes = this.convertPriceToUsdAndUzs(
+            certificatePriceAmount,
+            certificateCurrency,
+            purchaseRates,
+            r.usd_rmb_rate ? Number(r.usd_rmb_rate) : null,
+          );
+
           const totalIncomeUsd =
             Math.round(
               (sellRes.amount_usd +
@@ -2390,14 +2460,16 @@ export class CargoRegistrationsService {
             Math.round(
               (purchaseRes.amount_usd +
                 additionalExpenseRes.amount_usd +
-                internalLogisticsRes.amount_usd) *
+                internalLogisticsRes.amount_usd +
+                certificateRes.amount_usd) *
                 100,
             ) / 100;
           const totalOutcomeUzs =
             Math.round(
               (purchaseRes.amount_uzs +
                 additionalExpenseRes.amount_uzs +
-                internalLogisticsRes.amount_uzs) *
+                internalLogisticsRes.amount_uzs +
+                certificateRes.amount_uzs) *
                 100,
             ) / 100;
 
@@ -2473,6 +2545,11 @@ export class CargoRegistrationsService {
             internal_logistics_currency: internalLogisticsCurrency,
             internal_logistics_amount_usd: internalLogisticsRes.amount_usd,
             internal_logistics_amount_uzs: internalLogisticsRes.amount_uzs,
+            certificate_price: certificatePriceAmount,
+            certificate: certificatePriceAmount,
+            certificate_currency: certificateCurrency,
+            certificate_amount_usd: certificateRes.amount_usd,
+            certificate_amount_uzs: certificateRes.amount_uzs,
             total_income_usd: totalIncomeUsd,
             total_outcome_usd: totalOutcomeUsd,
             container_type: r.container_type,
@@ -2938,6 +3015,22 @@ export class CargoRegistrationsService {
       row.usd_rmb_rate ? Number(row.usd_rmb_rate) : null,
     );
 
+    const certificatePriceAmount = Number(
+      row.certificate_price !== undefined && row.certificate_price !== null
+        ? row.certificate_price
+        : row.certificate !== undefined && row.certificate !== null
+          ? row.certificate
+          : row.cct || 0,
+    );
+    const certificateCurrency = row.certificate_currency || 'USD';
+
+    const certificateRes = this.convertPriceToUsdAndUzs(
+      certificatePriceAmount,
+      certificateCurrency,
+      purchaseRates,
+      row.usd_rmb_rate ? Number(row.usd_rmb_rate) : null,
+    );
+
     const totalIncomeUsd =
       Math.round(
         (sellRes.amount_usd + turnkeyRes.amount_usd + speedUpRes.amount_usd) *
@@ -2953,14 +3046,16 @@ export class CargoRegistrationsService {
       Math.round(
         (purchaseRes.amount_usd +
           additionalExpenseRes.amount_usd +
-          internalLogisticsRes.amount_usd) *
+          internalLogisticsRes.amount_usd +
+          certificateRes.amount_usd) *
           100,
       ) / 100;
     const totalOutcomeUzs =
       Math.round(
         (purchaseRes.amount_uzs +
           additionalExpenseRes.amount_uzs +
-          internalLogisticsRes.amount_uzs) *
+          internalLogisticsRes.amount_uzs +
+          certificateRes.amount_uzs) *
           100,
       ) / 100;
 
@@ -3036,6 +3131,11 @@ export class CargoRegistrationsService {
       internal_logistics_currency: internalLogisticsCurrency,
       internal_logistics_amount_usd: internalLogisticsRes.amount_usd,
       internal_logistics_amount_uzs: internalLogisticsRes.amount_uzs,
+      certificate_price: certificatePriceAmount,
+      certificate: certificatePriceAmount,
+      certificate_currency: certificateCurrency,
+      certificate_amount_usd: certificateRes.amount_usd,
+      certificate_amount_uzs: certificateRes.amount_uzs,
       total_income_usd: totalIncomeUsd,
       total_outcome_usd: totalOutcomeUsd,
       container_type: row.container_type,
@@ -3341,6 +3441,10 @@ export class CargoRegistrationsService {
       case 'internal_logistics_cost':
       case 'internal_logistics':
         return queryBuilder.orderBy('cr.internal_logistics_cost', sortOrder);
+      case 'certificate_price':
+      case 'certificate':
+      case 'cct':
+        return queryBuilder.orderBy('cr.certificate_price', sortOrder);
       case 'id':
         return queryBuilder.orderBy('cr.id', sortOrder);
       case 'created_at':
