@@ -532,6 +532,48 @@ describe('DashboardService', () => {
       expect(res.creditorCarrierCount).toBe(2);
       expect(res.topDebtorClients?.length).toBe(2);
       expect(res.topCreditorCarriers?.length).toBe(2);
+
+      // Scoped cargos and piechart status breakdown validations
+      expect(res.totalScopedCargos).toBe(2);
+      expect(res.totalReceivableCargos).toBe(2);
+      expect(res.totalPayableCargos).toBe(2);
+
+      // Pie Chart 1: Receivables by status
+      expect(res.receivableStatusBreakdown).toBeDefined();
+      expect(res.receivableStatusBreakdown.length).toBe(2);
+      const onTheWayRec = res.receivableStatusBreakdown.find(
+        (s) => s.status === 'On the way',
+      );
+      expect(onTheWayRec).toBeDefined();
+      expect(onTheWayRec?.count).toBe(1);
+      expect(onTheWayRec?.amount).toBe(6000);
+      expect(onTheWayRec?.percentage).toBe(66.67);
+      expect(onTheWayRec?.color).toBe('#3B82F6');
+
+      const waitingRec = res.receivableStatusBreakdown.find(
+        (s) => s.status === 'Waiting',
+      );
+      expect(waitingRec).toBeDefined();
+      expect(waitingRec?.count).toBe(1);
+      expect(waitingRec?.amount).toBe(3000);
+      expect(waitingRec?.percentage).toBe(33.33);
+      expect(waitingRec?.color).toBe('#F59E0B');
+
+      // Pie Chart 2: Payables by status
+      expect(res.payableStatusBreakdown).toBeDefined();
+      expect(res.payableStatusBreakdown.length).toBe(2);
+      const onTheWayPay = res.payableStatusBreakdown.find(
+        (s) => s.status === 'On the way',
+      );
+      expect(onTheWayPay).toBeDefined();
+      expect(onTheWayPay?.count).toBe(1);
+      expect(onTheWayPay?.amount).toBe(4000);
+      expect(onTheWayPay?.percentage).toBe(66.67);
+
+      // Scoped cargos array
+      expect(res.scopedCargos?.length).toBe(2);
+      expect(res.scopedCargos?.[0].statusLabel).toBeDefined();
+      expect(res.scopedCargos?.[0].statusColor).toBeDefined();
     });
   });
 

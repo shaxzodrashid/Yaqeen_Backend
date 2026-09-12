@@ -27,6 +27,10 @@ import {
   DebtSummaryKpi,
   DebtorClientItem,
   CreditorCarrierItem,
+  DebtCargoStatusItem,
+  DebtPaymentStatusItem,
+  ScopedCargoBreakdownItem,
+  ScopedCargoDetailItem,
   DeliveryEfficiencyKpi,
   StatusBreakdownItem,
   RouteTransitTimeItem,
@@ -50,6 +54,33 @@ interface DateRange {
   prevStartDate: Date | null;
   prevEndDate: Date | null;
 }
+
+export const CARGO_STATUS_METADATA: Record<
+  string,
+  { label: string; color: string; order: number }
+> = {
+  Waiting: { label: 'Kutilmoqda (Waiting)', color: '#F59E0B', order: 1 },
+  Station: { label: 'Stansiyada (Station)', color: '#06B6D4', order: 2 },
+  'On the way': { label: 'Yo‘lda (On the way)', color: '#3B82F6', order: 3 },
+  'On the border': {
+    label: 'Chegarada (On the border)',
+    color: '#8B5CF6',
+    order: 4,
+  },
+  Reload: { label: 'Qayta yuklash (Reload)', color: '#EC4899', order: 5 },
+  Arrived: { label: 'Yetib kelgan (Arrived)', color: '#10B981', order: 6 },
+  Delivered: { label: 'Topshirilgan (Delivered)', color: '#059669', order: 7 },
+  Completed: { label: 'Yakunlangan (Completed)', color: '#6B7280', order: 8 },
+};
+
+export const PAYMENT_STATUS_METADATA: Record<
+  string,
+  { label: string; color: string }
+> = {
+  waiting: { label: 'Kutilmoqda (Waiting)', color: '#F59E0B' },
+  unpaid: { label: 'To‘lanmagan (Unpaid)', color: '#EF4444' },
+  paid: { label: 'To‘langan (Paid)', color: '#10B981' },
+};
 
 @Injectable()
 export class DashboardService {
@@ -1260,7 +1291,10 @@ export class DashboardService {
       : undefined;
     const multipliers = this.getCurrencyMultipliers(rates);
 
-    return this.computeDebtSummary(records, targetCurrency, multipliers);
+    return this.computeDebtSummary(records, targetCurrency, multipliers, {
+      limit: query.limit,
+      includeScopedCargos: query.include_cargos,
+    });
   }
 
   // ==========================================
@@ -1759,6 +1793,31 @@ export class DashboardService {
   }
 
   /**
+   * Canonicalize cargo logistics status string to standard title case.
+   */
+  private canonicalizeCargoStatus(status?: string | null): string {
+    if (!status) return 'Waiting';
+    const s = status.trim().toLowerCase();
+    if (s === 'waiting' || s === 'kutilmoqda') return 'Waiting';
+    if (s === 'station' || s === 'stansiya') return 'Station';
+    if (
+      s === 'on the way' ||
+      s === "yo'lda" ||
+      s === 'yo‘lda' ||
+      s === 'in transit'
+    )
+      return 'On the way';
+    if (s === 'on the border' || s === 'chegarada' || s === 'border')
+      return 'On the border';
+    if (s === 'reload' || s === 'qayta yuklash') return 'Reload';
+    if (s === 'arrived' || s === 'yetib kelgan' || s === 'kelgan')
+      return 'Arrived';
+    if (s === 'delivered' || s === 'topshirilgan') return 'Delivered';
+    if (s === 'completed' || s === 'yakunlangan') return 'Completed';
+    return status.trim();
+  }
+
+  /**
    * Debitor (Accounts Receivable) & Kreditor (Accounts Payable) calculator
    * Only outstanding (unpaid / waiting) cargos count as receivable debt.
    * Paid cargos (`paid` / `To'landi`) are excluded from finance overwatch.
@@ -1767,6 +1826,7 @@ export class DashboardService {
     records: any[],
     targetCurrency: Currency,
     multipliers: Record<string, number>,
+    options?: { limit?: number; includeScopedCargos?: boolean },
   ): Promise<DebtSummaryKpi> {
     const activeRecords = records.filter((r) => {
       const st = (r.status || '').toLowerCase();
@@ -1786,6 +1846,8 @@ export class DashboardService {
 
     let totalReceivableUzs = 0;
     let totalPayableUzs = 0;
+    let totalReceivableCargos = 0;
+    let totalPayableCargos = 0;
 
     const debtorMap = new Map<
       string,
@@ -1810,7 +1872,47 @@ export class DashboardService {
       }
     >();
 
+    // Breakdowns for primary & secondary piecharts
+    const receivableStatusMap = new Map<
+      string,
+      { count: number; amountUzs: number; volume: number; weight: number }
+    >();
+    const payableStatusMap = new Map<
+      string,
+      { count: number; amountUzs: number; volume: number; weight: number }
+    >();
+    const receivablePaymentStatusMap = new Map<
+      string,
+      { count: number; amountUzs: number }
+    >();
+    const payablePaymentStatusMap = new Map<
+      string,
+      { count: number; amountUzs: number }
+    >();
+    const overallStatusMap = new Map<
+      string,
+      {
+        count: number;
+        receivableAmountUzs: number;
+        payableAmountUzs: number;
+        volume: number;
+        weight: number;
+      }
+    >();
+    const overallPaymentStatusMap = new Map<
+      string,
+      {
+        count: number;
+        receivableAmountUzs: number;
+        payableAmountUzs: number;
+      }
+    >();
+
     for (const r of effectiveRecords) {
+      const rawStatus = r.status || 'Waiting';
+      const canonicalStatus = this.canonicalizeCargoStatus(rawStatus);
+      const normPaymentStatus = this.normalizePaymentStatus(r.payment_status);
+
       const sellPrice = Number(r.sell_price) || 0;
       const purchasePrice = Number(r.purchase_price) || 0;
       const sellCurr = (r.sell_currency as Currency) || Currency.UZS;
@@ -1819,8 +1921,81 @@ export class DashboardService {
       const sellUzs = sellPrice * (multipliers[sellCurr] ?? 1);
       const purchaseUzs = purchasePrice * (multipliers[purchaseCurr] ?? 1);
 
+      const vol = Number(r.volume) || 0;
+      const wt = Number(r.weight) || 0;
+
       totalReceivableUzs += sellUzs;
       totalPayableUzs += purchaseUzs;
+
+      if (sellUzs > 0) {
+        totalReceivableCargos += 1;
+        const rs = receivableStatusMap.get(canonicalStatus) || {
+          count: 0,
+          amountUzs: 0,
+          volume: 0,
+          weight: 0,
+        };
+        rs.count += 1;
+        rs.amountUzs += sellUzs;
+        rs.volume += vol;
+        rs.weight += wt;
+        receivableStatusMap.set(canonicalStatus, rs);
+
+        const rps = receivablePaymentStatusMap.get(normPaymentStatus) || {
+          count: 0,
+          amountUzs: 0,
+        };
+        rps.count += 1;
+        rps.amountUzs += sellUzs;
+        receivablePaymentStatusMap.set(normPaymentStatus, rps);
+      }
+
+      if (purchaseUzs > 0) {
+        totalPayableCargos += 1;
+        const ps = payableStatusMap.get(canonicalStatus) || {
+          count: 0,
+          amountUzs: 0,
+          volume: 0,
+          weight: 0,
+        };
+        ps.count += 1;
+        ps.amountUzs += purchaseUzs;
+        ps.volume += vol;
+        ps.weight += wt;
+        payableStatusMap.set(canonicalStatus, ps);
+
+        const pps = payablePaymentStatusMap.get(normPaymentStatus) || {
+          count: 0,
+          amountUzs: 0,
+        };
+        pps.count += 1;
+        pps.amountUzs += purchaseUzs;
+        payablePaymentStatusMap.set(normPaymentStatus, pps);
+      }
+
+      const os = overallStatusMap.get(canonicalStatus) || {
+        count: 0,
+        receivableAmountUzs: 0,
+        payableAmountUzs: 0,
+        volume: 0,
+        weight: 0,
+      };
+      os.count += 1;
+      os.receivableAmountUzs += sellUzs;
+      os.payableAmountUzs += purchaseUzs;
+      os.volume += vol;
+      os.weight += wt;
+      overallStatusMap.set(canonicalStatus, os);
+
+      const ops = overallPaymentStatusMap.get(normPaymentStatus) || {
+        count: 0,
+        receivableAmountUzs: 0,
+        payableAmountUzs: 0,
+      };
+      ops.count += 1;
+      ops.receivableAmountUzs += sellUzs;
+      ops.payableAmountUzs += purchaseUzs;
+      overallPaymentStatusMap.set(normPaymentStatus, ops);
 
       if (r.client_id) {
         const d = debtorMap.get(r.client_id) || {
@@ -1854,6 +2029,10 @@ export class DashboardService {
       }
     }
 
+    const clientNameMap = new Map<
+      string,
+      { clientName: string; companyName?: string }
+    >();
     const clientIds = Array.from(debtorMap.keys());
     if (clientIds.length > 0) {
       try {
@@ -1861,12 +2040,17 @@ export class DashboardService {
           .select('id', 'first_name', 'last_name', 'company_name')
           .whereIn('id', clientIds);
         for (const cl of clients) {
+          const fullName =
+            `${cl.first_name || ''} ${cl.last_name || ''}`.trim() ||
+            cl.company_name ||
+            'Client';
+          clientNameMap.set(cl.id, {
+            clientName: fullName,
+            companyName: cl.company_name || undefined,
+          });
           const item = debtorMap.get(cl.id);
           if (item) {
-            item.clientName =
-              `${cl.first_name || ''} ${cl.last_name || ''}`.trim() ||
-              cl.company_name ||
-              'Client';
+            item.clientName = fullName;
             item.companyName = cl.company_name || undefined;
           }
         }
@@ -1875,6 +2059,10 @@ export class DashboardService {
       }
     }
 
+    const agentNameMap = new Map<
+      string,
+      { agentName: string; companyName?: string }
+    >();
     const agentIds = Array.from(creditorMap.values())
       .map((c) => c.agentId)
       .filter((id): id is string => Boolean(id));
@@ -1892,13 +2080,18 @@ export class DashboardService {
           )
           .whereIn('id', agentIds);
         for (const ag of agents) {
+          const nameParts = [ag.first_name, ag.last_name]
+            .filter(Boolean)
+            .map((s: string) => s.trim());
+          const fullName = nameParts.join(' ');
+          const resolvedName = fullName || ag.company_name || 'Carrier';
+          agentNameMap.set(`id:${ag.id}`, {
+            agentName: resolvedName,
+            companyName: ag.company_name || undefined,
+          });
           const item = creditorMap.get(`id:${ag.id}`);
           if (item) {
-            const nameParts = [ag.first_name, ag.last_name]
-              .filter(Boolean)
-              .map((s: string) => s.trim());
-            const fullName = nameParts.join(' ');
-            item.agentName = fullName || ag.company_name || item.agentName;
+            item.agentName = resolvedName;
             item.companyName = ag.company_name || undefined;
             item.phoneNumber = ag.phone_number || undefined;
             item.email = ag.email || undefined;
@@ -1908,6 +2101,214 @@ export class DashboardService {
         // Safe fallback
       }
     }
+
+    const accountsReceivable = this.convertFromUzsFast(
+      totalReceivableUzs,
+      targetCurrency,
+      multipliers,
+    );
+    const accountsPayable = this.convertFromUzsFast(
+      totalPayableUzs,
+      targetCurrency,
+      multipliers,
+    );
+    const netBalance =
+      Math.round((accountsReceivable - accountsPayable) * 100) / 100;
+
+    // 1. Primary Pie Chart 1: Debitor / Accounts Receivable by Cargo Shipment Status
+    const receivableStatusBreakdown: DebtCargoStatusItem[] = [];
+    for (const [st, val] of receivableStatusMap.entries()) {
+      const amount = this.convertFromUzsFast(
+        val.amountUzs,
+        targetCurrency,
+        multipliers,
+      );
+      const percentage =
+        accountsReceivable > 0
+          ? Math.round((amount / accountsReceivable) * 10000) / 100
+          : 0;
+      const meta = CARGO_STATUS_METADATA[st] || {
+        label: st,
+        color: '#9CA3AF',
+        order: 99,
+      };
+      receivableStatusBreakdown.push({
+        status: st,
+        label: meta.label,
+        count: val.count,
+        amount,
+        percentage,
+        color: meta.color,
+        totalVolume: Math.round(val.volume * 100) / 100,
+        totalWeight: Math.round(val.weight * 100) / 100,
+      });
+    }
+    receivableStatusBreakdown.sort(
+      (a, b) =>
+        b.amount - a.amount ||
+        (CARGO_STATUS_METADATA[a.status]?.order ?? 99) -
+          (CARGO_STATUS_METADATA[b.status]?.order ?? 99),
+    );
+
+    // 2. Primary Pie Chart 2: Kreditor / Accounts Payable by Cargo Shipment Status
+    const payableStatusBreakdown: DebtCargoStatusItem[] = [];
+    for (const [st, val] of payableStatusMap.entries()) {
+      const amount = this.convertFromUzsFast(
+        val.amountUzs,
+        targetCurrency,
+        multipliers,
+      );
+      const percentage =
+        accountsPayable > 0
+          ? Math.round((amount / accountsPayable) * 10000) / 100
+          : 0;
+      const meta = CARGO_STATUS_METADATA[st] || {
+        label: st,
+        color: '#9CA3AF',
+        order: 99,
+      };
+      payableStatusBreakdown.push({
+        status: st,
+        label: meta.label,
+        count: val.count,
+        amount,
+        percentage,
+        color: meta.color,
+        totalVolume: Math.round(val.volume * 100) / 100,
+        totalWeight: Math.round(val.weight * 100) / 100,
+      });
+    }
+    payableStatusBreakdown.sort(
+      (a, b) =>
+        b.amount - a.amount ||
+        (CARGO_STATUS_METADATA[a.status]?.order ?? 99) -
+          (CARGO_STATUS_METADATA[b.status]?.order ?? 99),
+    );
+
+    // 3. Secondary Pie Charts: Payment Status Breakdowns (Waiting vs Unpaid)
+    const receivablePaymentStatusBreakdown: DebtPaymentStatusItem[] = [];
+    for (const [st, val] of receivablePaymentStatusMap.entries()) {
+      const amount = this.convertFromUzsFast(
+        val.amountUzs,
+        targetCurrency,
+        multipliers,
+      );
+      const percentage =
+        accountsReceivable > 0
+          ? Math.round((amount / accountsReceivable) * 10000) / 100
+          : 0;
+      const meta = PAYMENT_STATUS_METADATA[st] || {
+        label: st,
+        color: '#9CA3AF',
+      };
+      receivablePaymentStatusBreakdown.push({
+        paymentStatus: st,
+        label: meta.label,
+        count: val.count,
+        amount,
+        percentage,
+        color: meta.color,
+      });
+    }
+    receivablePaymentStatusBreakdown.sort((a, b) => b.amount - a.amount);
+
+    const payablePaymentStatusBreakdown: DebtPaymentStatusItem[] = [];
+    for (const [st, val] of payablePaymentStatusMap.entries()) {
+      const amount = this.convertFromUzsFast(
+        val.amountUzs,
+        targetCurrency,
+        multipliers,
+      );
+      const percentage =
+        accountsPayable > 0
+          ? Math.round((amount / accountsPayable) * 10000) / 100
+          : 0;
+      const meta = PAYMENT_STATUS_METADATA[st] || {
+        label: st,
+        color: '#9CA3AF',
+      };
+      payablePaymentStatusBreakdown.push({
+        paymentStatus: st,
+        label: meta.label,
+        count: val.count,
+        amount,
+        percentage,
+        color: meta.color,
+      });
+    }
+    payablePaymentStatusBreakdown.sort((a, b) => b.amount - a.amount);
+
+    // 4. Combined Overall Breakdowns
+    const totalVolumeAmount = accountsReceivable + accountsPayable;
+    const overallStatusBreakdown: ScopedCargoBreakdownItem[] = [];
+    for (const [st, val] of overallStatusMap.entries()) {
+      const recAmt = this.convertFromUzsFast(
+        val.receivableAmountUzs,
+        targetCurrency,
+        multipliers,
+      );
+      const payAmt = this.convertFromUzsFast(
+        val.payableAmountUzs,
+        targetCurrency,
+        multipliers,
+      );
+      const totAmt = Math.round((recAmt + payAmt) * 100) / 100;
+      const percentage =
+        totalVolumeAmount > 0
+          ? Math.round((totAmt / totalVolumeAmount) * 10000) / 100
+          : 0;
+      const meta = CARGO_STATUS_METADATA[st] || {
+        label: st,
+        color: '#9CA3AF',
+        order: 99,
+      };
+      overallStatusBreakdown.push({
+        status: st,
+        label: meta.label,
+        count: val.count,
+        receivableAmount: recAmt,
+        payableAmount: payAmt,
+        netBalance: Math.round((recAmt - payAmt) * 100) / 100,
+        totalAmount: totAmt,
+        totalVolume: Math.round(val.volume * 100) / 100,
+        totalWeight: Math.round(val.weight * 100) / 100,
+        percentage,
+        color: meta.color,
+      });
+    }
+    overallStatusBreakdown.sort((a, b) => b.totalAmount - a.totalAmount);
+
+    const overallPaymentStatusBreakdown: DebtPaymentStatusItem[] = [];
+    for (const [st, val] of overallPaymentStatusMap.entries()) {
+      const recAmt = this.convertFromUzsFast(
+        val.receivableAmountUzs,
+        targetCurrency,
+        multipliers,
+      );
+      const payAmt = this.convertFromUzsFast(
+        val.payableAmountUzs,
+        targetCurrency,
+        multipliers,
+      );
+      const totAmt = Math.round((recAmt + payAmt) * 100) / 100;
+      const percentage =
+        totalVolumeAmount > 0
+          ? Math.round((totAmt / totalVolumeAmount) * 10000) / 100
+          : 0;
+      const meta = PAYMENT_STATUS_METADATA[st] || {
+        label: st,
+        color: '#9CA3AF',
+      };
+      overallPaymentStatusBreakdown.push({
+        paymentStatus: st,
+        label: meta.label,
+        count: val.count,
+        amount: totAmt,
+        percentage,
+        color: meta.color,
+      });
+    }
+    overallPaymentStatusBreakdown.sort((a, b) => b.amount - a.amount);
 
     const topDebtorClients: DebtorClientItem[] = Array.from(debtorMap.values())
       .sort((a, b) => b.amountUzs - a.amountUzs)
@@ -1943,18 +2344,69 @@ export class DashboardService {
         orderCount: c.orderCount,
       }));
 
-    const accountsReceivable = this.convertFromUzsFast(
-      totalReceivableUzs,
-      targetCurrency,
-      multipliers,
-    );
-    const accountsPayable = this.convertFromUzsFast(
-      totalPayableUzs,
-      targetCurrency,
-      multipliers,
-    );
-    const netBalance =
-      Math.round((accountsReceivable - accountsPayable) * 100) / 100;
+    // Scoped individual cargos (up to limit or when explicitly requested)
+    const cargoLimit = options?.limit ?? 20;
+    const scopedCargos: ScopedCargoDetailItem[] = effectiveRecords
+      .slice(0, options?.includeScopedCargos ? undefined : cargoLimit)
+      .map((r) => {
+        const rawStatus = r.status || 'Waiting';
+        const canonicalStatus = this.canonicalizeCargoStatus(rawStatus);
+        const statusMeta = CARGO_STATUS_METADATA[canonicalStatus] || {
+          label: rawStatus,
+          color: '#9CA3AF',
+        };
+        const normPaymentStatus = this.normalizePaymentStatus(r.payment_status);
+        const paymentMeta = PAYMENT_STATUS_METADATA[normPaymentStatus] || {
+          label: normPaymentStatus,
+          color: '#9CA3AF',
+        };
+
+        const sellPrice = Number(r.sell_price) || 0;
+        const purchasePrice = Number(r.purchase_price) || 0;
+        const sellCurr = (r.sell_currency as Currency) || Currency.UZS;
+        const purchaseCurr = (r.purchase_currency as Currency) || Currency.UZS;
+
+        const sellUzs = sellPrice * (multipliers[sellCurr] ?? 1);
+        const purchaseUzs = purchasePrice * (multipliers[purchaseCurr] ?? 1);
+
+        const clInfo = r.client_id ? clientNameMap.get(r.client_id) : undefined;
+        const agKey = r.agent_id ? `id:${r.agent_id}` : null;
+        const agInfo = agKey ? agentNameMap.get(agKey) : undefined;
+
+        return {
+          id: r.id,
+          cargo: r.cargo || 'Cargo',
+          cargoType: r.cargo_type || 'LTL',
+          containerTruckId: r.container_truck_id || undefined,
+          status: canonicalStatus,
+          statusLabel: statusMeta.label,
+          statusColor: statusMeta.color,
+          paymentStatus: normPaymentStatus,
+          paymentStatusLabel: paymentMeta.label,
+          paymentStatusColor: paymentMeta.color,
+          clientId: r.client_id || undefined,
+          clientName: clInfo?.clientName || undefined,
+          companyName: clInfo?.companyName || undefined,
+          agentId: r.agent_id || undefined,
+          agentName: agInfo?.agentName || r.agent_name || undefined,
+          sellPrice: this.convertFromUzsFast(
+            sellUzs,
+            targetCurrency,
+            multipliers,
+          ),
+          purchasePrice: this.convertFromUzsFast(
+            purchaseUzs,
+            targetCurrency,
+            multipliers,
+          ),
+          currency: targetCurrency,
+          confirmedDate: r.confirmed_date
+            ? new Date(r.confirmed_date).toISOString().slice(0, 10)
+            : undefined,
+          volume: r.volume ? Number(r.volume) : undefined,
+          weight: r.weight ? Number(r.weight) : undefined,
+        };
+      });
 
     return {
       currency: targetCurrency,
@@ -1963,8 +2415,18 @@ export class DashboardService {
       netBalance,
       debtorClientCount: debtorMap.size,
       creditorCarrierCount: creditorMap.size,
+      totalScopedCargos: effectiveRecords.length,
+      totalReceivableCargos,
+      totalPayableCargos,
+      receivableStatusBreakdown,
+      payableStatusBreakdown,
+      receivablePaymentStatusBreakdown,
+      payablePaymentStatusBreakdown,
+      overallStatusBreakdown,
+      overallPaymentStatusBreakdown,
       topDebtorClients,
       topCreditorCarriers,
+      scopedCargos,
     };
   }
 

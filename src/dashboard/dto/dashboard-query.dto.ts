@@ -179,8 +179,13 @@ export class DebtSummaryQueryDto extends DashboardSummaryQueryDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
-  @Max(50)
+  @Max(100)
   limit?: number = 10;
+
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true || value === '1')
+  @IsBoolean()
+  include_cargos?: boolean;
 }
 
 export class DeliveryEfficiencyQueryDto extends DashboardSummaryQueryDto {}

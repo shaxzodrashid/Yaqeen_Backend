@@ -106,6 +106,64 @@ export interface CreditorCarrierItem {
   orderCount: number;
 }
 
+export interface DebtCargoStatusItem {
+  status: string;
+  label: string;
+  count: number;
+  amount: number;
+  percentage: number;
+  color: string;
+  totalVolume?: number;
+  totalWeight?: number;
+}
+
+export interface DebtPaymentStatusItem {
+  paymentStatus: string;
+  label: string;
+  count: number;
+  amount: number;
+  percentage: number;
+  color: string;
+}
+
+export interface ScopedCargoBreakdownItem {
+  status: string;
+  label: string;
+  count: number;
+  receivableAmount: number;
+  payableAmount: number;
+  netBalance: number;
+  totalAmount: number;
+  totalVolume: number;
+  totalWeight: number;
+  percentage: number;
+  color: string;
+}
+
+export interface ScopedCargoDetailItem {
+  id: string;
+  cargo: string;
+  cargoType: string;
+  containerTruckId?: string;
+  status: string;
+  statusLabel: string;
+  statusColor: string;
+  paymentStatus: string;
+  paymentStatusLabel: string;
+  paymentStatusColor: string;
+  clientId?: string;
+  clientName?: string;
+  companyName?: string;
+  agentId?: string;
+  agentName?: string;
+  sellPrice: number;
+  purchasePrice: number;
+  currency: string;
+  confirmedDate?: string;
+  volume?: number;
+  weight?: number;
+}
+
 export interface DebtSummaryKpi {
   currency?: string;
   accountsReceivable: number; // Mijozlarning to'lanmagan hisoblari (Debitorlik)
@@ -113,8 +171,18 @@ export interface DebtSummaryKpi {
   netBalance: number; // Debitor - Kreditor balansi (Sof balans)
   debtorClientCount: number;
   creditorCarrierCount: number;
+  totalScopedCargos: number;
+  totalReceivableCargos: number;
+  totalPayableCargos: number;
+  receivableStatusBreakdown: DebtCargoStatusItem[];
+  payableStatusBreakdown: DebtCargoStatusItem[];
+  receivablePaymentStatusBreakdown?: DebtPaymentStatusItem[];
+  payablePaymentStatusBreakdown?: DebtPaymentStatusItem[];
+  overallStatusBreakdown?: ScopedCargoBreakdownItem[];
+  overallPaymentStatusBreakdown?: DebtPaymentStatusItem[];
   topDebtorClients?: DebtorClientItem[];
   topCreditorCarriers?: CreditorCarrierItem[];
+  scopedCargos?: ScopedCargoDetailItem[];
 }
 
 export interface StatusBreakdownItem {

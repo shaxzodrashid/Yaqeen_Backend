@@ -479,9 +479,24 @@ Yuk yetkazish vaqti, on-time rate foizi va yo'nalishlar bo'yicha o'rtacha kunlar
 
 ---
 
-### 7. Qarzdorlik (Debitor / Kreditor) balansi: `GET /dashboard/debt-summary`
+### 7. Qarzdorlik (Debitor / Kreditor) balansi va Yuklar holati: `GET /dashboard/debt-summary`
 
-Mijozlarning to'lanmagan hisoblari va tashuvchilarga bo'lgan qarzdorliklar balansi:
+Mijozlarning to'lanmagan hisoblari (Debitorlik / Receivables) va tashuvchilarga bo'lgan qarzdorliklar (Kreditorlik / Payables) balansi hamda hisobga olingan (scoped) yuklarning statuslar bo'yicha batafsil taqsimoti.
+
+Frontend uchun **2 ta asosiy PieChart (Doiraviy diagramma)** va qo'shimcha tahlillar uchun to'liq tayyorlangan ma'lumotlar qaytariladi:
+
+1. **PieChart 1**: Debitorlik yuklarining holati (`receivableStatusBreakdown` - mijozlar qarzlari qaysi statusdagi yuklarda).
+2. **PieChart 2**: Kreditorlik yuklarining holati (`payableStatusBreakdown` - tashuvchilarga qarzlar qaysi statusdagi yuklarda).
+3. **Qo'shimcha PieChart**: To'lov holatlari bo'yicha (`receivablePaymentStatusBreakdown` va `payablePaymentStatusBreakdown`).
+
+#### Query Parametrlari:
+
+- `currency`: Pul birligi (`USD`, `UZS`, `RUB`, `RMB`) — default: `USD`
+- `period`: Vaqt oralig'i (`1D`, `5D`, `1M`, `6M`, `YTD`, `1Y`, `CUSTOM`) — default: `1M`
+- `start_date` / `end_date`: `CUSTOM` tanlanganda `YYYY-MM-DD`
+- `employee_id` / `client_id` / `agent_id`: Filtrlash
+- `limit`: Qaytariladigan ro'yxatlar limiti (default: `10`, max: `100`)
+- `include_cargos`: `true` bo'lsa, hisobga olingan barcha individual yuklar ro'yxatini (`scopedCargos`) to'liq qaytaradi
 
 #### Universal Response:
 
@@ -493,6 +508,128 @@ Mijozlarning to'lanmagan hisoblari va tashuvchilarga bo'lgan qarzdorliklar balan
   "netBalance": 6700.0,
   "debtorClientCount": 8,
   "creditorCarrierCount": 5,
+  "totalScopedCargos": 12,
+  "totalReceivableCargos": 10,
+  "totalPayableCargos": 8,
+
+  "receivableStatusBreakdown": [
+    {
+      "status": "On the way",
+      "label": "Yo‘lda (On the way)",
+      "count": 5,
+      "amount": 12500.0,
+      "percentage": 51.02,
+      "color": "#3B82F6",
+      "totalVolume": 180.5,
+      "totalWeight": 25400.0
+    },
+    {
+      "status": "Arrived",
+      "label": "Yetib kelgan (Arrived)",
+      "count": 3,
+      "amount": 7500.0,
+      "percentage": 30.61,
+      "color": "#10B981",
+      "totalVolume": 95.0,
+      "totalWeight": 14200.0
+    },
+    {
+      "status": "Waiting",
+      "label": "Kutilmoqda (Waiting)",
+      "count": 2,
+      "amount": 4500.0,
+      "percentage": 18.37,
+      "color": "#F59E0B",
+      "totalVolume": 45.0,
+      "totalWeight": 6800.0
+    }
+  ],
+
+  "payableStatusBreakdown": [
+    {
+      "status": "On the way",
+      "label": "Yo‘lda (On the way)",
+      "count": 4,
+      "amount": 10200.0,
+      "percentage": 57.3,
+      "color": "#3B82F6",
+      "totalVolume": 140.0,
+      "totalWeight": 21000.0
+    },
+    {
+      "status": "Arrived",
+      "label": "Yetib kelgan (Arrived)",
+      "count": 2,
+      "amount": 4600.0,
+      "percentage": 25.84,
+      "color": "#10B981",
+      "totalVolume": 65.0,
+      "totalWeight": 9800.0
+    },
+    {
+      "status": "Waiting",
+      "label": "Kutilmoqda (Waiting)",
+      "count": 2,
+      "amount": 3000.0,
+      "percentage": 16.85,
+      "color": "#F59E0B",
+      "totalVolume": 45.0,
+      "totalWeight": 6800.0
+    }
+  ],
+
+  "receivablePaymentStatusBreakdown": [
+    {
+      "paymentStatus": "waiting",
+      "label": "Kutilmoqda (Waiting)",
+      "count": 7,
+      "amount": 16500.0,
+      "percentage": 67.35,
+      "color": "#F59E0B"
+    },
+    {
+      "paymentStatus": "unpaid",
+      "label": "To‘lanmagan (Unpaid)",
+      "count": 3,
+      "amount": 8000.0,
+      "percentage": 32.65,
+      "color": "#EF4444"
+    }
+  ],
+
+  "payablePaymentStatusBreakdown": [
+    {
+      "paymentStatus": "waiting",
+      "label": "Kutilmoqda (Waiting)",
+      "count": 6,
+      "amount": 13800.0,
+      "percentage": 77.53,
+      "color": "#F59E0B"
+    },
+    {
+      "paymentStatus": "unpaid",
+      "label": "To‘lanmagan (Unpaid)",
+      "count": 2,
+      "amount": 4000.0,
+      "percentage": 22.47,
+      "color": "#EF4444"
+    }
+  ],
+
+  "overallStatusBreakdown": [
+    {
+      "status": "On the way",
+      "label": "Yo‘lda (On the way)",
+      "count": 5,
+      "receivableAmount": 12500.0,
+      "payableAmount": 10200.0,
+      "netBalance": 2300.0,
+      "totalAmount": 22700.0,
+      "percentage": 53.66,
+      "color": "#3B82F6"
+    }
+  ],
+
   "topDebtorClients": [
     {
       "clientId": "c1f8832a-5e2b-4c12-881b-9f93120d5102",
@@ -502,12 +639,81 @@ Mijozlarning to'lanmagan hisoblari va tashuvchilarga bo'lgan qarzdorliklar balan
       "orderCount": 4
     }
   ],
+
   "topCreditorCarriers": [
     {
       "agentName": "Silk Road Logistics",
       "amount": 9500.0,
       "orderCount": 3
     }
+  ],
+
+  "scopedCargos": [
+    {
+      "id": "e4468f3a-c8cf-481b-b461-9c6bc7631623",
+      "cargo": "Avtomobil ehtiyot qismlari",
+      "cargoType": "FTL",
+      "containerTruckId": "TRK-9821",
+      "status": "On the way",
+      "statusLabel": "Yo‘lda (On the way)",
+      "statusColor": "#3B82F6",
+      "paymentStatus": "waiting",
+      "paymentStatusLabel": "Kutilmoqda (Waiting)",
+      "paymentStatusColor": "#F59E0B",
+      "clientId": "c1f8832a-5e2b-4c12-881b-9f93120d5102",
+      "clientName": "OOO Global Express",
+      "agentName": "Silk Road Logistics",
+      "sellPrice": 4500.0,
+      "purchasePrice": 3200.0,
+      "currency": "USD",
+      "confirmedDate": "2026-08-15"
+    }
   ]
 }
+```
+
+#### Frontend Recharts Misoli:
+
+```tsx
+// 1. Debitorlik yuklari holati (PieChart 1)
+<ResponsiveContainer width="50%" height={300}>
+  <PieChart>
+    <Pie
+      data={data.receivableStatusBreakdown}
+      dataKey="amount"
+      nameKey="label"
+      cx="50%"
+      cy="50%"
+      outerRadius={80}
+      label={(entry) => `${entry.label}: ${entry.percentage}%`}
+    >
+      {data.receivableStatusBreakdown.map((entry, idx) => (
+        <Cell key={`cell-rec-${idx}`} fill={entry.color} />
+      ))}
+    </Pie>
+    <Tooltip formatter={(value: number) => [`$${value.toLocaleString()}`, 'Debitorlik']} />
+    <Legend />
+  </PieChart>
+</ResponsiveContainer>
+
+// 2. Kreditorlik yuklari holati (PieChart 2)
+<ResponsiveContainer width="50%" height={300}>
+  <PieChart>
+    <Pie
+      data={data.payableStatusBreakdown}
+      dataKey="amount"
+      nameKey="label"
+      cx="50%"
+      cy="50%"
+      outerRadius={80}
+      label={(entry) => `${entry.label}: ${entry.percentage}%`}
+    >
+      {data.payableStatusBreakdown.map((entry, idx) => (
+        <Cell key={`cell-pay-${idx}`} fill={entry.color} />
+      ))}
+    </Pie>
+    <Tooltip formatter={(value: number) => [`$${value.toLocaleString()}`, 'Kreditorlik']} />
+    <Legend />
+  </PieChart>
+</ResponsiveContainer>
 ```
