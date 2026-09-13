@@ -575,6 +575,82 @@ describe('DashboardService', () => {
       expect(res.scopedCargos?.[0].statusLabel).toBeDefined();
       expect(res.scopedCargos?.[0].statusColor).toBeDefined();
     });
+
+    it('should scope all cargo statuses (including Arrived and Delivered) when outstanding', async () => {
+      const mockRecords = [
+        {
+          id: 'reg-active',
+          client_id: 'cl-1',
+          agent_name: 'Carrier A',
+          sell_price: '5000',
+          purchase_price: '3000',
+          status: 'On the way',
+          payment_status: 'waiting',
+          confirmed_date: '2026-08-01',
+        },
+        {
+          id: 'reg-arrived',
+          client_id: 'cl-1',
+          agent_name: 'Carrier B',
+          sell_price: '4000',
+          purchase_price: '2500',
+          status: 'Arrived',
+          payment_status: 'unpaid',
+          confirmed_date: '2026-08-02',
+        },
+        {
+          id: 'reg-delivered',
+          client_id: 'cl-2',
+          agent_name: 'Carrier C',
+          sell_price: '2000',
+          purchase_price: '1500',
+          status: 'Delivered',
+          payment_status: 'waiting',
+          confirmed_date: '2026-08-03',
+        },
+        {
+          id: 'reg-paid',
+          client_id: 'cl-2',
+          agent_name: 'Carrier D',
+          sell_price: '10000',
+          purchase_price: '8000',
+          status: 'Arrived',
+          payment_status: 'paid', // Should be excluded because paid
+          confirmed_date: '2026-08-04',
+        },
+      ];
+
+      const chainable = {
+        select: jest.fn().mockReturnThis(),
+        whereBetween: jest.fn().mockReturnThis(),
+        where: jest.fn().mockReturnThis(),
+        whereIn: jest.fn().mockReturnValue([
+          { id: 'cl-1', first_name: 'Client', last_name: 'One' },
+          { id: 'cl-2', first_name: 'Client', last_name: 'Two' },
+        ]),
+        then: jest.fn().mockImplementation((cb) => cb(mockRecords)),
+      };
+      knexMock.mockReturnValue(chainable);
+
+      const res = await service.getDebtSummary(
+        { period: TimeframePeriod.ONE_MONTH },
+        mockRefDate,
+      );
+
+      // Total receivable: 5000 (On the way) + 4000 (Arrived) + 2000 (Delivered) = 11000
+      expect(res.accountsReceivable).toBe(11000);
+      // Total payable: 3000 (On the way) + 2500 (Arrived) + 1500 (Delivered) = 7000
+      expect(res.accountsPayable).toBe(7000);
+      expect(res.netBalance).toBe(4000);
+      expect(res.totalScopedCargos).toBe(3);
+
+      const statusesInBreakdown = res.receivableStatusBreakdown.map(
+        (s) => s.status,
+      );
+      expect(statusesInBreakdown).toContain('On the way');
+      expect(statusesInBreakdown).toContain('Arrived');
+      expect(statusesInBreakdown).toContain('Delivered');
+    });
   });
 
   describe('getDeliveryEfficiency', () => {

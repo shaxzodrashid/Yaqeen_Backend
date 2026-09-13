@@ -1828,20 +1828,14 @@ export class DashboardService {
     multipliers: Record<string, number>,
     options?: { limit?: number; includeScopedCargos?: boolean },
   ): Promise<DebtSummaryKpi> {
-    const activeRecords = records.filter((r) => {
-      const st = (r.status || '').toLowerCase();
-      return st !== 'arrived' && st !== 'delivered' && st !== 'completed';
-    });
-
-    const targetRecords = activeRecords.length > 0 ? activeRecords : records;
-
     // Finance rule: only cargos whose payment_status is NOT 'paid' are considered debt.
-    // Null/undefined defaults to 'waiting' => counted as receivable.
-    const outstandingRecords = targetRecords.filter(
+    // All cargo statuses are scoped (Waiting, Station, On the way, On the border, Reload, Arrived, Delivered, Completed, etc.).
+    // Null/undefined defaults to 'waiting' => counted as receivable/payable debt.
+    const outstandingRecords = records.filter(
       (r) => !this.isPaidStatus(r.payment_status),
     );
 
-    // If every target record is already paid, debt is zero (not fallback to paid).
+    // If every record is already paid, debt is zero.
     const effectiveRecords = outstandingRecords;
 
     let totalReceivableUzs = 0;
